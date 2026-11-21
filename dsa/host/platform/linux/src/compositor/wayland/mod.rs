@@ -76,8 +76,8 @@ pub enum Event {
     Report(FromHost),
     /// Input for the guest.
     Input(InputEvent),
-    /// The desktop's clipboard has this text.
-    HostClipboard(String),
+    /// The desktop's clipboard has this text or image.
+    HostClipboard(dsa_host_core::clipboard::Clip),
     /// Pointer input on a task's picture-in-picture window outside Wayland (X11).
     PipInput {
         task_id: i32,

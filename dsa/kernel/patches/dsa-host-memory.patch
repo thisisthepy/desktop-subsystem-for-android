@@ -1,23 +1,26 @@
 diff --git a/fs/proc/Kconfig b/fs/proc/Kconfig
-index 6ae966c..6410cdf 100644
+index 6ae966c..f7e30f9 100644
 --- a/fs/proc/Kconfig
 +++ b/fs/proc/Kconfig
-@@ -120,6 +120,21 @@ config PROC_CHILDREN
+@@ -120,6 +120,24 @@ config PROC_CHILDREN
  	  Say Y if you are running any user-space software which takes benefit from
  	  this interface. For example, rkt is such a piece of software.
  
 +config DSA_HOST_MEMORY
-+	bool "DSA: show chosen apps the computer's memory as the device's"
++	bool "DSA: show apps the memory the guest may grow to as the device's"
 +	depends on PROC_FS
 +	default n
 +	help
 +	  The Desktop Subsystem for Android guest starts small and grows, so
-+	  its memory size says nothing about the computer it runs on. This
-+	  shows the apps whose uids are written to
-+	  /sys/module/dsa_host_memory/parameters/uids the computer's memory
-+	  (kernel.dsa_host_memory.total_kb in bootconfig) as MemTotal in
-+	  /proc/meminfo and as totalram in sysinfo(). Every other process
-+	  sees the guest's own memory.
++	  its memory size says nothing about what an app may use. This shows
++	  every app process (Android app ID 10000 or more) the memory the
++	  guest may grow to (kernel.dsa_host_memory.total_kb in bootconfig)
++	  as MemTotal in /proc/meminfo and as totalram in sysinfo(), and adds
++	  what the guest may still grow to its free and available memory.
++	  The app store named in /sys/module/dsa_host_memory/parameters/uids
++	  sees the computer's memory (store_total_kb) as its total. System
++	  processes, and the apps named in real_uids, see the guest's own
++	  memory.
 +
 +	  Unless you are building the DSA guest kernel, say N.
 +
@@ -35,40 +38,50 @@ index 7b4db9c..897fc67 100644
 +proc-$(CONFIG_DSA_HOST_MEMORY)	+= dsa_host_memory.o
 diff --git a/fs/proc/dsa_host_memory.c b/fs/proc/dsa_host_memory.c
 new file mode 100644
-index 0000000..eb19e68
+index 0000000..78f4bb6
 --- /dev/null
 +++ b/fs/proc/dsa_host_memory.c
-@@ -0,0 +1,156 @@
+@@ -0,0 +1,201 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
-+ * DSA host memory: the apps the guest names see the computer's memory as the
-+ * device's memory.
++ * DSA host memory: apps see the memory the guest may grow to as the device's
++ * memory.
 + *
-+ * The DSA guest starts with a small VM and grows it as it needs, so the size
-+ * its kernel reports says nothing about the computer it runs on. Some apps
-+ * pick what to install by that size: an app store hands a device with little
-+ * memory a build a 64-bit only guest cannot run. For the apps the guest
-+ * names, MemTotal in /proc/meminfo and totalram in sysinfo() are the
-+ * computer's physical memory instead. Every other process sees the guest's
-+ * own memory, so memory management (lmkd, cache limits) is unchanged.
++ * The DSA guest starts with a small VM and grows it as it needs, up to a
++ * maximum the host sets, so the size its kernel reports says nothing about
++ * what an app may use. Apps decide by that size: a game checks MemTotal
++ * against its requirements and refuses to start on a VM that has not grown
++ * yet, and an app store hands a device with little memory a build a 64-bit
++ * only guest cannot run. Every app process (an app ID of 10000 or more, for
++ * every Android user) sees the maximum instead, as MemTotal in /proc/meminfo
++ * and totalram in sysinfo(), and the memory still to grow (the maximum less
++ * the VM's size now) is added to what it sees as free and available. Every
++ * other process (init, lmkd, system_server and the other system uids) sees
++ * the guest's own memory, so memory management is unchanged.
 + *
-+ * Two parameters:
++ * Parameters:
 + *
-+ *   dsa_host_memory.total_kb   the computer's physical memory in KiB, which
-+ *                              the host passes in the boot's bootconfig
-+ *                              (kernel.dsa_host_memory.total_kb). 0, or no
-+ *                              more than the guest has, changes nothing.
-+ *   dsa_host_memory.uids       the Android app IDs that see it (a uid modulo
-+ *                              100000, so the app's copy for every Android
-+ *                              user is included), comma separated, at most
-+ *                              DSA_HOST_MEMORY_MAX_UIDS. The guest's control
-+ *                              daemon names them from the package manager's
-+ *                              list, and init writes them here. "none" names
-+ *                              no app.
++ *   dsa_host_memory.total_kb        the memory the VM may grow to, in KiB,
++ *                                   which the host passes in the boot's
++ *                                   bootconfig (kernel.dsa_host_memory.*).
++ *                                   0, or no more than the guest has,
++ *                                   changes nothing.
++ *   dsa_host_memory.store_total_kb  the computer's physical memory, in KiB,
++ *                                   from the bootconfig too: the apps in uids
++ *                                   see it as their total when it is larger.
++ *                                   Their free and available memory still
++ *                                   grow only by what the VM may still grow.
++ *   dsa_host_memory.uids            the app store's app IDs (a uid modulo
++ *                                   100000, so the app's copy for every
++ *                                   Android user is included).
++ *   dsa_host_memory.real_uids       the app IDs that see the guest's own
++ *                                   memory, as the system does: DSA's agent,
++ *                                   which reports the guest's memory to the
++ *                                   host.
 + *
-+ * Only MemTotal and totalram change. Free and available memory stay the
-+ * guest's, so an app that sizes a cache from what is free takes no more than
-+ * the guest has.
++ * Both lists are comma separated, at most DSA_HOST_MEMORY_MAX_UIDS long, and
++ * "none" names no app. The guest's control daemon names them from the package
++ * manager's list, and only init writes them.
 + */
 +
 +#include <linux/cred.h>
@@ -91,48 +104,80 @@ index 0000000..eb19e68
 +#define DSA_HOST_MEMORY_MAX_UIDS 16
 +/* An Android uid is the user ID times 100000 plus the app ID. */
 +#define DSA_ANDROID_PER_USER_RANGE 100000
++/* The first app ID Android gives an installed app; below it are system uids. */
++#define DSA_ANDROID_FIRST_APPLICATION_UID 10000
 +
 +static unsigned long dsa_total_kb;
 +module_param_named(total_kb, dsa_total_kb, ulong, 0444);
-+MODULE_PARM_DESC(total_kb, "The computer's physical memory in KiB, which the named apps see");
++MODULE_PARM_DESC(total_kb, "The memory the VM may grow to in KiB, which apps see");
 +
-+static DEFINE_SEQLOCK(dsa_uids_lock);
-+static unsigned int dsa_uids[DSA_HOST_MEMORY_MAX_UIDS];
-+static unsigned int dsa_uid_count;
++static unsigned long dsa_store_total_kb;
++module_param_named(store_total_kb, dsa_store_total_kb, ulong, 0444);
++MODULE_PARM_DESC(store_total_kb, "The computer's physical memory in KiB, which the apps in uids see");
 +
-+static bool dsa_app_listed(kuid_t kuid)
++struct dsa_uid_list {
++	seqlock_t lock;
++	unsigned int uids[DSA_HOST_MEMORY_MAX_UIDS];
++	unsigned int count;
++};
++
++static struct dsa_uid_list dsa_store_uids = {
++	.lock = __SEQLOCK_UNLOCKED(dsa_store_uids.lock),
++};
++static struct dsa_uid_list dsa_real_uids = {
++	.lock = __SEQLOCK_UNLOCKED(dsa_real_uids.lock),
++};
++
++static bool dsa_app_listed(struct dsa_uid_list *list, unsigned int app)
 +{
-+	unsigned int app = from_kuid(&init_user_ns, kuid) % DSA_ANDROID_PER_USER_RANGE;
 +	unsigned int seq, i;
 +	bool listed;
 +
++	if (!READ_ONCE(list->count))
++		return false;
 +	do {
-+		seq = read_seqbegin(&dsa_uids_lock);
++		seq = read_seqbegin(&list->lock);
 +		listed = false;
-+		for (i = 0; i < dsa_uid_count; i++) {
-+			if (dsa_uids[i] == app) {
++		for (i = 0; i < list->count; i++) {
++			if (list->uids[i] == app) {
 +				listed = true;
 +				break;
 +			}
 +		}
-+	} while (read_seqretry(&dsa_uids_lock, seq));
++	} while (read_seqretry(&list->lock, seq));
 +	return listed;
 +}
 +
-+void dsa_host_memory_adjust(struct sysinfo *info)
++unsigned long dsa_host_memory_adjust(struct sysinfo *info)
 +{
++	unsigned int app = from_kuid(&init_user_ns, current_uid()) % DSA_ANDROID_PER_USER_RANGE;
++	unsigned long own = info->totalram;
++	unsigned long shown = own;
++	unsigned long headroom = 0;
 +	unsigned long pages;
 +
-+	if (!dsa_total_kb || !READ_ONCE(dsa_uid_count) || !dsa_app_listed(current_uid()))
-+		return;
-+	pages = dsa_total_kb >> (PAGE_SHIFT - 10);
++	/* System uids, root among them, keep the VM's own size. */
++	if (app < DSA_ANDROID_FIRST_APPLICATION_UID || dsa_app_listed(&dsa_real_uids, app))
++		return 0;
 +	/* si_meminfo() counts in pages, with mem_unit set to the page size. */
-+	if (pages > info->totalram)
-+		info->totalram = pages;
++	pages = READ_ONCE(dsa_total_kb) >> (PAGE_SHIFT - 10);
++	if (pages > own) {
++		headroom = pages - own;
++		shown = pages;
++	}
++	if (dsa_app_listed(&dsa_store_uids, app)) {
++		pages = READ_ONCE(dsa_store_total_kb) >> (PAGE_SHIFT - 10);
++		if (pages > shown)
++			shown = pages;
++	}
++	info->totalram = shown;
++	info->freeram += headroom;
++	return headroom;
 +}
 +
 +static int dsa_uids_set(const char *val, const struct kernel_param *kp)
 +{
++	struct dsa_uid_list *list = kp->arg;
 +	unsigned int parsed[DSA_HOST_MEMORY_MAX_UIDS];
 +	unsigned int count = 0;
 +	char *copy, *cursor, *word;
@@ -164,24 +209,25 @@ index 0000000..eb19e68
 +	if (err)
 +		return err;
 +
-+	write_seqlock(&dsa_uids_lock);
-+	memcpy(dsa_uids, parsed, count * sizeof(parsed[0]));
-+	WRITE_ONCE(dsa_uid_count, count);
-+	write_sequnlock(&dsa_uids_lock);
++	write_seqlock(&list->lock);
++	memcpy(list->uids, parsed, count * sizeof(parsed[0]));
++	WRITE_ONCE(list->count, count);
++	write_sequnlock(&list->lock);
 +	return 0;
 +}
 +
 +static int dsa_uids_get(char *buffer, const struct kernel_param *kp)
 +{
++	struct dsa_uid_list *list = kp->arg;
 +	unsigned int uids[DSA_HOST_MEMORY_MAX_UIDS];
 +	unsigned int count, seq, i;
 +	int len = 0;
 +
 +	do {
-+		seq = read_seqbegin(&dsa_uids_lock);
-+		count = dsa_uid_count;
-+		memcpy(uids, dsa_uids, count * sizeof(uids[0]));
-+	} while (read_seqretry(&dsa_uids_lock, seq));
++		seq = read_seqbegin(&list->lock);
++		count = list->count;
++		memcpy(uids, list->uids, count * sizeof(uids[0]));
++	} while (read_seqretry(&list->lock, seq));
 +	for (i = 0; i < count; i++)
 +		len += scnprintf(buffer + len, PAGE_SIZE - len, "%s%u", i ? "," : "", uids[i]);
 +	len += scnprintf(buffer + len, PAGE_SIZE - len, "\n");
@@ -193,10 +239,12 @@ index 0000000..eb19e68
 +	.get = dsa_uids_get,
 +};
 +
-+module_param_cb(uids, &dsa_uids_ops, NULL, 0644);
-+MODULE_PARM_DESC(uids, "Android app IDs that see the computer's memory, comma separated");
++module_param_cb(uids, &dsa_uids_ops, &dsa_store_uids, 0644);
++MODULE_PARM_DESC(uids, "The app store's app IDs, which see the computer's memory, comma separated");
++module_param_cb(real_uids, &dsa_uids_ops, &dsa_real_uids, 0644);
++MODULE_PARM_DESC(real_uids, "App IDs that see the guest's own memory, comma separated");
 diff --git a/fs/proc/meminfo.c b/fs/proc/meminfo.c
-index a458f1e..7f31a90 100644
+index a458f1e..db46055 100644
 --- a/fs/proc/meminfo.c
 +++ b/fs/proc/meminfo.c
 @@ -19,6 +19,7 @@
@@ -207,35 +255,54 @@ index a458f1e..7f31a90 100644
  #include "internal.h"
  
  void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
-@@ -42,6 +43,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
+@@ -39,9 +40,11 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
+ 	long available;
+ 	unsigned long pages[NR_LRU_LISTS];
+ 	unsigned long sreclaimable, sunreclaim;
++	unsigned long dsa_headroom;
  	int lru;
  
  	si_meminfo(&i);
-+	dsa_host_memory_adjust(&i);
++	dsa_headroom = dsa_host_memory_adjust(&i);
  	si_swapinfo(&i);
  	committed = vm_memory_committed();
  
+@@ -53,7 +56,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
+ 	for (lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
+ 		pages[lru] = global_node_page_state(NR_LRU_BASE + lru);
+ 
+-	available = si_mem_available();
++	available = si_mem_available() + dsa_headroom;
+ 	sreclaimable = global_node_page_state_pages(NR_SLAB_RECLAIMABLE_B);
+ 	sunreclaim = global_node_page_state_pages(NR_SLAB_UNRECLAIMABLE_B);
+ 
 diff --git a/include/linux/dsa_host_memory.h b/include/linux/dsa_host_memory.h
 new file mode 100644
-index 0000000..324fdce
+index 0000000..7d7541d
 --- /dev/null
 +++ b/include/linux/dsa_host_memory.h
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,25 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
-+ * DSA host memory: the apps the guest names see the computer's memory as the
-+ * device's memory, in /proc/meminfo and sysinfo(). See fs/proc/dsa_host_memory.c.
++ * DSA host memory: apps see the memory the guest may grow to as the device's
++ * memory, in /proc/meminfo and sysinfo(). See fs/proc/dsa_host_memory.c.
 + */
 +#ifndef _LINUX_DSA_HOST_MEMORY_H
 +#define _LINUX_DSA_HOST_MEMORY_H
 +
 +struct sysinfo;
 +
++/*
++ * Adjusts the totals si_meminfo() filled in for the calling process, and
++ * returns the pages added to its free memory, which its available memory
++ * gains too.
++ */
 +#ifdef CONFIG_DSA_HOST_MEMORY
-+void dsa_host_memory_adjust(struct sysinfo *info);
++unsigned long dsa_host_memory_adjust(struct sysinfo *info);
 +#else
-+static inline void dsa_host_memory_adjust(struct sysinfo *info)
++static inline unsigned long dsa_host_memory_adjust(struct sysinfo *info)
 +{
++	return 0;
 +}
 +#endif
 +

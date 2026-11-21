@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>開始</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>再起動</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android を停止してから、もう一度起動します。
+
+アプリのウィンドウは閉じます。起動が終わったら、アプリをもう一度開いてください。</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>停止</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Android を開始できませんでした。もう一度お試しください。失敗が続く場合は詳細を確認してください。</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>このコンピューターで Android を実行できませんでした。Android ではなくコンピューター側の問題で、使用中の Android のバージョンはそのまま保たれます。理由は詳細を確認してください。</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>詳細</value>
@@ -262,6 +273,9 @@ Android {2} はまだ起動を完了していません ({3})。Android を再び
   <data name="Memory_Shared" xml:space="preserve">
     <value>共有メモリ</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>複数のプロセスが共有するメモリです。ウィンドウの画像やグラフィックスのバッファが含まれます。使っているアプリを閉じると解放されます。</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>圧縮メモリ</value>
   </data>
@@ -270,6 +284,9 @@ Android {2} はまだ起動を完了していません ({3})。Android を再び
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>空き</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>今は何も使っていないメモリです。Android が PC に返すので、PC の RAM を占めません。</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>プロセス {0}</value>
@@ -747,7 +764,10 @@ Google Play をもう一度インストールしてください。</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Google Play をインストールし、それを含めて Android が開始すると、ここに Android ID が表示されます。</value>
+    <value>Android ID はまだ利用できません。Google Play 開発者サービスは、この端末が初めて Google にチェックインするときに ID を作成します。
+そのためには、Google Play がインストールされ、Android がそれとともに起動し、ネットワークに接続している必要があります。
+数分たっても空のままの場合は Android を再起動してください。
+ID は 10 進数で、Google の登録ページが受け付ける形式です。</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>開発者</value>
@@ -850,14 +870,26 @@ adb disconnect の後は、adb サーバーが再起動するまで接続しま�
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>スレッド スタック</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>実行中のスレッドごとにカーネルが持つ作業領域です。アプリを閉じると減ります。</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>ページ テーブル</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>各アプリのメモリが RAM のどこにあるかをプロセッサーに伝える対応表です。アプリを閉じると減ります。</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>カーネル マッピング (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>カーネルとドライバーが確保する大きなバッファです。グラフィックスなどに使います。不要になると解放されます。</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>CPU ごとのデータ</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>カーネルがプロセッサーのコアごとに 1 つずつ持つデータです。サイズは Android の起動時に決まります。</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>ドライバー</value>
@@ -2303,7 +2335,7 @@ Android は今すぐ停止し、次回は最初にインストールしたとき
     <value>対応する最新のバージョン (現在は Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} とそのセキュリティ更新</value>
+    <value>Android {0} に固定: そのセキュリティ アップデートとイメージ アップデートのみを受け取り、新しい Android には自動で移りません</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android の更新</value>
@@ -2604,5 +2636,32 @@ Android はこれを拒否します。</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>すべてのファイル</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>代替ストア</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>未インストール</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>インストール済み</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>インストール済み、バージョン {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>ダウンロードしてインストールしています…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>インストールできませんでした: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>インストール</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>開く</value>
   </data>
 </root>

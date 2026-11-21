@@ -25,6 +25,7 @@
 //! `Info.plist`, so [`sync`] never touches an application it did not make, and a Desktop item
 //! is only ever removed when it is a link the note records into DSA's folder.
 
+use dsa_host_core::apps::shortcut_tag;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -100,17 +101,6 @@ pub fn bundle_identifier(package: &str) -> String {
         })
         .collect();
     format!("{BUNDLE_PREFIX}{clean}")
-}
-
-/// A short name for a shortcut's ID that a file name and a bundle identifier can carry: an
-/// FNV-1a hash of it, in hex. Android takes any text as an ID.
-pub fn shortcut_tag(id: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in id.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
 }
 
 /// The stub's file name: the app's label, with what a file name cannot hold replaced, and
@@ -355,14 +345,6 @@ pub fn app_bundle(folder: &Path, package: &str) -> Option<PathBuf> {
         .find(|path| stub_package(path).as_deref() == Some(package))
 }
 
-/// Writes `content` to `path` unless it already holds it.
-fn write_if_changed(path: &Path, content: &[u8]) -> io::Result<()> {
-    if fs::read(path).is_ok_and(|old| old == content) {
-        return Ok(());
-    }
-    fs::write(path, content)
-}
-
 /// Puts a copy of `window_host` in the bundle at `macos`, unless it holds the same already.
 fn place_executable(macos: &Path, window_host: &Path) -> io::Result<()> {
     let executable = macos.join(EXECUTABLE);
@@ -408,16 +390,25 @@ pub fn write_stub(
         icns::from_png(&app.icon_png).ok()
     };
     match &icon {
-        Some(icon) => write_if_changed(&resources.join("icon.icns"), icon)?,
+        Some(icon) => dsa_host_core::file_write::replace_if_changed(
+            &resources.join("icon.icns"),
+            icon,
+            "partial",
+        )?,
         None => {
             let _ = fs::remove_file(resources.join("icon.icns"));
         }
     }
-    write_if_changed(
+    dsa_host_core::file_write::replace_if_changed(
         &contents.join("Info.plist"),
         info_plist(app, icon.is_some()).as_bytes(),
+        "partial",
     )?;
-    write_if_changed(&contents.join("PkgInfo"), b"APPL????")?;
+    dsa_host_core::file_write::replace_if_changed(
+        &contents.join("PkgInfo"),
+        b"APPL????",
+        "partial",
+    )?;
     place_executable(&macos, window_host)?;
     Ok(bundle)
 }
@@ -450,16 +441,25 @@ pub fn write_pinned_stub(
         icns::from_png(&shortcut.icon_png).ok()
     };
     match &icon {
-        Some(icon) => write_if_changed(&resources.join("icon.icns"), icon)?,
+        Some(icon) => dsa_host_core::file_write::replace_if_changed(
+            &resources.join("icon.icns"),
+            icon,
+            "partial",
+        )?,
         None => {
             let _ = fs::remove_file(resources.join("icon.icns"));
         }
     }
-    write_if_changed(
+    dsa_host_core::file_write::replace_if_changed(
         &contents.join("Info.plist"),
         pinned_plist(package, shortcut, icon.is_some()).as_bytes(),
+        "partial",
     )?;
-    write_if_changed(&contents.join("PkgInfo"), b"APPL????")?;
+    dsa_host_core::file_write::replace_if_changed(
+        &contents.join("PkgInfo"),
+        b"APPL????",
+        "partial",
+    )?;
     place_executable(&macos, window_host)?;
     Ok(bundle)
 }
@@ -561,7 +561,11 @@ fn write_note(folder: &Path, links: &[DesktopLink]) -> io::Result<()> {
         })
         .collect();
     fs::create_dir_all(folder)?;
-    write_if_changed(&folder.join(DESKTOP_NOTE), text.as_bytes())
+    dsa_host_core::file_write::replace_if_changed(
+        &folder.join(DESKTOP_NOTE),
+        text.as_bytes(),
+        "partial",
+    )
 }
 
 /// Whether `path` is a link into `folder`, which is all DSA ever removes from the Desktop.

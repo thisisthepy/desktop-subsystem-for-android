@@ -67,6 +67,10 @@ namespace Dsa.Setup
         /// <summary>The newest Android major the release supports, or null when not known.</summary>
         internal string AndroidMajor { get; private set; }
 
+        /// <summary>Whether this is a preset setup (a17, a16) that fixes the computer to
+        /// AndroidMajor, rather than the default one that follows the newest Android.</summary>
+        internal bool AndroidPinned { get; private set; }
+
         /// <summary>Whether the package carries an Android image (else the service downloads one).</summary>
         internal bool BundledImage { get; private set; }
 
@@ -98,6 +102,7 @@ namespace Dsa.Setup
 
             this.Version = this.engine.GetVariableVersion("WixBundleVersion");
             this.AndroidMajor = this.ReadVariable("AndroidMajor");
+            this.AndroidPinned = this.ReadVariable("AndroidPinned") == "1";
             this.BundledImage = this.ReadVariable("BundledImage") == "1";
 
             base.OnStartup(args);

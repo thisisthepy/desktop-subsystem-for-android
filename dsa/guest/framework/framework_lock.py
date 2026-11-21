@@ -40,9 +40,10 @@ a project fetched in part) and fetched by .github/scripts/translator/fetch-sourc
                                                    changes soong_ui's source in the services
                                                    tree so that GOMEMLIMIT reaches soong_build
 
-services.jar, with DSA's window manager, package manager, WebView service and display manager
-(which shows Google Play a phone's density, so that Play delivers xxhdpi splits), is built in a tree
-of its own (SERVICES_JAR): the Java framework needs most of the platform.
+services.jar, with DSA's window manager, package manager, WebView service, display manager
+(which shows Google Play a phone's density, so that Play delivers xxhdpi splits) and activity
+manager (which gives Google Play the computer's installed memory as advertisedMem), is built in a
+tree of its own (SERVICES_JAR): the Java framework needs most of the platform.
 """
 
 import hashlib
@@ -101,9 +102,10 @@ KEYMINT_SOURCES = {
 }
 KEYMINT_FILES = list(KEYMINT_OUTPUTS) + list(KEYMINT_SOURCES)
 
-# The window manager, package manager and WebView service with DSA's changes (the patches to
-# frameworks/base/services in patches/frameworks/base/<android>/): services.jar, which the image
-# takes in place of the published build's. The Java framework reaches across most of the
+# The window manager, package manager, WebView service, display manager and activity manager
+# with DSA's changes (the patches to frameworks/base/services in
+# patches/frameworks/base/<android>/): services.jar, which the image takes in place of the
+# published build's. The Java framework reaches across most of the
 # platform's projects, so it is not built in the reduced tree the native files are built in, but
 # in a tree of every project the build's manifest syncs by default (services_lock), with the
 # build's own product (the version's target) and release configuration. A dex file is the same
@@ -112,6 +114,16 @@ KEYMINT_FILES = list(KEYMINT_OUTPUTS) + list(KEYMINT_SOURCES)
 # builds none.
 SERVICES_JAR = "SYSTEM/framework/services.jar"
 JAVA_OUTPUTS = {SERVICES_JAR: "system/framework/services.jar"}
+# The folders of frameworks/base that each file the image takes from the build is built from. A
+# patch changes frameworks/base only there, as the image keeps the published build's copy of
+# everything else. framework.jar in particular stays the published one (it is on the boot class
+# path, with a precompiled boot image), so a native method libandroid_runtime registered for a
+# Java method framework.jar does not declare would make zygote abort at start.
+FRAMEWORKS_BASE_SOURCES = {
+    "SYSTEM/lib64/libhwui.so": ["libs/hwui"],
+    "SYSTEM/lib64/libandroid_runtime.so": ["core/jni"],
+    SERVICES_JAR: ["services"],
+}
 # The projects the services tree takes in part, as the native tree takes them: each holds every
 # toolchain version the platform ever used, and the build reads only the ones the lock names.
 # Android 17 keeps its Rust toolchains in prebuilts/rust-toolchain/linux-x86 and leaves only
@@ -387,11 +399,11 @@ def manifest_problems(version, text):
     return problems
 
 
-def install_source(query):
+def install_source(query, suffix=".jar"):
     """The file an install path is a copy of, from what `ninja -t query <install path>` prints:
-    the one explicit input of its rule, which must copy a jar. The services build builds that
-    file, the module's own dex jar, so that installing it does not also build what the module
-    requires."""
+    the one explicit input of its rule, which must copy a file ending in `suffix` (a jar, or an
+    app's APK). The services build builds that file, the module's own dex jar or APK, so that
+    installing it does not also build what the module requires."""
     rule, inputs, section = None, [], None
     for line in query.splitlines():
         if line.startswith("  ") and not line.startswith("    "):
@@ -408,8 +420,9 @@ def install_source(query):
     if not re.search(r"cp|copy|install", rule, re.IGNORECASE):
         raise LockError(f"the install path is made by {rule}, which is not a copy, so the module's "
                         "own output cannot stand in for it")
-    if len(inputs) != 1 or not inputs[0].endswith(".jar"):
-        raise LockError(f"the install path is a copy of {', '.join(inputs) or 'nothing'}, not of one jar")
+    if len(inputs) != 1 or not inputs[0].endswith(suffix):
+        kind = "jar" if suffix == ".jar" else suffix.lstrip(".").upper()
+        raise LockError(f"the install path is a copy of {', '.join(inputs) or 'nothing'}, not of one {kind}")
     return inputs[0]
 
 
@@ -436,9 +449,9 @@ def soong_memory_limit(text):
 
 
 def main(argv):
-    if argv[1:] == ["install-source"]:
+    if argv[1:] in (["install-source"], ["install-source", "--apk"]):
         try:
-            print(install_source(sys.stdin.read()))
+            print(install_source(sys.stdin.read(), ".apk" if argv[2:] == ["--apk"] else ".jar"))
         except LockError as error:
             raise SystemExit(str(error))
         return

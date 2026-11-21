@@ -29,11 +29,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::background::MediaCommand;
+use dsa_host_core::compositor::blank_windows::BlankWatch;
 use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
 use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
+use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::shown_windows::{CoverWatch, ShownWindows};
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
@@ -66,11 +68,9 @@ const BUILD: &str = "dsa-wm";
 /// How long a window host may take over its handshake.
 const HANDSHAKE: Duration = Duration::from_secs(5);
 
-/// How long the renderer waits for a window host to copy a frame out of its texture.
-const PRESENT_WAIT: Duration = Duration::from_millis(500);
-
-/// How often the manager looks for window hosts that are late.
-const TICK: Duration = Duration::from_millis(500);
+// How long the renderer waits for a window host to copy a frame out of its texture, and how
+// often the manager looks for window hosts that are late: the same on every host.
+use dsa_host_core::compositor::window_sizing::{MANAGER_TICK as TICK, PRESENT_WAIT};
 
 /// How often the manager looks at which task windows are covered by other windows.
 const COVERS_CHECK: Duration = Duration::from_secs(1);
@@ -80,27 +80,13 @@ pub fn pipe_name(session: u32) -> String {
     format!("dsa-wm-{session}")
 }
 
-/// The arguments that open DSA's settings on the Apps page with `package`'s row in view.
-pub fn app_page_arguments(package: &str) -> [String; 4] {
-    [
-        "--page".into(),
-        "apps".into(),
-        "--app".into(),
-        package.into(),
-    ]
-}
-
 /// Opens DSA's settings (the settings app installed beside this window manager) on the Apps
 /// page at `package`, as the system menu's App info does. The settings app runs on its own;
 /// nothing waits for it.
 fn open_app_page(package: &str) -> Result<(), String> {
     let program =
         crate::start_menu::default_uninstaller().ok_or("the settings app's place is not known")?;
-    std::process::Command::new(&program)
-        .args(app_page_arguments(package))
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("could not start {}: {e}", program.display()))
+    dsa_host_core::links::open_app_page_with(&program, package)
 }
 
 /// What the other threads tell the manager.
@@ -279,9 +265,22 @@ impl HostLink {
             .get(&call.task_id)
             .cloned();
         let mut surfaces = self.surfaces.lock().unwrap_or_else(|e| e.into_inner());
-        let window = surfaces
-            .entry(call.task_id)
-            .or_insert_with(|| WindowSurfaces::new(call.task_id, Arc::clone(gpu), logger.clone()));
+        let window = match surfaces.entry(call.task_id) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                match WindowSurfaces::new(call.task_id, Arc::clone(gpu), logger.clone()) {
+                    Ok(window) => entry.insert(window),
+                    Err(why) => {
+                        return vec![SurfaceAnswer {
+                            task_id: call.task_id,
+                            call_id: call.call_id,
+                            error: format!("the window manager has no GPU device now: {why}"),
+                            ..Default::default()
+                        }]
+                    }
+                }
+            }
+        };
         let answers = window.call(call, texture, &|handle| self.place(handle));
         if call.op == dsa_host_core::compositor::surface_calls::SURFACE_OP_RELEASE_ALL {
             surfaces.remove(&call.task_id);
@@ -370,6 +369,8 @@ pub struct RemoteWindow {
     /// The guest task that draws into the window: its own, or the one that took it over
     /// after a GPU reset.
     drawing: std::sync::atomic::AtomicI32,
+    /// Told of each frame the app draws, so a size of a drag held back for it may go.
+    drawn: DrawnFrames,
     gpu: Arc<Gpu>,
     state: Mutex<RemoteState>,
     logger: Option<Arc<CompositorLogger>>,
@@ -381,18 +382,27 @@ impl RemoteWindow {
         task_id: i32,
         link: Arc<HostLink>,
         gpu: Arc<Gpu>,
+        drawn: DrawnFrames,
         logger: Option<Arc<CompositorLogger>>,
     ) -> Arc<RemoteWindow> {
-        Self::make(task_id, Some(link), EarlyFrames::linked(), gpu, logger)
+        Self::make(
+            task_id,
+            Some(link),
+            EarlyFrames::linked(),
+            gpu,
+            drawn,
+            logger,
+        )
     }
 
     /// The frame target of a task whose window host has not connected yet.
     pub fn waiting(
         task_id: i32,
         gpu: Arc<Gpu>,
+        drawn: DrawnFrames,
         logger: Option<Arc<CompositorLogger>>,
     ) -> Arc<RemoteWindow> {
-        Self::make(task_id, None, EarlyFrames::waiting(), gpu, logger)
+        Self::make(task_id, None, EarlyFrames::waiting(), gpu, drawn, logger)
     }
 
     fn make(
@@ -400,11 +410,13 @@ impl RemoteWindow {
         link: Option<Arc<HostLink>>,
         early: EarlyFrames,
         gpu: Arc<Gpu>,
+        drawn: DrawnFrames,
         logger: Option<Arc<CompositorLogger>>,
     ) -> Arc<RemoteWindow> {
         Arc::new(RemoteWindow {
             task_id,
             drawing: std::sync::atomic::AtomicI32::new(task_id),
+            drawn,
             gpu,
             state: Mutex::new(RemoteState {
                 link,
@@ -640,7 +652,8 @@ impl FrameTarget for RemoteWindow {
             (link, state.sequence)
         };
         // The app has drawn this size: the next size of a drag may go to it.
-        super::tasks::frame_drawn(self.drawing.load(Ordering::Relaxed), (width, height));
+        self.drawn
+            .frame_drawn(self.drawing.load(Ordering::Relaxed), (width, height));
         let started = Instant::now();
         let sent = link.send(Body::Frame(Frame {
             task_id: self.task_id,
@@ -689,11 +702,12 @@ impl FrameTarget for RemoteWindow {
 }
 
 /// Takes the window hosts' connections until `stop` is set, and reads each one on a thread
-/// of its own. `adapter_luid` is the GPU the frames are on, which each window host is told.
+/// of its own. `adapter_luid` says the GPU the frames are on, which each window host is told
+/// as it attaches: the renderer names it once it has started, so it is read for each one.
 pub fn accept_hosts(
     mut listener: Box<dyn Listener>,
     events: Sender<ManagerEvent>,
-    adapter_luid: Option<[u8; 8]>,
+    adapter_luid: impl Fn() -> Option<[u8; 8]>,
     gpu: Option<Arc<Gpu>>,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
@@ -718,6 +732,7 @@ pub fn accept_hosts(
         let stop = Arc::clone(&stop);
         let logger = logger.clone();
         let gpu = gpu.clone();
+        let adapter_luid = adapter_luid();
         let _ = thread::Builder::new()
             .name("dsa-wm-host".into())
             .spawn(move || serve_host(connection, id, events, adapter_luid, gpu, stop, logger));
@@ -904,6 +919,8 @@ pub struct ManagerSetup {
     /// had windows: it tells the user, and restarts Android when the stall says to. None when
     /// nothing is done about it.
     pub recover: Option<Recovery>,
+    /// The frames the apps drew, shared with the thread that sends the requests to the guest.
+    pub drawn: DrawnFrames,
 }
 
 struct Manager {
@@ -914,6 +931,8 @@ struct Manager {
     crashes: CrashRestarts,
     /// Whether the guest draws again after a GPU reset.
     stall: FrameStall,
+    /// The windows that outlived a window manager restart and show nothing.
+    blank: BlankWatch,
     /// The generations of the window manager's Direct3D device and of the renderer's Vulkan
     /// device last seen: a change is a GPU reset.
     gpu_generation: u64,
@@ -938,13 +957,14 @@ struct Manager {
 /// Runs the manager until the window manager stops, or every sender of its events is gone.
 /// Every window host is disconnected when it ends.
 pub fn manage(setup: ManagerSetup) {
-    let gpu_generation = setup.gpu.as_ref().map_or(0, |gpu| gpu.generation());
+    let gpu_generation = setup.gpu.as_ref().map_or(0, |gpu| gpu.resets());
     let renderer_generation = setup.renderer_generation.as_ref().map_or(0, |seen| seen());
     let mut manager = Manager {
         windows: TaskWindows::new(),
         resets: GpuResetWindows::new(),
         crashes: CrashRestarts::new(),
         stall: FrameStall::new(),
+        blank: BlankWatch::new(Instant::now()),
         gpu_generation,
         renderer_generation,
         hosts: WindowHosts::new(),
@@ -1339,7 +1359,8 @@ impl Manager {
                     "the GPU was reset, and a new Direct3D device cannot be made yet: {why}"
                 )),
             }
-            let generation = gpu.generation();
+            // Devices let go of while Android was stopped and made again are not a reset.
+            let generation = gpu.resets();
             if generation != self.gpu_generation {
                 self.gpu_generation = generation;
                 reset = true;
@@ -1382,9 +1403,29 @@ impl Manager {
         }
     }
 
+    /// Closes the windows that outlived a window manager restart and still show one colour:
+    /// the graphics stream of their app ended with the old renderer, and the window would stay
+    /// black for good while its task runs. Opening the app again gives it a new stream.
+    fn follow_blank_windows(&mut self, now: Instant) {
+        self.blank.inherit(&self.windows.windows(), now);
+        for (task_id, blank) in super::surfaces::blank_frames() {
+            self.blank.frame(task_id, blank, now);
+        }
+        for task_id in self.blank.due(now) {
+            self.log(&format!(
+                "task {task_id}'s window has shown one colour since the window manager started: \
+                 its app lost its graphics stream with the old renderer and did not draw again, \
+                 so the window closes"
+            ));
+            self.user_closed(task_id, now);
+        }
+        super::surfaces::watch_blank_frames(&self.blank.watched(now));
+    }
+
     fn tick(&mut self) {
         self.follow_gpu_resets(Instant::now());
         self.follow_frame_stall(Instant::now());
+        self.follow_blank_windows(Instant::now());
         // A window kept through a GPU reset whose app did not come back closes.
         let late = self.resets.tick(Instant::now());
         if !late.is_empty() {
@@ -1444,6 +1485,7 @@ impl Manager {
     }
 
     fn drop_remote(&mut self, task_id: i32) {
+        self.blank.forget(task_id);
         if let Some(remote) = self.remotes.remove(&task_id) {
             remote.close();
         }
@@ -1478,6 +1520,7 @@ impl Manager {
                                         *task_id,
                                         Arc::clone(&link),
                                         Arc::clone(gpu),
+                                        self.setup.drawn.clone(),
                                         self.setup.logger.clone(),
                                     );
                                     if let Some(old) = self.remotes.insert(*task_id, remote) {
@@ -1570,9 +1613,10 @@ impl Manager {
         // host has connected: the first ones are often its splash screen, drawn once.
         if let Some(gpu) = &self.setup.gpu {
             let logger = self.setup.logger.clone();
+            let drawn = self.setup.drawn.clone();
             for (_, task_id) in &routed {
                 self.remotes.entry(*task_id).or_insert_with(|| {
-                    RemoteWindow::waiting(*task_id, Arc::clone(gpu), logger.clone())
+                    RemoteWindow::waiting(*task_id, Arc::clone(gpu), drawn.clone(), logger.clone())
                 });
             }
         }
@@ -1600,12 +1644,17 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    #[test]
+    fn nfr8_the_windows_manager_keeps_the_shared_timing() {
+        use dsa_host_core::compositor::window_sizing::vectors::TIMING;
+        assert_eq!(super::TICK, TIMING.tick);
+        assert_eq!(super::PRESENT_WAIT, TIMING.present_wait);
+    }
 
     #[test]
     fn fr22_app_info_opens_the_apps_page_at_the_app() {
         assert_eq!(
-            app_page_arguments("com.example.clock"),
+            dsa_host_core::links::app_page_arguments("com.example.clock"),
             ["--page", "apps", "--app", "com.example.clock"].map(String::from)
         );
     }

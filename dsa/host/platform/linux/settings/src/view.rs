@@ -6,8 +6,8 @@ use std::collections::VecDeque;
 use crate::api::{Failure, Problem};
 use crate::i18n::{tr, trf};
 use crate::model::{
-    AdbAutoConnectState, AndroidVersion, App, AppWindow, ArmTranslation, Backup, BackupJob,
-    DnsResolver, DpiScaling, FullScreenPlace, Gapps, GappsState, GuestMemory, HostRole,
+    AdbAutoConnectState, AltStore, AndroidVersion, App, AppWindow, ArmTranslation, Backup,
+    BackupJob, DnsResolver, DpiScaling, FullScreenPlace, Gapps, GappsState, GuestMemory, HostRole,
     ImportedCertificate, KeyProtection, KeyProtectionShown, Memory, MemoryShare, Network,
     NetworkMode, Outcome, ProgramUpdateAnswer, ProgramUpdatePhase, State, Status, ALL_FOLDERS,
 };
@@ -77,10 +77,49 @@ pub struct Controls {
     pub can_freeze: bool,
 }
 
+/// The status card's first button, as core decides it from the state and from what this app
+/// is doing (`action`). `None` while the state is unknown: the button is locked and reads
+/// "Start", or "Restart" while this app restarts Android.
+pub fn start_button(
+    status: Option<&Status>,
+    action: Option<dsa_host_core::start_button::StartAction>,
+) -> Option<dsa_host_core::start_button::StartButton> {
+    use dsa_host_core::session::SessionState;
+    let state = match status.map(|s| s.state).unwrap_or(State::Unknown) {
+        State::Unknown => None,
+        State::Stopped => Some(SessionState::Stopped),
+        State::Starting => Some(SessionState::Starting),
+        State::Active => Some(SessionState::Active),
+        State::Dozing => Some(SessionState::Dozing),
+        State::Frozen => Some(SessionState::Frozen),
+        State::Stopping => Some(SessionState::Stopping),
+        State::Stalled => Some(SessionState::Stalled),
+    };
+    match (state, action) {
+        (Some(state), action) => Some(dsa_host_core::start_button::start_button(state, action)),
+        // An action under way decides the button whatever the state.
+        (None, Some(action)) => Some(dsa_host_core::start_button::start_button(
+            SessionState::Stopped,
+            Some(action),
+        )),
+        (None, None) => None,
+    }
+}
+
+/// What the first button reads.
+pub fn start_button_text(button: Option<dsa_host_core::start_button::StartButton>) -> String {
+    if button.is_some_and(|b| b.is_restart()) {
+        tr("Restart")
+    } else {
+        tr("Start")
+    }
+}
+
 pub fn controls(status: Option<&Status>) -> Controls {
     let state = status.map(|s| s.state).unwrap_or(State::Unknown);
     Controls {
-        can_start: matches!(state, State::Stopped | State::Stalled),
+        can_start: start_button(status, None)
+            == Some(dsa_host_core::start_button::StartButton::Start),
         can_stop: matches!(
             state,
             State::Starting | State::Active | State::Dozing | State::Frozen | State::Stalled
@@ -175,7 +214,7 @@ pub fn guest_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
             tr("Kernel caches the kernel can free on demand."),
             guest.slab_reclaimable_kb,
         ),
-        row(tr("Shared memory"), String::new(), guest.shmem_kb),
+        row(tr("Shared memory"), tr("Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."), guest.shmem_kb),
         row(
             tr("Compressed memory"),
             trf(
@@ -184,7 +223,7 @@ pub fn guest_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
             ),
             guest.zram_used_kb,
         ),
-        row(tr("Free"), String::new(), guest.free_kb),
+        row(tr("Free"), tr("Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."), guest.free_kb),
     ];
     // Google Play services, which the user chose to install, on a row of its own, so what it
     // costs is not taken for what Android and DSA cost.
@@ -223,14 +262,14 @@ pub fn kernel_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
             tr("Memory the kernel keeps for its own data and cannot reclaim"),
             k.slab_unreclaimable_kb,
         ),
-        row(tr("Thread stacks"), String::new(), k.kernel_stack_kb),
-        row(tr("Page tables"), String::new(), k.page_tables_kb),
+        row(tr("Thread stacks"), tr("Working space the kernel keeps for every running thread. It shrinks as apps close."), k.kernel_stack_kb),
+        row(tr("Page tables"), tr("The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."), k.page_tables_kb),
         row(
             tr("Kernel mappings (vmalloc)"),
-            String::new(),
+            tr("Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."),
             k.vmalloc_used_kb,
         ),
-        row(tr("Per-CPU data"), String::new(), k.percpu_kb),
+        row(tr("Per-CPU data"), tr("Data the kernel keeps once for each processor core. Its size is fixed when Android starts."), k.percpu_kb),
         row(
             tr("Drivers"),
             tr("What no counter names, such as GPU and DMA buffers"),
@@ -386,7 +425,10 @@ pub fn android_channel_text(info: &AndroidVersion) -> String {
             &[&newest.to_string()],
         )
     } else {
-        trf("Android {0} and its security updates", &[&info.channel])
+        trf(
+            "Fixed to Android {0}: its security and image updates, never a newer Android on its own",
+            &[&info.channel],
+        )
     }
 }
 
@@ -974,6 +1016,25 @@ pub fn gapps_source(gapps: &Gapps) -> String {
     }
 }
 
+/// One line on where an alternative store stands: being installed, why its install failed,
+/// installed (with its version), or not installed.
+pub fn alt_store_status(store: &AltStore, installing: bool, failure: Option<&Failure>) -> String {
+    if installing {
+        return tr("Downloading and installing…");
+    }
+    if let Some(failure) = failure {
+        return trf(
+            "Not installed: {0}",
+            &[&problem_text(failure).replace('\n', " ")],
+        );
+    }
+    match (store.installed, store.version.is_empty()) {
+        (true, false) => trf("Installed, version {0}", &[&store.version]),
+        (true, true) => tr("Installed"),
+        (false, _) => tr("Not installed"),
+    }
+}
+
 /// What the Google Play item says while the package is being installed.
 pub fn gapps_busy_text() -> String {
     tr("Downloading and installing Google Play. This can take several minutes.")
@@ -983,7 +1044,7 @@ pub fn gapps_busy_text() -> String {
 pub fn gapps_device_id(gapps: &Gapps) -> String {
     match &gapps.device_id {
         Some(_) => tr("Enter this number on Google's registration page."),
-        None => tr("It shows here once Google Play is installed and Android has started."),
+        None => tr("The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."),
     }
 }
 
@@ -1733,4 +1794,18 @@ impl ProgramUpdateFollower {
             self.set(ProgramUpdatePhase::Restarting, "");
         }
     }
+}
+
+/// What the status page shows for the service's last reason, in `lang`: a start the host
+/// refused reads as a problem with this computer, and a crash as Android having stopped
+/// unexpectedly, in core's words, with its reason; any other reason as the service gave it.
+pub fn last_reason_text(reason: &str, lang: dsa_host_core::ui_language::UiLanguage) -> String {
+    dsa_host_core::start_failure::localized_host_problem(lang, reason)
+        .or_else(|| dsa_host_core::guest_crash::localized_crash(lang, reason))
+        .unwrap_or_else(|| reason.to_string())
+}
+
+/// The language this app's session shows messages in, as gettext picks it.
+pub fn session_language() -> dsa_host_core::ui_language::UiLanguage {
+    dsa_host_core::ui_language::UiLanguage::from_posix_env(|name| std::env::var(name).ok())
 }

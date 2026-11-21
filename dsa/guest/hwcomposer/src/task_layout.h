@@ -183,6 +183,19 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
 // that one; a first frame has nothing better to show.
 bool leavesLastFrame(bool layerMissing, bool hasFrame);
 
+// When the frames of a task reported again with the bounds it already had are sent again, as
+// milliseconds from the report; empty when they are not. The agent reports every task again
+// when it restarts, and the host then reopens the task's window, which has no frame of its own
+// yet. SurfaceFlinger presents only when something changes, so a still app (a dialog, a
+// settings page) would leave that window showing the host's splash until it drew again. So a
+// task whose frame was sent before gets its frame again at once, and once more a while later,
+// as the host may not have reopened the window by the time the first one arrives. A report
+// with new bounds asks for a frame anyway, and a task never sent has nothing to repeat.
+std::vector<int64_t> resendAfterReport(bool boundsChanged, bool posted);
+
+// How long after a repeated report the second frame is asked for.
+constexpr int64_t kResendLateMs = 1500;
+
 // Whether a frame goes unsent because nothing in it shows what the app drew: no layer of the
 // task shows a buffer, or every one that does is fully transparent. That is the task as it
 // ends: its app's surface is hidden or removed before the task is, and what is left (the task's

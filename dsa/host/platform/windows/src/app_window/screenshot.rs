@@ -15,83 +15,29 @@
 //! The work runs on a thread of its own: reading the frame back and encoding it take a moment,
 //! and the window keeps answering meanwhile.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use dsa_host_core::screenshot::PixelOrder;
 
 use crate::compositor::log::{note, CompositorLogger};
 use crate::compositor::present::{CapturedFrame, WindowPresenter};
 
-/// A screenshot: `width` by `height` opaque pixels as RGBA rows, top row first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Shot {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-}
+pub use dsa_host_core::screenshot::Shot;
 
 /// The app's content of `frame`: the rows under the title bar's band, every pixel opaque.
 /// `None` when nothing is left under the band.
 pub fn app_content(frame: &CapturedFrame) -> Option<Shot> {
-    let row = frame.width as usize * 4;
-    let band = frame.band.min(frame.height);
-    let height = frame.height - band;
-    if frame.width == 0 || height == 0 || frame.rgba.len() < row * frame.height as usize {
-        return None;
-    }
-    let start = band as usize * row;
-    let mut rgba = frame.rgba[start..start + row * height as usize].to_vec();
-    // The swapchain shows a frame without its alpha, so a screenshot is what the user saw.
-    for pixel in rgba.chunks_exact_mut(4) {
-        pixel[3] = 0xFF;
-    }
-    Some(Shot {
-        width: frame.width,
-        height,
-        rgba,
-    })
+    dsa_host_core::screenshot::app_content(
+        &frame.rgba,
+        frame.width as usize * 4,
+        (frame.width, frame.height),
+        frame.band,
+        PixelOrder::Rgba,
+    )
 }
 
-/// A local date and time, to the second.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LocalTime {
-    pub year: u16,
-    pub month: u16,
-    pub day: u16,
-    pub hour: u16,
-    pub minute: u16,
-    pub second: u16,
-}
-
-/// The file name of the `copy`th screenshot taken at `time` (1 for the first), starting with
-/// `prefix`: "Screenshot 2026-11-08 143022.png", then "Screenshot 2026-11-08 143022 (2).png".
-pub fn file_name(prefix: &str, time: &LocalTime, copy: u32) -> String {
-    let stem = format!(
-        "{prefix} {:04}-{:02}-{:02} {:02}{:02}{:02}",
-        time.year, time.month, time.day, time.hour, time.minute, time.second
-    );
-    if copy <= 1 {
-        format!("{stem}.png")
-    } else {
-        format!("{stem} ({copy}).png")
-    }
-}
-
-/// The first path in `folder` named for a screenshot at `time` that `exists` says is free.
-pub fn free_path(
-    folder: &Path,
-    prefix: &str,
-    time: &LocalTime,
-    exists: impl Fn(&Path) -> bool,
-) -> PathBuf {
-    let mut copy = 1;
-    loop {
-        let path = folder.join(file_name(prefix, time, copy));
-        if !exists(&path) || copy >= 10_000 {
-            return path;
-        }
-        copy += 1;
-    }
-}
+pub use dsa_host_core::screenshot::{file_name, free_path, LocalTime};
 
 /// `shot` as a packed device-independent bitmap (`CF_DIB`): a 40 byte BITMAPINFOHEADER for 32
 /// bits a pixel, uncompressed, then the rows bottom first, each pixel blue, green, red and an
@@ -300,31 +246,8 @@ unsafe fn set_data(format: u32, bytes: &[u8]) -> Result<(), String> {
 
 /// Saves `png` in the user's Screenshots folder under a name no file has yet.
 fn save(png: &[u8], prefix: &str) -> Result<(), String> {
-    use std::io::Write;
     let folder = screenshots_folder()?;
-    let time = local_time();
-    // A file made between the look and the write is never written over: the write makes a
-    // new file or fails, and the next name is tried.
-    for _ in 0..3 {
-        let path = free_path(&folder, prefix, &time, Path::exists);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                return file
-                    .write_all(png)
-                    .map_err(|e| format!("could not write {}: {e}", path.display()));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("could not make {}: {e}", path.display())),
-        }
-    }
-    Err(format!(
-        "every screenshot name in {} is taken",
-        folder.display()
-    ))
+    dsa_host_core::screenshot::save_new(&folder, prefix, &local_time(), png).map(|_| ())
 }
 
 /// The user's Screenshots folder, made when it is missing: the known folder Windows keeps for
@@ -381,12 +304,12 @@ fn local_time() -> LocalTime {
         now
     };
     LocalTime {
-        year: now.wYear,
-        month: now.wMonth,
-        day: now.wDay,
-        hour: now.wHour,
-        minute: now.wMinute,
-        second: now.wSecond,
+        year: i32::from(now.wYear),
+        month: u32::from(now.wMonth),
+        day: u32::from(now.wDay),
+        hour: u32::from(now.wHour),
+        minute: u32::from(now.wMinute),
+        second: u32::from(now.wSecond),
     }
 }
 
@@ -429,39 +352,6 @@ mod tests {
             ..frame(2, 2, 0)
         };
         assert_eq!(app_content(&short), None);
-    }
-
-    #[test]
-    fn fr22_a_screenshot_is_named_as_windows_names_its_own() {
-        let time = LocalTime {
-            year: 2026,
-            month: 11,
-            day: 8,
-            hour: 9,
-            minute: 5,
-            second: 3,
-        };
-        assert_eq!(
-            file_name("Screenshot", &time, 1),
-            "Screenshot 2026-11-08 090503.png"
-        );
-        assert_eq!(
-            file_name("스크린샷", &time, 2),
-            "스크린샷 2026-11-08 090503 (2).png"
-        );
-        // A name taken goes to the next copy.
-        let folder = Path::new("shots");
-        let taken = [
-            folder.join("Screenshot 2026-11-08 090503.png"),
-            folder.join("Screenshot 2026-11-08 090503 (2).png"),
-        ];
-        assert_eq!(
-            free_path(folder, "Screenshot", &time, |path| taken
-                .iter()
-                .any(|t| t == path)),
-            folder.join("Screenshot 2026-11-08 090503 (3).png")
-        );
-        assert_eq!(free_path(folder, "Screenshot", &time, |_| false), taken[0]);
     }
 
     #[test]

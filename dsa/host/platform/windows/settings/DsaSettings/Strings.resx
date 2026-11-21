@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Start</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Restart</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android stops and starts again.
+
+Its app windows close. Open the apps again once it has started.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Stop</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Android could not start. Try again, and check the details if it keeps failing.</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>This computer could not run Android. This is a problem with the computer, not with Android; the Android version in use is kept. See the details for the reason.</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Details</value>
@@ -262,6 +273,9 @@ DSA downloads another image if there is one. The next DSA version tries this one
   <data name="Memory_Shared" xml:space="preserve">
     <value>Shared memory</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Compressed memory</value>
   </data>
@@ -270,6 +284,9 @@ DSA downloads another image if there is one. The next DSA version tries this one
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Free</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Process {0}</value>
@@ -747,7 +764,10 @@ Install Google Play again.</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>The Android ID shows here once Google Play is installed and Android has started with it.</value>
+    <value>The Android ID is not available yet. Google Play services make it when this device first checks in with Google.
+That needs Google Play installed, Android started with it and a network connection.
+If this stays empty a few minutes later, restart Android.
+The ID is a decimal number, the form Google's registration page takes.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Developer</value>
@@ -850,14 +870,26 @@ Automatic: up to this PC's memory less what Windows keeps. Applies from the next
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Thread stacks</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Working space the kernel keeps for every running thread. It shrinks as apps close.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Page tables</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>The maps that tell the processor where each app's memory is in RAM. They shrink as apps close.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Kernel mappings (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Per-CPU data</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Data the kernel keeps once for each processor core. Its size is fixed when Android starts.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Drivers</value>
@@ -2303,7 +2335,7 @@ Turn it on under ARM apps, restart Android, and install the app again.</value>
     <value>The newest supported version (now Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} and its security updates</value>
+    <value>Fixed to Android {0}: its security and image updates, never a newer Android on its own</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android update</value>
@@ -2605,5 +2637,32 @@ Get the app's x86_64 or arm64-v8a build.</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>All files</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Alternative stores</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Not installed</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Installed</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Installed, version {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Downloading and installing…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Not installed: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Open</value>
   </data>
 </root>

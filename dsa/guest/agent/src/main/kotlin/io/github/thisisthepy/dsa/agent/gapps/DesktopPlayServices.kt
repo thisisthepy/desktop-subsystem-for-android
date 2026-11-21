@@ -43,8 +43,12 @@ data class UnusedComponent(val className: String, val feature: String)
  * Keeps off the parts of Google Play services that run all the time on a phone and have no
  * use on a desktop: crisis alerts, the emergency location service, motion sickness assist,
  * nearby device presence, Cast device suggestions, remote gestures from a watch, the
- * hardware activity recognition provider, Find My Device's secure lock, and the cross-device
- * service. Each is a service Play services starts at boot and keeps running in its main
+ * hardware activity recognition provider, Find My Device's secure lock, the cross-device
+ * service, Find My Device's Bluetooth offline beacon, the GNSS assistance download, and the
+ * logging library's debug dump. The beacon advertises over Bluetooth and the assistance data
+ * feeds a satellite receiver; a desktop's Android has neither radio, so both only hold memory.
+ * Location for apps comes from the fused and network location services, which stay on. The
+ * debug dump only answers `dumpsys` for Play services' own logging. Each is a service Play services starts at boot and keeps running in its main
  * process, so each costs resident memory for as long as Android runs. None of them carries
  * push messages, accounts, the Play Store, location for apps, Play Integrity or backup; those
  * run in other services of the same process, which stay as they are.
@@ -188,6 +192,15 @@ class DesktopPlayServices(
             ),
             UnusedComponent("com.google.android.gms.mdm.services.SecureLockService", "Find My Device secure lock"),
             UnusedComponent("com.google.android.gms.dtdi.lifecycle.LifecycleService", "cross-device services"),
+            UnusedComponent(
+                "com.google.android.gms.findmydevice.spot.bleadvertising.OfflineBeaconService_Persistent",
+                "Find My Device Bluetooth offline beacon",
+            ),
+            UnusedComponent(
+                "com.google.android.gms.location.gnssassistance.GnssAssistanceService",
+                "GNSS assistance download",
+            ),
+            UnusedComponent("com.google.android.gms.clearcut.debug.ClearcutDebugDumpService", "logging debug dump"),
         )
     }
 }

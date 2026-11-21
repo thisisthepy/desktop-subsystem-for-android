@@ -79,6 +79,22 @@ public partial class AdvancedPage : Page
     private async void OnRemoveGapps(object sender, RoutedEventArgs e) =>
         await ViewModel.RemoveGappsAsync();
 
+    private async void OnInstallStore(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string id })
+        {
+            await ViewModel.InstallStoreAsync(id);
+        }
+    }
+
+    private async void OnOpenStore(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string id })
+        {
+            await ViewModel.OpenStoreAsync(id);
+        }
+    }
+
     private void OnOpenGappsTerms(object sender, RoutedEventArgs e) => OpenWebPage(ViewModel.GappsTermsUrl);
 
     private void OnOpenGappsRegistration(object sender, RoutedEventArgs e) =>

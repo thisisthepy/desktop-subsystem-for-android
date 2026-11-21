@@ -2,9 +2,10 @@
 //!
 //! The desktop's clipboard reaches the guest whenever it changes while a task window has the
 //! keyboard, which is when Wayland lets a program read it. What the guest copies becomes the
-//! desktop's clipboard, offered under every name for text. Files dropped on a task window
-//! are handed to the window's app. What an app drags out of its window becomes a drag on the
-//! desktop, of files (`text/uri-list`, streamed from the guest when a target asks) and text.
+//! desktop's clipboard: text under every name for text, an image as `image/png`. Files
+//! dropped on a task window are handed to the window's app. What an app drags out of its
+//! window becomes a drag on the desktop, of files (`text/uri-list`, streamed from the guest
+//! when a target asks) and text.
 
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, OwnedFd};
@@ -25,7 +26,9 @@ use wayland_client::protocol::{
 use wayland_client::{event_created_child, Connection, Dispatch, Proxy, QueueHandle};
 
 use super::{task_of, Event, State};
-use crate::shell::clipboard::{host_text, text_type, TEXT_TYPES};
+use dsa_host_core::clipboard::Clip;
+
+use crate::shell::clipboard::{host_image, host_text, selection_type, IMAGE_TYPE, TEXT_TYPES};
 use crate::shell::file_drag;
 use crate::shell::file_drop::{paths, URI_LIST};
 
@@ -38,8 +41,8 @@ pub struct DataState {
     drag: Option<(WlDataOffer, i32)>,
     /// The source of what the guest copied last, while it is the desktop's clipboard.
     source: Option<WlDataSource>,
-    /// Text the guest copied while no task window had the keyboard, to set when one has.
-    waiting: Option<String>,
+    /// What the guest copied while no task window had the keyboard, to set when one has.
+    waiting: Option<Clip>,
     /// The desktop's clipboard offer, read when a task window has the keyboard.
     selection: Option<WlDataOffer>,
     /// When a press of the left button leaves a task window.
@@ -143,12 +146,20 @@ fn pipe() -> Option<(OwnedFd, OwnedFd)> {
     }
 }
 
-/// Reads all an offer writes, on a thread of its own so the desktop never waits on us (or we
-/// on ourselves, when the offer is our own).
+/// The most bytes read of an offer of text: four for each byte of UTF-8 that may cross, and
+/// one past it, so text that is too long is seen to be.
+const TEXT_LIMIT: u64 = dsa_host_core::clipboard::MAX_CLIPBOARD_BYTES as u64 * 4 + 1;
+
+/// The most bytes read of an offer of an image: one past the longest PNG that crosses.
+const IMAGE_LIMIT: u64 = dsa_host_core::clipboard::MAX_IMAGE_BYTES as u64 + 1;
+
+/// Reads at most `limit` bytes of what an offer writes, on a thread of its own so the desktop
+/// never waits on us (or we on ourselves, when the offer is our own).
 fn read_offer(
     offer: &WlDataOffer,
     mime: &str,
     connection: &Connection,
+    limit: u64,
     done: impl FnOnce(Vec<u8>) + Send + 'static,
 ) {
     let Some((read, write)) = pipe() else {
@@ -160,7 +171,6 @@ fn read_offer(
     std::thread::spawn(move || {
         let mut file = std::fs::File::from(read);
         let mut bytes = Vec::new();
-        let limit = dsa_host_core::clipboard::MAX_CLIPBOARD_BYTES as u64 * 4 + 1;
         if (&mut file).take(limit).read_to_end(&mut bytes).is_ok() {
             done(bytes);
         }
@@ -213,8 +223,8 @@ impl State {
     /// A task window got the keyboard: the desktop's clipboard may be read now, and what the
     /// guest copied meanwhile becomes the desktop's.
     pub(crate) fn data_focus_changed(&mut self) {
-        if let Some(text) = self.data_state.waiting.take() {
-            self.set_clipboard(text);
+        if let Some(clip) = self.data_state.waiting.take() {
+            self.set_clipboard(clip);
         }
         self.read_selection();
     }
@@ -230,29 +240,43 @@ impl State {
             .data::<OfferTypes>()
             .and_then(|types| types.lock().ok().map(|types| types.clone()))
             .unwrap_or_default();
-        let Some(mime) = text_type(&types).map(str::to_string) else {
+        let Some((mime, image)) =
+            selection_type(&types).map(|(mime, image)| (mime.to_string(), image))
+        else {
             return;
         };
         let events = self.events.clone();
-        read_offer(&offer, &mime, &self.connection, move |bytes| {
-            if let Some(text) = host_text(bytes) {
-                events.send(Event::HostClipboard(text));
+        let limit = if image { IMAGE_LIMIT } else { TEXT_LIMIT };
+        read_offer(&offer, &mime, &self.connection, limit, move |bytes| {
+            let clip = if image {
+                host_image(bytes).map(|png| Clip::Image(png.into()))
+            } else {
+                host_text(bytes).map(Clip::Text)
+            };
+            if let Some(clip) = clip {
+                events.send(Event::HostClipboard(clip));
             }
         });
     }
 
-    /// The guest copied `text`: it becomes the desktop's clipboard.
-    pub fn set_clipboard(&mut self, text: String) {
+    /// The guest copied `clip`: it becomes the desktop's clipboard, text under every name for
+    /// text, an image as `image/png`.
+    pub fn set_clipboard(&mut self, clip: Clip) {
         let (Some(manager), Some(device)) = (&self.data_manager, &self.data_device) else {
             return;
         };
         if self.seat_state.keyboard_focus.is_none() {
-            self.data_state.waiting = Some(text);
+            self.data_state.waiting = Some(clip);
             return;
         }
-        let source = manager.create_data_source(&self.qh, Arc::new(text));
-        for mime in TEXT_TYPES {
-            source.offer(mime.to_string());
+        let image = matches!(clip, Clip::Image(_));
+        let source = manager.create_data_source(&self.qh, Arc::new(clip));
+        if image {
+            source.offer(IMAGE_TYPE.to_string());
+        } else {
+            for mime in TEXT_TYPES {
+                source.offer(mime.to_string());
+            }
         }
         device.set_selection(Some(&source), self.serial);
         if let Some(old) = self.data_state.source.replace(source) {
@@ -318,17 +342,23 @@ impl Dispatch<WlDataDevice, ()> for State {
                     .unwrap_or_default();
                 let events = state.events.clone();
                 let finished = offer.clone();
-                read_offer(&offer, URI_LIST, &state.connection, move |bytes| {
-                    let list = String::from_utf8_lossy(&bytes);
-                    let paths = paths(&list);
-                    if !paths.is_empty() {
-                        events.send(Event::Dropped {
-                            task_id,
-                            package,
-                            paths,
-                        });
-                    }
-                });
+                read_offer(
+                    &offer,
+                    URI_LIST,
+                    &state.connection,
+                    TEXT_LIMIT,
+                    move |bytes| {
+                        let list = String::from_utf8_lossy(&bytes);
+                        let paths = paths(&list);
+                        if !paths.is_empty() {
+                            events.send(Event::Dropped {
+                                task_id,
+                                package,
+                                paths,
+                            });
+                        }
+                    },
+                );
                 if finished.version() >= 3 {
                     finished.finish();
                 }
@@ -360,21 +390,25 @@ impl Dispatch<WlDataOffer, OfferTypes> for State {
     }
 }
 
-impl Dispatch<WlDataSource, Arc<String>> for State {
+impl Dispatch<WlDataSource, Arc<Clip>> for State {
     fn event(
         state: &mut Self,
         source: &WlDataSource,
         event: wl_data_source::Event,
-        text: &Arc<String>,
+        clip: &Arc<Clip>,
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         match event {
             wl_data_source::Event::Send { fd, .. } => {
-                let text = text.clone();
+                let clip = Arc::clone(clip);
                 std::thread::spawn(move || {
                     let mut file = std::fs::File::from(fd);
-                    let _ = file.write_all(text.as_bytes());
+                    let bytes: &[u8] = match &*clip {
+                        Clip::Text(text) => text.as_bytes(),
+                        Clip::Image(png) => png,
+                    };
+                    let _ = file.write_all(bytes);
                 });
             }
             wl_data_source::Event::Cancelled => {

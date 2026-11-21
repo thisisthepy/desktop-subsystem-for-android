@@ -3,9 +3,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dsa_host_core::host_config::HostConfigFile;
+use dsa_host_core::memory::start_mb;
 use dsa_host_windows::host_config::{
-    expand_locations, host_sized_memory_mb, page_reporting_order_for_build, profile_disk,
-    HostConfig,
+    expand_locations, page_reporting_order_for_build, profile_disk, HostConfig,
 };
 use dsa_host_windows::vm::GuestArch;
 
@@ -27,7 +28,7 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
     // Without memory_mb and without a user limit, the VM starts at its 2 GiB default.
-    assert_eq!(vm.memory_mb, host_sized_memory_mb(0));
+    assert_eq!(vm.memory_mb, start_mb(0));
     assert_eq!(vm.memory_mb, 2048);
     assert!([0, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
@@ -309,8 +310,8 @@ fn fr14_the_vm_boots_the_image_folder_it_is_given() {
         PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("image-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let files = config.image_files(Some(&dir));
-    assert_eq!(files.system_image, Some(dir.join("system.vhdx")));
+    let files = config.image_files(Some(&dir)).unwrap();
+    assert_eq!(files.system_disk, Some(dir.join("system.vhdx")));
     assert_eq!(files.disk_template, None);
     assert_eq!(
         files.kernel,
@@ -319,7 +320,7 @@ fn fr14_the_vm_boots_the_image_folder_it_is_given() {
     );
     std::fs::write(dir.join("bzImage"), b"kernel").unwrap();
     assert_eq!(
-        config.image_files(Some(&dir)).kernel,
+        config.image_files(Some(&dir)).unwrap().kernel,
         dir.join("bzImage"),
         "the image's own kernel"
     );
@@ -334,7 +335,7 @@ fn fr27_an_arm64_image_boots_its_own_kernel_named_image() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("Image"), b"arm64 kernel").unwrap();
     assert_eq!(
-        config.image_files(Some(&dir)).kernel,
+        config.image_files(Some(&dir)).unwrap().kernel,
         dir.join("Image"),
         "an arm64 image's kernel is named Image"
     );
@@ -372,8 +373,8 @@ fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
         r#"{"version": "17.0.0-16373615", "kernel_cmdline": "androidboot.boot_part_uuid=6b1ad5ad androidboot.fstab_suffix=dsa"}"#,
     )
     .unwrap();
-    let files = config.image_files(Some(&dir));
-    assert_eq!(files.system_image, None, "no separate system disk");
+    let files = config.image_files(Some(&dir)).unwrap();
+    assert_eq!(files.system_disk, None, "no separate system disk");
     assert_eq!(files.disk_template, Some(dir.join("disk.vhdx")));
     assert_eq!(files.initrd, Some(dir.join("initrd.img")));
     assert_eq!(
@@ -383,7 +384,7 @@ fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
 
     let user = config.user_vm("S-1-5-21-1-2-3-1001").unwrap();
     let mut vm = user.config.clone();
-    vm.system_image = files.system_image;
+    vm.system_image = files.system_disk;
     vm.initrd = files.initrd;
     vm.kernel_cmdline = files.kernel_cmdline;
     let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
@@ -592,8 +593,8 @@ fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
         r#"{"version": "17.0.0-16373615", "kernel_cmdline": "androidboot.boot_devices=vmbus androidboot.fstab_suffix=dsa", "files": {"system.vhdx": {}, "data.vhdx": {}}}"#,
     )
     .unwrap();
-    let files = config.image_files(Some(&dir));
-    assert_eq!(files.system_image, Some(dir.join("system.vhdx")));
+    let files = config.image_files(Some(&dir)).unwrap();
+    assert_eq!(files.system_disk, Some(dir.join("system.vhdx")));
     assert_eq!(files.disk_template, Some(dir.join("data.vhdx")));
     assert_eq!(files.initrd, Some(dir.join("initrd.img")));
     assert_eq!(
@@ -603,7 +604,7 @@ fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
 
     let user = config.user_vm("S-1-5-21-1-2-3-1001").unwrap();
     let mut vm = user.config.clone();
-    vm.system_image = files.system_image;
+    vm.system_image = files.system_disk;
     vm.initrd = files.initrd;
     vm.kernel_cmdline = files.kernel_cmdline;
     let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
@@ -747,8 +748,9 @@ fn fr15_a_release_list_the_user_chose_is_kept_and_reported() {
 #[cfg(windows)]
 #[test]
 fn fr15_the_service_boots_the_newer_image_an_upgrade_bundled() {
+    use dsa_host_core::host_config::updates_config;
+    use dsa_host_core::update::service::open_updates;
     use dsa_host_windows::host_config::InstalledPackage;
-    use dsa_host_windows::service::open_updates;
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("fr15-bundled-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -781,13 +783,17 @@ fn fr15_the_service_boots_the_newer_image_an_upgrade_bundled() {
     .unwrap();
     config.apply_package(&InstalledPackage::parse(REAL_PACKAGE).unwrap());
 
-    let updates = open_updates(&config, "test").unwrap().unwrap();
+    let updates = open_updates(updates_config(&config), "test")
+        .unwrap()
+        .unwrap();
     let state = updates.store.state().unwrap();
     assert_eq!(state.current.version, "17.0.0-5");
     assert_eq!(state.previous.unwrap().version, "17.0.0-1");
     assert!(state.on_trial);
     // The next start keeps it.
-    let updates = open_updates(&config, "test").unwrap().unwrap();
+    let updates = open_updates(updates_config(&config), "test")
+        .unwrap()
+        .unwrap();
     assert_eq!(updates.store.state().unwrap().current.version, "17.0.0-5");
 }
 
@@ -839,4 +845,41 @@ fn fr15_an_upgrade_from_before_the_channels_reads_the_lists_of_both_channels() {
             .installer_channel("1.0.0"),
         ReleaseChannel::Stable
     );
+}
+
+#[test]
+fn pr3_gpu_paravirtualization_is_off_unless_the_file_turns_it_on() {
+    let sid = "S-1-5-21-1-2-3-1001";
+    let config = HostConfig::parse(MINIMAL).unwrap();
+    assert!(!config.gpu_paravirtualization);
+    assert!(!config.vm_config(Some(sid)).unwrap().gpu_paravirtualization);
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dsa-hostd.example.json");
+    let example = HostConfig::parse(&std::fs::read_to_string(example).unwrap()).unwrap();
+    assert!(
+        !example.gpu_paravirtualization,
+        "no installation turns it on"
+    );
+    let json = MINIMAL.replace("\n}", ",\n  \"gpu_paravirtualization\": true\n}");
+    let config = HostConfig::parse(&json).unwrap();
+    assert!(config.gpu_paravirtualization);
+    assert!(config.vm_config(Some(sid)).unwrap().gpu_paravirtualization);
+    let user = config.user_vm_with(sid, &profiles).unwrap();
+    assert!(user.config.gpu_paravirtualization);
+}
+
+#[test]
+fn d9_an_image_of_another_architecture_is_refused_before_boot() {
+    let config = HostConfig::parse(UPDATING).unwrap();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("other-arch-image-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let other = if cfg!(target_arch = "aarch64") {
+        "x86_64"
+    } else {
+        "arm64"
+    };
+    std::fs::write(dir.join("image.json"), format!(r#"{{"arch": "{other}"}}"#)).unwrap();
+    let why = config.image_files(Some(&dir)).unwrap_err();
+    assert!(why.contains(&format!("is for {other}")), "{why}");
 }

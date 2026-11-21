@@ -19,14 +19,12 @@ use std::thread;
 use std::time::Duration;
 
 use dsa_host_core::compositor::frame_stall::is_recovery_key;
-use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
 use dsa_host_core::tasks::PinShortcutRequest;
 use dsa_host_core::update::alerts::is_update_key;
-use dsa_host_unix::socket::UnixLocalConnector;
 
-use super::hosts::BUILD;
+use super::hosts::connect;
 use super::launch::AppLauncher;
 use super::log;
 use crate::shell::notifications::{NotificationCenter, Response, UPDATES_URL};
@@ -66,15 +64,6 @@ fn answer_pin(
 
 /// How long to wait for the service before trying again.
 const RETRY: Duration = Duration::from_secs(2);
-/// How long one call to the service may take.
-const TIMEOUT: Duration = Duration::from_secs(5);
-
-fn connect(host_api: &Path) -> Result<HostApiClient, String> {
-    let mut connector = UnixLocalConnector {
-        path: host_api.to_path_buf(),
-    };
-    HostApiClient::connect(&mut connector, BUILD, TIMEOUT).map_err(|e| e.to_string())
-}
 
 /// Opens the settings app on its Updates page, through its URL scheme, which reaches it whether
 /// it runs already (in the menu bar) or has to start.

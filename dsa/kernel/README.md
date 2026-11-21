@@ -8,7 +8,10 @@ kernel, and the user's WSL kernel is not touched.
 | `wsl-kernel.tag` | The WSL kernel tag the source comes from |
 | `android.config` | The options merged on top of that tag's `Microsoft/config-wsl` (x86_64) or `Microsoft/config-wsl-arm64` (arm64) |
 | `android-arm64.config` | The options the arm64 kernel adds after `android.config` |
-| `virtio.config` | The virtio drivers the macOS host's VM needs, merged last for both architectures |
+| `virtio.config` | The virtio drivers the macOS host's VM needs, merged after those for both architectures |
+| `dxg.config` | Hyper-V's paravirtualized GPU driver (dxgkrnl, `/dev/dxg`), merged last for both architectures. It is idle unless the host gives the VM a GPU (experimental, off by default) |
+| `android-debug.config` | Memory debugging (`CONFIG_DEBUG_VM`, `CONFIG_KFENCE`, `CONFIG_PAGE_OWNER`, `CONFIG_DEBUG_LIST`), merged only by `build.sh --debug`, never into the shipped kernel |
+| `android-memory-profile.config` | Memory allocation profiling (`CONFIG_MEM_ALLOC_PROFILING`, `/proc/allocinfo`), merged only by `build.sh --memory-profile`, never into the shipped kernel |
 | `patches/` | Small patches applied to the pinned source before configuration, the same for both architectures |
 | `apply-patches.sh` | Leaves a checkout of the tag with the whole patch series applied, however often it runs; the patches stack (several change `mm/page_reporting.c`), so it checks the series as a whole, not one patch at a time |
 | `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` (x86_64) or `Image` (arm64) |
@@ -127,21 +130,33 @@ in probe order, which changes when the host attaches another disk.
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.
 - **Everything built in.** The VM boots one image with no modules, so options
   `config-wsl` builds as modules, and their dependencies, are set to `y`.
-- **The computer's memory for Google Play.** Google Play gives a device under 8 GB a Chrome
-  whose browser is 32-bit, which this 64-bit only guest cannot run, and the VM starts small
-  and grows, so its size is not the computer's. `patches/dsa-host-memory.patch` adds
-  `fs/proc/dsa_host_memory.c`: a process whose uid is in
-  `/sys/module/dsa_host_memory/parameters/uids` sees `total_kb`, the computer's physical
-  memory, as `MemTotal` in `/proc/meminfo` and as the total of `sysinfo()`. The host passes
-  `total_kb` in the bootconfig (`kernel.dsa_host_memory.total_kb`); init writes the uids the
-  guest's control daemon names (the Play Store and Play services). Only the total changes, and
-  only for those uids, so lmkd and every other process see the VM's real memory.
+- **The memory the guest may grow to, for apps.** Apps decide by the device's memory: a game
+  refuses to start under its requirement, and Google Play gives a device under 8 GB a Chrome
+  whose browser is 32-bit, which this 64-bit only guest cannot run. The VM starts small and
+  grows, so its size is not what an app may use. `patches/dsa-host-memory.patch` adds
+  `fs/proc/dsa_host_memory.c`: every app process (app ID 10000 or more, for every Android
+  user) sees `total_kb`, the memory the VM may grow to, as `MemTotal` in `/proc/meminfo` and
+  as the total of `sysinfo()`, and what the VM may still grow is added to its free and
+  available memory. The apps in `/sys/module/dsa_host_memory/parameters/uids` (the Play Store
+  and Play services) see `store_total_kb`, the computer's physical memory, as their total. The
+  host passes both in the bootconfig (`kernel.dsa_host_memory.*`); init writes the uids the
+  guest's control daemon names. System processes, and the apps in `real_uids` (DSA's agent,
+  which reports the guest's memory to the host), see the VM's real memory, so lmkd and
+  Android's own memory management are unchanged.
 - **Bootconfig**, which carries each boot's control channel secret from the host. The
   guest reads it from `/proc/bootconfig`, which apps cannot read.
 - **Its own release name** (`-dsa`), so it is never mistaken for the WSL kernel.
 - **pstore on a disk (pstore/blk)**, so the kernel's last messages, an oops's report and
   Android's last log lines (pmsg) are kept on a small disk and shown in `/sys/fs/pstore` at
   the next boot. `dsa logs collect` carries what is there, and the guest then clears it.
+- **A kernel sized for the VM.** The kernel's own memory stays resident for the VM's whole
+  life, so the fragment leaves out what config-wsl carries for a WSL distribution on any
+  machine: room for 512 processors and 1024 NUMA nodes (`CONFIG_NR_CPUS=64`, no NUMA; the VM
+  has 4 processors by default and one node), unmerged slab caches and per-CPU partial slab
+  lists, the function tracer's per-function records, the virtual terminals and the
+  framebuffer layer (with which vkms also kept an fbdev buffer nobody draws), and, on arm64,
+  KVM. Tracepoints, BTF, kallsyms and `/proc/slabinfo` stay, because atrace, perfetto, netd
+  and the memory measurement use them. `android.config` says why each one goes.
 
 ## The pstore disk
 
@@ -150,7 +165,7 @@ once, so the next start is a new VM with empty memory. A log kept in RAM (ramoop
 gone by then, so the kernel keeps it on a disk instead.
 
 The host attaches `pstore.vhd`, beside the user's Android disk, as the last disk of the VM
-(`dsa/host/platform/windows/src/pstore_disk.rs`). It is a fixed VHD of 4 MiB, so it never
+(`dsa/host/core/src/disk/pstore.rs`). It is a fixed VHD of 4 MiB, so it never
 grows, with one GPT partition whose UUID is fixed. The host names that partition on the kernel
 command line:
 
@@ -193,7 +208,21 @@ region has to be reserved on either architecture.
 dsa/kernel/build.sh --config-only               # merge and check, about a minute
 dsa/kernel/build.sh                             # also build bzImage, tens of minutes
 dsa/kernel/build.sh --arch arm64 [--config-only] # the same for arm64 (Image)
+dsa/kernel/build.sh [--arch arm64] --debug       # with android-debug.config, for chasing memory bugs
+dsa/kernel/build.sh [--arch arm64] --memory-profile # with android-memory-profile.config, /proc/allocinfo
 ```
+
+`--memory-profile` merges `android-memory-profile.config`: memory allocation profiling, on
+from boot. `/proc/allocinfo` then lists every page and slab allocation by the source line that
+made it, which is how the kernel memory `/proc/meminfo` names no line for (drivers, DMA, page
+structs) can be told apart. `dsa-channeld --memory-report` writes its largest sites to the
+kernel log as `allocinfo` lines. The profiling takes about 1% of the guest's memory itself,
+so compare what each site holds, not the totals.
+
+`--debug` merges `android-debug.config` last, and `--extra-config FILE` (or
+`DSA_KERNEL_EXTRA_CONFIG`) any other fragment. Such a kernel builds and lands in directories of
+its own (`build-<arch>-extra`, `out-extra`), so it never replaces the shipped kernel. It is
+slower and larger, and only for reproducing a memory bug.
 
 The check fails when any line of `android.config` did not survive the merge, which is how
 Kconfig reports a missing dependency: by silently dropping the option. It also fails if

@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Démarrer</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Redémarrer</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android s&apos;arrête puis redémarre.
+
+Ses fenêtres d&apos;applications se ferment. Rouvrez les applications une fois qu&apos;il a démarré.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Arrêter</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Android n'a pas pu démarrer. Réessayez, et consultez les détails si le problème persiste.</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Cet ordinateur n'a pas pu exécuter Android. Le problème vient de l'ordinateur, pas d'Android ; la version d'Android utilisée est conservée. Consultez les détails pour la raison.</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Détails</value>
@@ -262,6 +273,9 @@ DSA télécharge une autre image s'il en existe une. La prochaine version de DSA
   <data name="Memory_Shared" xml:space="preserve">
     <value>Mémoire partagée</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Mémoire partagée par plusieurs processus, comme les images des fenêtres et les tampons graphiques. Elle est libérée quand les applis qui l'utilisent se ferment.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Mémoire compressée</value>
   </data>
@@ -270,6 +284,9 @@ DSA télécharge une autre image s'il en existe une. La prochaine version de DSA
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Libre</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Mémoire que rien n'utilise pour l'instant. Android la rend au PC, elle n'occupe donc pas sa RAM.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Processus {0}</value>
@@ -747,7 +764,10 @@ Réinstallez Google Play.</value>
     <value>Android ID : {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>L'Android ID s'affiche ici une fois Google Play installé et Android démarré avec lui.</value>
+    <value>L'Android ID n'est pas encore disponible. Les services Google Play le créent quand cet appareil se connecte à Google pour la première fois.
+Il faut pour cela Google Play installé, Android démarré avec lui et une connexion réseau.
+S'il reste vide quelques minutes plus tard, redémarrez Android.
+L'ID est un nombre décimal, le format qu'accepte la page d'enregistrement de Google.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Développeur</value>
@@ -850,14 +870,26 @@ Automatique : jusqu'à la mémoire de ce PC moins ce que garde Windows. S'appliq
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Piles des threads</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Espace de travail que le noyau garde pour chaque thread en cours. Il diminue quand des applis se ferment.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Tables de pages</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Les tables qui indiquent au processeur où se trouve en RAM la mémoire de chaque appli. Elles diminuent quand des applis se ferment.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Mappages du noyau (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Grands tampons que le noyau et ses pilotes mettent de côté, entre autres pour l'affichage. Ils sont libérés quand ils ne servent plus.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Données par processeur</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Données que le noyau garde une fois par cœur de processeur. Leur taille est fixée au démarrage d'Android.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Pilotes</value>
@@ -2303,7 +2335,7 @@ Activez-la sous Applications ARM, redémarrez Android, puis réinstallez l'appli
     <value>La version prise en charge la plus récente (actuellement Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} et ses mises à jour de sécurité</value>
+    <value>Fixé sur Android {0} : ses mises à jour de sécurité et d'image, jamais un Android plus récent de lui-même</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Mise à jour d'Android</value>
@@ -2604,5 +2636,32 @@ Obtenez la version x86_64 ou arm64-v8a de l'application.</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Tous les fichiers</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Magasins alternatifs</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Un magasin se supprime depuis la liste des apps.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Non installé</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Installé</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Installé, version {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Téléchargement et installation…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Non installé : {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Installer</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Ouvrir</value>
   </data>
 </root>

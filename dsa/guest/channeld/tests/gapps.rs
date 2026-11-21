@@ -158,3 +158,52 @@ fn fr32_only_the_agent_says_the_device_id_and_no_client_says_where_the_apps_stan
         .from_guest(peer, dsa_protocol::encode(&Envelope { body: Some(id) }))
         .is_err());
 }
+
+fn agent_router(
+    read: impl Fn() -> Option<String> + Send + Sync + 'static,
+) -> (Router, mpsc::Receiver<Vec<u8>>) {
+    let (to_host, from_guest) = mpsc::channel();
+    let router = Router::new(to_host, |_| Ok(())).on_google_device_id(read);
+    (router, from_guest)
+}
+
+fn device_id_sent_to_host(from_guest: &mpsc::Receiver<Vec<u8>>) -> String {
+    match dsa_protocol::decode(&from_guest.try_recv().unwrap())
+        .unwrap()
+        .body
+    {
+        Some(Body::GoogleDeviceId(id)) => id.id,
+        other => panic!("expected GoogleDeviceId, got {other:?}"),
+    }
+}
+
+fn agent_says_device_id(router: &Router, id: &str) {
+    let answer = Body::GoogleDeviceId(GoogleDeviceId { id: id.into() });
+    router
+        .from_guest(
+            dsa_guest_channeld::router::Peer(1),
+            dsa_protocol::encode(&Envelope { body: Some(answer) }),
+        )
+        .unwrap();
+}
+
+#[test]
+fn fr32_an_empty_device_id_from_the_agent_is_filled_in_from_googles_own_files() {
+    let (router, from_guest) = agent_router(|| Some("4562097385933913176".to_string()));
+    agent_says_device_id(&router, "");
+    assert_eq!(device_id_sent_to_host(&from_guest), "4562097385933913176");
+}
+
+#[test]
+fn fr32_a_device_id_the_agent_read_is_passed_on_as_it_is() {
+    let (router, from_guest) = agent_router(|| Some("999".to_string()));
+    agent_says_device_id(&router, "123");
+    assert_eq!(device_id_sent_to_host(&from_guest), "123");
+}
+
+#[test]
+fn fr32_with_no_id_anywhere_the_host_still_hears_the_empty_answer() {
+    let (router, from_guest) = agent_router(|| None);
+    agent_says_device_id(&router, "");
+    assert_eq!(device_id_sent_to_host(&from_guest), "");
+}

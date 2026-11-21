@@ -83,6 +83,7 @@ use crate::background::{
     self, BackgroundApp, BackgroundCommand, BackgroundEvent, BackgroundWatch, MediaCommand,
     MediaSession, Playback,
 };
+use crate::clipboard::Clip;
 use crate::data_reset::{UserDataReset, RESET_STOP_WAIT};
 use crate::device_identity::{
     ComputerSource, DeviceIdentity, DeviceIdentityStore, IdentityReport, ImageBuild,
@@ -161,6 +162,11 @@ pub trait UserAndroid: Send + Sync {
         None
     }
     fn start(&self);
+    /// As [`UserAndroid::start`], and `reason` says who asked, for the log.
+    fn start_because(&self, reason: &str) {
+        let _ = reason;
+        self.start();
+    }
     fn stop(&self);
     /// News about the Android image for the user, if there is any.
     fn update_notice(&self) -> Option<String> {
@@ -250,6 +256,17 @@ pub trait UserAndroid: Send + Sync {
     /// The text this Android copies from now on, while the clipboard is shared. `None` when
     /// this Android does not share its clipboard at all.
     fn watch_clipboard(&self) -> Option<Receiver<String>>;
+    /// The user's host clipboard got an image, as PNG, for this Android to take while the
+    /// clipboard is shared. An Android that shares only text drops it.
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        let _ = png;
+    }
+    /// The text and the images this Android copies from now on, while the clipboard is
+    /// shared. `None` when this Android shares only text, or nothing; its text then comes from
+    /// [`UserAndroid::watch_clipboard`].
+    fn watch_clips(&self) -> Option<Receiver<crate::clipboard::Clip>> {
+        None
+    }
     /// Lets the web links apps in this Android open go to apps in it (`on`), or to the host,
     /// as the user's setting says.
     fn links_in_android(&self, on: bool) {
@@ -747,6 +764,12 @@ pub trait UserAndroid: Send + Sync {
         let _ = filter;
         None
     }
+    /// Why this Android's log is not coming, when it is known: Android was stopped because
+    /// its image speaks another protocol than this host. A reader of the log is told, since
+    /// otherwise it waits for records that cannot come.
+    fn log_problem(&self) -> Option<String> {
+        None
+    }
     /// Asks this Android for everything its log holds now that passes `filter`.
     fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, TaskRequestError> {
         let _ = filter;
@@ -865,11 +888,16 @@ impl UserAndroid for Session {
     /// On a stopped session, returns once it has moved on, so that what the caller reads
     /// next is the start's progress or its failure, never the state from before it.
     fn start(&self) {
+        // Named through the trait: `self.start_because` would pick Session's own method,
+        // which only sends the request and returns before the session has moved on.
+        UserAndroid::start_because(self, "a start request");
+    }
+    fn start_because(&self, reason: &str) {
         if Session::state(self) != SessionState::Stopped {
-            return Session::start(self);
+            return Session::start_because(self, reason);
         }
         let events = self.events();
-        Session::start(self);
+        Session::start_because(self, reason);
         let _ = events.recv_timeout(Duration::from_secs(5));
     }
     fn stop(&self) {
@@ -883,6 +911,9 @@ impl UserAndroid for Session {
     }
     fn watch_log(&self, filter: LogFilter) -> Option<LogWatch> {
         Some(Session::watch_log(self, filter))
+    }
+    fn log_problem(&self) -> Option<String> {
+        Session::log_problem(self)
     }
     fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, TaskRequestError> {
         Session::dump_log(self, filter).map_err(request_error)
@@ -925,6 +956,12 @@ impl UserAndroid for Session {
     }
     fn watch_clipboard(&self) -> Option<Receiver<String>> {
         Some(Session::watch_clipboard(self))
+    }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        Session::host_clipboard_image(self, png)
+    }
+    fn watch_clips(&self) -> Option<Receiver<crate::clipboard::Clip>> {
+        Some(Session::watch_clips(self))
     }
     fn watch_location(&self) -> Option<Receiver<Wanted>> {
         Some(Session::watch_location(self))
@@ -2663,10 +2700,13 @@ impl HostApiService {
 
     /// Serves one client until it disconnects or breaks the protocol.
     pub fn serve_connection(&self, mut connection: Box<dyn Connection>, peer: Peer) {
-        if let Err(error) = service_accept(&mut *connection, &self.hello, self.handshake_timeout) {
-            eprintln!("local API: refused a client of {}: {error}", peer.user);
-            return;
-        }
+        let client = match service_accept(&mut *connection, &self.hello, self.handshake_timeout) {
+            Ok(hello) => hello.build,
+            Err(error) => {
+                eprintln!("local API: refused a client of {}: {error}", peer.user);
+                return;
+            }
+        };
         loop {
             let frame = match connection.recv(None) {
                 Ok(frame) => frame,
@@ -2791,7 +2831,7 @@ impl HostApiService {
             if let Some(request::Body::OpenFile(open)) = &request.body {
                 return self.open_file(connection, &peer, request.id, open.clone());
             }
-            let response = self.answer(&peer, request);
+            let response = self.answer(&peer, &client, request);
             if send(&mut *connection, Body::Response(response)).is_err() {
                 return;
             }
@@ -3402,19 +3442,22 @@ impl HostApiService {
         }
     }
 
-    /// Answers a WatchClipboard request, then passes the text the client copies to its
-    /// Android, and the text its Android copies to the client, until the client goes away.
-    /// What the client sends that is not clipboard text closes the connection; a frame that
-    /// cannot be read is dropped.
+    /// Answers a WatchClipboard request, then passes the text and the images the client copies
+    /// to its Android, and those its Android copies to the client, until the client goes away.
+    /// What the client sends that is neither closes the connection; a frame that cannot be read
+    /// is dropped.
     fn watch_clipboard(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
         let watched = match self.androids.android(&peer.user) {
             Err(why) => Err(error(ErrorCode::Unavailable, why)),
-            Ok(android) => match android.watch_clipboard() {
-                Some(watch) => Ok((android, watch)),
-                None => Err(error(
-                    ErrorCode::Unavailable,
-                    "this Android does not share its clipboard".into(),
-                )),
+            Ok(android) => match android.watch_clips() {
+                Some(watch) => Ok((android, ClipWatch::Clips(watch))),
+                None => match android.watch_clipboard() {
+                    Some(watch) => Ok((android, ClipWatch::Text(watch))),
+                    None => Err(error(
+                        ErrorCode::Unavailable,
+                        "this Android does not share its clipboard".into(),
+                    )),
+                },
             },
         };
         let (android, watch) = match watched {
@@ -3440,8 +3483,13 @@ impl HostApiService {
         loop {
             loop {
                 match watch.try_recv() {
-                    Ok(text) => {
-                        let frame = Body::ClipboardText(types::ClipboardText { text });
+                    Ok(clip) => {
+                        let frame = match clip {
+                            Clip::Text(text) => Body::ClipboardText(types::ClipboardText { text }),
+                            Clip::Image(png) => {
+                                Body::ClipboardImage(types::ClipboardImage { png: png.to_vec() })
+                            }
+                        };
                         if send(&mut *connection, frame).is_err() {
                             return;
                         }
@@ -3462,10 +3510,13 @@ impl HostApiService {
                 Ok(Envelope {
                     body: Some(Body::ClipboardText(clip)),
                 }) => android.host_clipboard(clip.text),
+                Ok(Envelope {
+                    body: Some(Body::ClipboardImage(image)),
+                }) => android.host_clipboard_image(image.png),
                 Ok(_) => {
                     eprintln!(
-                        "local API: a client of {} sent something other than clipboard text on \
-                         a connection that carries the clipboard; closing its connection",
+                        "local API: a client of {} sent something other than a clip on a \
+                         connection that carries the clipboard; closing its connection",
                         peer.user
                     );
                     connection.close();
@@ -3481,7 +3532,24 @@ impl HostApiService {
             }
         }
     }
+}
 
+/// What an Android copies, as text only or as text and images.
+enum ClipWatch {
+    Text(Receiver<String>),
+    Clips(Receiver<Clip>),
+}
+
+impl ClipWatch {
+    fn try_recv(&self) -> Result<Clip, TryRecvError> {
+        match self {
+            ClipWatch::Text(watch) => watch.try_recv().map(Clip::Text),
+            ClipWatch::Clips(watch) => watch.try_recv(),
+        }
+    }
+}
+
+impl HostApiService {
     /// Answers a WatchLocation request, then tells the client each time its Android starts or
     /// stops wanting the location, and passes the positions and statuses the client sends to
     /// its Android, until the client goes away. A position that is not on Earth is dropped,
@@ -5168,7 +5236,7 @@ impl HostApiService {
         connection.close();
     }
 
-    fn answer(&self, peer: &Peer, request: Request) -> Response {
+    fn answer(&self, peer: &Peer, client: &str, request: Request) -> Response {
         let body = match request.body {
             None => error(
                 ErrorCode::UnknownRequest,
@@ -5445,7 +5513,10 @@ impl HostApiService {
                 Ok(android) => {
                     match body {
                         request::Body::GetStatus(_) => {}
-                        request::Body::StartSession(_) => android.start(),
+                        request::Body::StartSession(_) => android.start_because(&format!(
+                            "{client} of {} through the local API",
+                            peer.user
+                        )),
                         request::Body::StopSession(_) => android.stop(),
                         request::Body::UpdateProgram(_)
                         | request::Body::GetVmId(_)
@@ -7360,6 +7431,36 @@ impl ClientError {
     }
 }
 
+/// How long Android may take to start before opening an app gives up.
+pub const APP_START_ANDROID: Duration = Duration::from_secs(360);
+
+/// Makes sure the caller's Android runs before one of its apps opens. An app opened from its
+/// shortcut or bundle is the user asking for Android, so a stopped Android (never started,
+/// stopped by a crash, or left stopped by a restart of the service) is started and waited
+/// for. `api` reaches the service, `build` names the caller, and `waiting` is called once when
+/// it has to wait, so the caller can show that something is happening. Every host's window
+/// program calls this before it asks for the app, so the app's window opens once Android is
+/// ready.
+pub fn ensure_android_for_app(
+    api: &mut dyn Connector,
+    build: &str,
+    timeout: Duration,
+    poll: Duration,
+    mut waiting: impl FnMut(),
+) -> Result<(), String> {
+    let mut client = HostApiClient::connect(api, build, Duration::from_secs(5))
+        .map_err(|e| format!("Android cannot be started: {e}"))?;
+    let mut told = false;
+    client
+        .ensure_running(timeout, poll, |_| {
+            if !told {
+                told = true;
+                waiting();
+            }
+        })
+        .map_err(|e| format!("Android did not start: {e}"))
+}
+
 /// The client end of the local API.
 pub struct HostApiClient {
     connection: Box<dyn Connection>,
@@ -9180,9 +9281,37 @@ impl ClipboardStream {
         .map_err(ClientError::Transport)
     }
 
-    /// The next text the caller's Android copied, waiting at most `timeout`. `Ok(None)` means
-    /// none came in time; an error means the connection has ended.
+    /// Says that the host's clipboard got an image, as PNG. Nothing is awaited. A PNG that may
+    /// not cross (longer than [`MAX_IMAGE_BYTES`](crate::clipboard::MAX_IMAGE_BYTES), or not a
+    /// PNG) is refused here and nothing is sent. An error of the transport means the connection
+    /// has ended, and a new one is needed.
+    pub fn send_image(&mut self, png: &[u8]) -> Result<(), ClientError> {
+        crate::clipboard::check_image(png).map_err(ClientError::Malformed)?;
+        send(
+            &mut *self.connection,
+            Body::ClipboardImage(types::ClipboardImage { png: png.to_vec() }),
+        )
+        .map_err(ClientError::Transport)
+    }
+
+    /// The next text the caller's Android copied, waiting at most `timeout`; images it copied
+    /// meanwhile are passed over. `Ok(None)` means none came in time; an error means the
+    /// connection has ended.
     pub fn next(&mut self, timeout: Duration) -> Result<Option<String>, ClientError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.next_clip(left)? {
+                Some(Clip::Text(text)) => return Ok(Some(text)),
+                Some(Clip::Image(_)) if !left.is_zero() => continue,
+                _ => return Ok(None),
+            }
+        }
+    }
+
+    /// The next text or image the caller's Android copied, waiting at most `timeout`.
+    /// `Ok(None)` means none came in time; an error means the connection has ended.
+    pub fn next_clip(&mut self, timeout: Duration) -> Result<Option<Clip>, ClientError> {
         let frame = match self.connection.recv(Some(timeout)) {
             Ok(frame) => frame,
             Err(TransportError::Timeout) => return Ok(None),
@@ -9191,8 +9320,11 @@ impl ClipboardStream {
         match decode(&frame) {
             Ok(Envelope {
                 body: Some(Body::ClipboardText(clip)),
-            }) => Ok(Some(clip.text)),
-            Ok(_) => Err(ClientError::Malformed("expected clipboard text".into())),
+            }) => Ok(Some(Clip::Text(clip.text))),
+            Ok(Envelope {
+                body: Some(Body::ClipboardImage(image)),
+            }) => Ok(Some(Clip::Image(image.png.into()))),
+            Ok(_) => Err(ClientError::Malformed("expected a clip".into())),
             Err(error) => Err(ClientError::Malformed(error.to_string())),
         }
     }

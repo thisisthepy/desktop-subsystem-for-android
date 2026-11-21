@@ -29,8 +29,10 @@ data class NativeCrash(val packageName: String, val detail: String)
  * library", since its 64-bit library holds only WebView. Android writes each crash of
  * a user app to its dropbox as `data_app_crash` (Java) or `data_app_native_crash` (native), with
  * a header naming the package; only those records, and of them only the ones that name a library
- * that did not load, are reported. An app that keeps crashing is reported once every
- * [REPEAT_MILLIS], and the agent's own crashes never.
+ * that did not load, are reported. Every such crash is reported, so the host can show its notice
+ * each time the app fails; the host holds back repeats within its own burst. Only a crash within
+ * [REPEAT_MILLIS] of the last reported one of the same app (the same record delivered twice, or a
+ * tight crash loop) is dropped. The agent's own crashes are never reported.
  *
  * Every method runs on the agent's scheduler thread.
  */
@@ -62,8 +64,11 @@ class NativeLibraryCrashes(
     }
 
     companion object {
-        /** How long an app that crashed the same way is not reported again. */
-        const val REPEAT_MILLIS = 5 * 60 * 1000L
+        /**
+         * How long after a reported crash another of the same app is taken as the same record or a
+         * tight loop. Far under the host's notice burst (20 s), so a later crash is always reported.
+         */
+        const val REPEAT_MILLIS = 5 * 1000L
 
         /** The dropbox tags of the crashes of apps the user installed. */
         val TAGS = setOf("data_app_crash", "data_app_native_crash")

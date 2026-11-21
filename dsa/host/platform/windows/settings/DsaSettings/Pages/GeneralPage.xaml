@@ -27,11 +27,12 @@
                     </ui:CardControl.Header>
                     <StackPanel Style="{StaticResource CardControls}">
                         <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
-                                         Visibility="{Binding IsBusy, Converter={StaticResource Visible}}"
+                                         Visibility="{Binding ShowsProgress, Converter={StaticResource Visible}}"
                                          AutomationProperties.Name="{l:Text GeneralStateCard.Header}" />
                         <TextBlock Text="{Binding StateText, Mode=OneWay}" Margin="0,0,12,0" Style="{StaticResource CardValue}" />
-                        <ui:Button Content="{l:Text StartButton.Content}" Appearance="Primary" Click="OnStart" Margin="0,0,8,0"
-                                   IsEnabled="{Binding CanStart, Mode=OneWay}" />
+                        <ui:Button Content="{Binding StartButtonText, Mode=OneWay}" Appearance="Primary" Click="OnStart" Margin="0,0,8,0"
+                                   AutomationProperties.Name="{Binding StartButtonText, Mode=OneWay}"
+                                   IsEnabled="{Binding CanPressStart, Mode=OneWay}" />
                         <ui:Button Content="{l:Text StopButton.Content}" Click="OnStop" IsEnabled="{Binding CanStop, Mode=OneWay}" />
                     </StackPanel>
                 </ui:CardControl>

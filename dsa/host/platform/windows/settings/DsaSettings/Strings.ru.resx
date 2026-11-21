@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Запустить</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Перезапустить</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android остановится и запустится снова.
+
+Окна его приложений закроются. Откройте приложения снова, когда он запустится.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Остановить</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Не удалось запустить Android. Повторите попытку, а если ошибка повторится, посмотрите подробности.</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Этому компьютеру не удалось запустить Android. Проблема в компьютере, а не в Android; используемая версия Android сохраняется. Причина указана в подробностях.</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Подробности</value>
@@ -262,6 +273,9 @@ DSA скачает другой образ, если он есть. Следую
   <data name="Memory_Shared" xml:space="preserve">
     <value>Общая память</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Память, которую используют сразу несколько процессов, например изображения окон и графические буферы. Освобождается, когда использующие её приложения закрываются.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Сжатая память</value>
   </data>
@@ -270,6 +284,9 @@ DSA скачает другой образ, если он есть. Следую
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Свободно</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Память, которую сейчас ничто не использует. Android возвращает её компьютеру, поэтому она не занимает его оперативную память.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Процесс {0}</value>
@@ -747,7 +764,10 @@ DSA не распространяет их. Публичный пакет LiteGa
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android ID появится здесь, когда Google Play будет установлен и Android запустится с ним.</value>
+    <value>Android ID пока недоступен. Сервисы Google Play создают его, когда это устройство впервые регистрируется в Google.
+Для этого нужны установленный Google Play, Android, запущенный вместе с ним, и подключение к сети.
+Если через несколько минут ID всё ещё пуст, перезапустите Android.
+ID это десятичное число, формат, который принимает страница регистрации Google.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Для разработчиков</value>
@@ -850,14 +870,26 @@ DSA не распространяет их. Публичный пакет LiteGa
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Стеки потоков</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Рабочее место, которое ядро держит для каждого работающего потока. Уменьшается, когда приложения закрываются.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Таблицы страниц</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Таблицы, по которым процессор находит память каждого приложения в ОЗУ. Уменьшаются, когда приложения закрываются.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Отображения ядра (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Большие буферы, которые выделяют ядро и его драйверы, в том числе для графики. Освобождаются, когда больше не нужны.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Данные для каждого ЦП</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Данные, которые ядро держит по одной копии на каждое ядро процессора. Их размер задаётся при запуске Android.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Драйверы</value>
@@ -2303,7 +2335,7 @@ Android сейчас остановится, а при следующем зап
     <value>Новейшая поддерживаемая версия (сейчас Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} и его обновления безопасности</value>
+    <value>Закреплено на Android {0}: только его обновления безопасности и образа, без самостоятельного перехода на более новый Android</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Обновление Android</value>
@@ -2604,5 +2636,32 @@ Android его отклонит.</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Все файлы</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Альтернативные магазины</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Удалить магазин можно в списке приложений.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Не установлен</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Установлен</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Установлен, версия {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Загрузка и установка…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Не установлен: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Установить</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Открыть</value>
   </data>
 </root>

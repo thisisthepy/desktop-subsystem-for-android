@@ -116,13 +116,8 @@ pub fn read_note(path: &Path) -> Note {
 }
 
 fn write_note(path: &Path, note: &Note) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    }
     let text = serde_json::to_string_pretty(note).unwrap_or_default();
-    let fresh = path.with_extension("json.new");
-    fs::write(&fresh, text)
-        .and_then(|()| fs::rename(&fresh, path))
+    dsa_host_core::file_write::replace_in_new_folder(path, text.as_bytes(), "json.new")
         .map_err(|e| format!("could not write {}: {e}", path.display()))
 }
 

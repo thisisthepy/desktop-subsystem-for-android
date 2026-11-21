@@ -112,6 +112,13 @@ pub struct BandSample {
     pub range: Option<(u16, u16)>,
 }
 
+/// The colour a window paints over its title bar band, from what it read there (`sample`):
+/// the app's top colour while the app leaves the band empty, and none over an app that draws
+/// its own title bar (`app_drawn`), which is never filled over. Every host paints the same.
+pub fn shown_band_fill(sample: BandSample, app_drawn: bool) -> Option<u32> {
+    sample.fill.filter(|_| !app_drawn)
+}
+
 /// Samples of a frame's band (`band`, from inside it) and of the row under it (`below`), each
 /// 0xAARRGGBB, as a window reads them.
 pub fn band_sample(band: &[u32], below: &[u32]) -> BandSample {
@@ -539,6 +546,163 @@ pub struct CaptionBand {
     pub height: u32,
     pub start_width: u32,
     pub end_width: u32,
+}
+
+impl CaptionBand {
+    /// The band a window that lets its OS place the parts over the band is told about:
+    /// `height` units high, in a window `width` units wide, at `scale` pixels a unit. `items`
+    /// are the left and right edges (units from the window's left) of what the OS keeps over
+    /// the band. An item in the left half of the band counts toward `start_width`, how far in
+    /// from the band's left end it reaches; one in the right half toward `end_width`, from the
+    /// right end. `gap` is the space left after the outermost item, so an app's controls
+    /// never touch it. A window that shows no band (a non-positive or non-finite size) gets an
+    /// empty one; a bad `scale` counts as 1.
+    pub fn from_items(
+        width: f64,
+        height: f64,
+        items: &[(f64, f64)],
+        scale: f64,
+        gap: f64,
+    ) -> CaptionBand {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
+            return CaptionBand::default();
+        }
+        let middle = width / 2.0;
+        let (mut start, mut end) = (0.0f64, 0.0f64);
+        for &(left, right) in items {
+            if !(left.is_finite() && right.is_finite()) || right <= left {
+                continue;
+            }
+            if (left + right) / 2.0 < middle {
+                start = start.max(right.max(0.0) + gap);
+            } else {
+                end = end.max((width - left).max(0.0) + gap);
+            }
+        }
+        let pixels = |units: f64| (units.min(width) * scale).ceil() as u32;
+        CaptionBand {
+            height: (height * scale).round() as u32,
+            start_width: pixels(start),
+            end_width: pixels(end),
+        }
+    }
+}
+
+/// A rectangle in the window's client pixels: left, top, width, height.
+pub type ClientRect = (i32, i32, u32, u32);
+
+/// One button of the title bar the window draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CaptionKind {
+    /// The back arrow in the icon's cell, while the task can go back.
+    Back,
+    /// The app's icon in its cell, which opens the window menu.
+    SystemMenu,
+    Minimize,
+    /// Maximize, or Restore while the window is maximized or fills its monitor.
+    Maximize,
+    Close,
+}
+
+impl CaptionKind {
+    /// Every kind, in the order they stand in the title bar.
+    pub const ALL: [CaptionKind; 5] = [
+        CaptionKind::Back,
+        CaptionKind::SystemMenu,
+        CaptionKind::Minimize,
+        CaptionKind::Maximize,
+        CaptionKind::Close,
+    ];
+}
+
+/// The title bar's buttons as the window draws them now: their cells in client pixels and
+/// what they say.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CaptionCells {
+    /// The icon's cell; `None` in a window too narrow for it.
+    pub icon: Option<ClientRect>,
+    /// Whether the icon's cell shows the back arrow rather than the app's icon.
+    pub back: bool,
+    /// The minimize, maximize and close buttons' cells; `None` before the window has laid
+    /// its title bar out.
+    pub buttons: Option<[ClientRect; 3]>,
+    /// Whether the window is maximized or fills its monitor, when the middle button restores.
+    pub maximized: bool,
+    /// Whether the middle button does anything: a window the user's settings fix in size
+    /// cannot be maximized, but one that fills its monitor can always leave it.
+    pub can_maximize: bool,
+    /// Whether the title bar is hidden: a window that fills its monitor shows it only once
+    /// the pointer or the keyboard brings it out.
+    pub offscreen: bool,
+}
+
+impl CaptionCells {
+    /// The buttons of a title bar laid out as `layout`, its icon's cell showing the back arrow
+    /// when `back`.
+    pub fn of(
+        layout: &CaptionLayout,
+        back: bool,
+        maximized: bool,
+        can_maximize: bool,
+        offscreen: bool,
+    ) -> CaptionCells {
+        CaptionCells {
+            icon: layout.icon_cell(),
+            back,
+            buttons: Some(CaptionButton::ALL.map(|button| layout.button_rect(button))),
+            maximized,
+            can_maximize,
+            offscreen,
+        }
+    }
+
+    /// The buttons there are, left to right.
+    pub fn kinds(&self) -> Vec<CaptionKind> {
+        CaptionKind::ALL
+            .into_iter()
+            .filter(|kind| self.cell(*kind).is_some())
+            .collect()
+    }
+
+    /// Where `kind` is drawn, in client pixels; `None` while the title bar has no such button.
+    pub fn cell(&self, kind: CaptionKind) -> Option<ClientRect> {
+        match kind {
+            CaptionKind::Back => self.icon.filter(|_| self.back),
+            CaptionKind::SystemMenu => self.icon.filter(|_| !self.back),
+            CaptionKind::Minimize => self.buttons.map(|cells| cells[0]),
+            CaptionKind::Maximize => self.buttons.map(|cells| cells[1]),
+            CaptionKind::Close => self.buttons.map(|cells| cells[2]),
+        }
+    }
+
+    /// Whether `kind` does anything when pressed now.
+    pub fn enabled(&self, kind: CaptionKind) -> bool {
+        kind != CaptionKind::Maximize || self.can_maximize
+    }
+
+    /// The button a client point (`x`, `y`) is on; none while the title bar is hidden.
+    pub fn at(&self, x: f64, y: f64) -> Option<CaptionKind> {
+        if self.offscreen {
+            return None;
+        }
+        self.kinds()
+            .into_iter()
+            .find(|kind| self.cell(*kind).is_some_and(|cell| in_cell(cell, x, y)))
+    }
+}
+
+/// Whether the client point (`x`, `y`) is in `cell`.
+pub fn in_cell(cell: ClientRect, x: f64, y: f64) -> bool {
+    let (left, top, width, height) = cell;
+    x >= left as f64
+        && x < left as f64 + width as f64
+        && y >= top as f64
+        && y < top as f64 + height as f64
 }
 
 /// What a point of a task window's title bar does, the icon's cell and an app's own title
@@ -1361,6 +1525,17 @@ fn over(bottom: [f64; 4], top: [f64; 4]) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr8_the_band_fill_is_the_apps_top_colour_unless_the_app_draws_its_band() {
+        let sample = BandSample {
+            fill: Some(0xFF11_2233),
+            ..BandSample::default()
+        };
+        assert_eq!(shown_band_fill(sample, false), Some(0xFF11_2233));
+        assert_eq!(shown_band_fill(sample, true), None);
+        assert_eq!(shown_band_fill(BandSample::default(), false), None);
+    }
 
     /// A window 800 pixels wide at 100%, with a title bar of 31 and a top edge of 8.
     fn at_100() -> CaptionLayout {
@@ -2948,5 +3123,119 @@ mod tests {
             [0, 0, 0, 0]
         );
         assert_eq!(bar_pixel(&image, &layout, 400, 15), [0, 0, 0, 0]);
+    }
+
+    const GAP: f64 = 8.0;
+
+    #[test]
+    fn fr22_band_reaches_past_items_on_each_side() {
+        // Three buttons from 7 to 61 units, in a 600 unit window at 2x.
+        let band = CaptionBand::from_items(
+            600.0,
+            28.0,
+            &[(7.0, 21.0), (27.0, 41.0), (47.0, 61.0)],
+            2.0,
+            GAP,
+        );
+        assert_eq!(band.height, 56);
+        assert_eq!(band.start_width, ((61.0 + GAP) * 2.0) as u32);
+        assert_eq!(band.end_width, 0);
+        // An item added after the buttons widens that end only.
+        let buttons = [(7.0, 21.0), (27.0, 41.0), (47.0, 61.0), (68.0, 96.0)];
+        let with = CaptionBand::from_items(600.0, 28.0, &buttons, 1.0, GAP);
+        assert_eq!(with.start_width, (96.0 + GAP) as u32);
+        // Items in the right half count from the right end.
+        let right =
+            CaptionBand::from_items(600.0, 28.0, &[(539.0, 553.0), (579.0, 593.0)], 1.0, GAP);
+        assert_eq!(right.start_width, 0);
+        assert_eq!(right.end_width, (600.0 - 539.0 + GAP) as u32);
+    }
+
+    #[test]
+    fn fr22_hidden_band_is_empty() {
+        let items = [(7.0, 21.0)];
+        assert_eq!(
+            CaptionBand::from_items(600.0, 0.0, &items, 2.0, GAP),
+            CaptionBand::default()
+        );
+        assert_eq!(
+            CaptionBand::from_items(600.0, f64::NAN, &items, 2.0, GAP),
+            CaptionBand::default()
+        );
+        assert_eq!(
+            CaptionBand::from_items(0.0, 28.0, &items, 2.0, GAP),
+            CaptionBand::default()
+        );
+        // A bad scale counts as 1x rather than as no band.
+        assert_eq!(
+            CaptionBand::from_items(600.0, 28.0, &[], 0.0, GAP).height,
+            28
+        );
+        // An item that is empty or not a number is skipped.
+        let skipped =
+            CaptionBand::from_items(600.0, 28.0, &[(10.0, 10.0), (f64::NAN, 5.0)], 1.0, GAP);
+        assert_eq!((skipped.start_width, skipped.end_width), (0, 0));
+    }
+
+    fn buttons_of(layout: &CaptionLayout, back: bool, offscreen: bool) -> CaptionCells {
+        CaptionCells::of(layout, back, false, true, offscreen)
+    }
+
+    #[test]
+    fn fr22_a_point_in_the_icons_cell_hits_the_back_button() {
+        let cell = (4, 0, 40, 32);
+        assert!(in_cell(cell, 4.0, 0.0));
+        assert!(in_cell(cell, 43.5, 31.5));
+        assert!(!in_cell(cell, 44.0, 10.0));
+        assert!(!in_cell(cell, 3.9, 10.0));
+        assert!(!in_cell(cell, 10.0, 32.0));
+    }
+
+    #[test]
+    fn fr22_every_caption_button_is_found_at_its_cell_and_a_hidden_bar_has_none() {
+        let layout = at_100();
+        let cells = buttons_of(&layout, false, false);
+        use CaptionKind::*;
+        assert_eq!(cells.kinds(), vec![SystemMenu, Minimize, Maximize, Close]);
+        for (kind, button) in [
+            (CaptionKind::Minimize, CaptionButton::Minimize),
+            (CaptionKind::Maximize, CaptionButton::Maximize),
+            (CaptionKind::Close, CaptionButton::Close),
+        ] {
+            let (left, top, width, height) = layout.button_rect(button);
+            let middle = (
+                left as f64 + width as f64 / 2.0,
+                top as f64 + height as f64 / 2.0,
+            );
+            assert_eq!(cells.at(middle.0, middle.1), Some(kind));
+        }
+        // Below the band is the app.
+        assert_eq!(cells.at(400.0, 40.0), None);
+        // The icon's cell is the system menu, or the back arrow while the task can go back.
+        let (left, top, _, _) = layout.icon_cell().unwrap();
+        let on_icon = (left as f64 + 4.0, top as f64 + 4.0);
+        assert_eq!(
+            cells.at(on_icon.0, on_icon.1),
+            Some(CaptionKind::SystemMenu)
+        );
+        let back = buttons_of(&layout, true, false);
+        assert_eq!(back.at(on_icon.0, on_icon.1), Some(CaptionKind::Back));
+        assert_eq!(back.kinds(), vec![Back, Minimize, Maximize, Close]);
+        assert_eq!(back.kinds(), vec![Back, Minimize, Maximize, Close]);
+        let hidden = buttons_of(&layout, false, true);
+        assert_eq!(hidden.at(on_icon.0, on_icon.1), None);
+        // The buttons stay in the tree while the bar is hidden, but nothing is hit.
+        assert_eq!(hidden.kinds(), cells.kinds());
+    }
+
+    #[test]
+    fn fr22_a_fixed_size_window_cannot_be_maximized() {
+        let cells = CaptionCells {
+            can_maximize: false,
+            ..buttons_of(&at_100(), false, false)
+        };
+        assert!(!cells.enabled(CaptionKind::Maximize));
+        assert!(cells.enabled(CaptionKind::Close));
+        assert!(CaptionCells::default().kinds().is_empty());
     }
 }

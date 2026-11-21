@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
+     SPDX-License-Identifier: Apache-2.0
+
+     The design every default app follows: rounded shapes, cards that group a list, and a large
+     bold title that folds into the toolbar. apps.py copies this file into each app's resources
+     before the app's own patches, which point the app's theme at these styles.
+-->
+<resources>
+    <!-- Corner sizes, from small components (chips, text fields) to sheets and dialogs. -->
+    <dimen name="dsa_corner_small">12dp</dimen>
+    <dimen name="dsa_corner_medium">20dp</dimen>
+    <dimen name="dsa_corner_large">28dp</dimen>
+    <dimen name="dsa_corner_extra_large">32dp</dimen>
+
+    <!-- A card that groups list rows: its distance from the window's sides, and the space
+         between two cards. -->
+    <dimen name="dsa_card_side">16dp</dimen>
+    <dimen name="dsa_card_gap">12dp</dimen>
+
+    <style name="DsaShape.Small" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">@dimen/dsa_corner_small</item>
+    </style>
+
+    <style name="DsaShape.Medium" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">@dimen/dsa_corner_medium</item>
+    </style>
+
+    <style name="DsaShape.Large" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">@dimen/dsa_corner_large</item>
+    </style>
+
+    <style name="DsaShape.ExtraLarge" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">@dimen/dsa_corner_extra_large</item>
+    </style>
+
+    <!-- A filled card with no elevation: a group of rows, not a raised surface. -->
+    <style name="DsaCard" parent="Widget.Material3.CardView.Filled">
+        <item name="shapeAppearance">@style/DsaShape.Medium</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+
+    <!-- The large title area: a bold title that folds into the toolbar as the list scrolls. -->
+    <style name="DsaCollapsingToolbar" parent="Widget.Material3.CollapsingToolbar.Large">
+        <item name="expandedTitleTextAppearance">@style/DsaLargeTitle</item>
+        <item name="collapsedTitleTextAppearance">@style/DsaTitle</item>
+    </style>
+
+    <style name="DsaLargeTitle" parent="TextAppearance.Material3.DisplaySmall">
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="DsaTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textStyle">bold</item>
+    </style>
+</resources>

@@ -93,37 +93,13 @@ pub fn input_scopes(kind: InputKind) -> &'static [InputScope] {
 /// `new_end` in `new`. `None` when they are the same. Never splits a surrogate pair, so what
 /// is sent is always whole characters.
 fn difference(old: &[u16], new: &[u16]) -> Option<(u32, u32, u32)> {
-    if old == new {
-        return None;
-    }
-    let mut prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
-    if prefix > 0 && is_high_surrogate(old[prefix - 1]) {
-        prefix -= 1;
-    }
-    let most = old.len().min(new.len()) - prefix;
-    let mut suffix = old
-        .iter()
-        .rev()
-        .zip(new.iter().rev())
-        .take(most)
-        .take_while(|(a, b)| a == b)
-        .count();
-    if suffix > 0 && is_low_surrogate(old[old.len() - suffix]) {
-        suffix -= 1;
-    }
-    Some((
-        prefix as u32,
-        (old.len() - suffix) as u32,
-        (new.len() - suffix) as u32,
-    ))
-}
-
-fn is_high_surrogate(unit: u16) -> bool {
-    (0xd800..=0xdbff).contains(&unit)
-}
-
-fn is_low_surrogate(unit: u16) -> bool {
-    (0xdc00..=0xdfff).contains(&unit)
+    dsa_host_core::text_edit::difference(
+        old,
+        new,
+        dsa_host_core::text_edit::is_high_surrogate,
+        dsa_host_core::text_edit::is_low_surrogate,
+    )
+    .map(|(prefix, old_end, new_end)| (prefix as u32, old_end as u32, new_end as u32))
 }
 
 fn text_of(units: &[u16]) -> String {

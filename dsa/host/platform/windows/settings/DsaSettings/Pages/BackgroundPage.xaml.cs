@@ -17,6 +17,8 @@ public partial class BackgroundPage : Page
         InitializeComponent();
         DataContext = ViewModel;
         Loaded += async (_, _) => await ViewModel.RefreshAsync();
+        // The list and its icons go when the page is left; it is read afresh when shown.
+        Unloaded += (_, _) => ViewModel.Release();
     }
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();

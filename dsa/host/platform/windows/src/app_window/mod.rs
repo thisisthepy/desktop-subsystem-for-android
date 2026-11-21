@@ -33,6 +33,7 @@ pub mod overlay;
 pub mod pointer;
 pub mod screenshot;
 pub mod splash;
+pub mod starting_splash;
 pub mod system_menu;
 pub mod text_store;
 pub mod thumb_bar;
@@ -71,28 +72,22 @@ pub const STARTED_BY_WINDOW_MANAGER: &str = "--started-by-window-manager";
 
 /// The argument that names the app, for the installed window host, whose file name is not
 /// a package's.
-pub const PACKAGE_ARGUMENT: &str = "--package";
+pub use dsa_host_core::compositor::window_hosts::PACKAGE_ARGUMENT;
 
 /// The argument that names the pipe to dial instead of this session's window manager's, for
 /// tests.
 pub const PIPE_ARGUMENT: &str = "--pipe";
 
-/// The value that follows `flag` in `args`, if any.
-pub fn argument(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|arg| arg == flag)
-        .and_then(|at| args.get(at + 1))
-        .cloned()
-}
+pub use dsa_host_core::compositor::window_hosts::argument;
 
 /// Which app a window host shows: the one `--package` names, else the package its folder is
 /// named after (`apps\<package>\<Label>.exe`), else the package its file is named after, as
 /// a program of the earlier layout (`apps\<package>.exe`) is. `None` when none names a valid
 /// package.
 pub fn package_of(program: &std::path::Path, args: &[String]) -> Option<String> {
-    use dsa_host_core::compositor::window_hosts::is_valid_package;
-    if let Some(named) = argument(args, PACKAGE_ARGUMENT) {
-        return is_valid_package(&named).then_some(named);
+    use dsa_host_core::compositor::window_hosts::{is_valid_package, package_argument};
+    if let Some(named) = package_argument(args) {
+        return named;
     }
     let folder = program
         .parent()

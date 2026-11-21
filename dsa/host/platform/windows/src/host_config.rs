@@ -45,19 +45,20 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dsa_host_core::session::SessionConfig;
+use dsa_host_core::image_files::{GuestArch, ImageFiles, ImageRulesOwned};
 use serde::Deserialize;
 
 use dsa_host_core::host_config::{
     check_image_sources, default_connect_timeout_secs, default_control_port,
     default_data_disk_size_gb, default_doze_delay_secs, default_log_port, default_processors,
     default_ready_timeout_secs, default_stop_timeout_secs, default_true, default_vm_name,
+    HostConfigFile,
 };
 pub use dsa_host_core::host_config::{
     expand_locations, HostConfigError, UpdateSettings, DEFAULT_MEMORY_MB,
 };
+use dsa_host_core::memory::start_mb;
 use dsa_host_core::update::policy::InstalledImage;
-use dsa_host_core::update::program::ReleaseChannel;
 use dsa_host_core::update::program_service::ProgramSettings;
 
 use crate::vm::{console_pipe_path, is_sid, AndroidVmConfig};
@@ -67,18 +68,6 @@ use crate::vm::{console_pipe_path, is_sid, AndroidVmConfig};
 fn user_data_disk(dir: &std::path::Path, sid: &str) -> PathBuf {
     let dir = dir.to_string_lossy();
     PathBuf::from(format!("{}\\{sid}\\data.vhdx", dir.trim_end_matches('\\')))
-}
-
-/// What a VM boots from one image.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImageFiles {
-    pub kernel: PathBuf,
-    pub initrd: Option<PathBuf>,
-    pub kernel_cmdline: String,
-    /// A separate, read-only system disk (older images).
-    pub system_image: Option<PathBuf>,
-    /// The template a user's Android disk is made from (images with `image.json`).
-    pub disk_template: Option<PathBuf>,
 }
 
 /// One user's VM: its HCS name, its configuration and how large its data disk may grow.
@@ -124,33 +113,6 @@ pub fn profile_disk(local_app_data: &std::path::Path) -> PathBuf {
     crate::paths::UserRoot::in_local_app_data(local_app_data).android_disk()
 }
 
-/// The memory a VM starts with for a user whose limit is `limit_mb` (0 for automatic):
-/// [`DEFAULT_MEMORY_MB`], or the user's limit when it is smaller.
-///
-/// The VM starts small because the guest kernel keeps its page records for all the memory
-/// it has resident, about 1.6% of it, used or not: a VM made at the computer's size from the
-/// start would cost some 460 MiB on a 32 GiB computer while idle. It grows from there while
-/// the guest needs more (see [`growth_max_mb`]).
-pub fn host_sized_memory_mb(limit_mb: u32) -> u32 {
-    match limit_mb {
-        0 => DEFAULT_MEMORY_MB,
-        limit => limit.clamp(2048, DEFAULT_MEMORY_MB),
-    }
-}
-
-/// How far a VM may grow while it runs, in MiB, for a user whose limit is `limit_mb`: their
-/// limit, never more than the computer has, or with no limit the computer's memory less what
-/// Windows keeps (see [`automatic_vm_memory_mb`]). `None` when the computer's memory cannot
-/// be read.
-///
-/// [`automatic_vm_memory_mb`]: dsa_host_core::memory::automatic_vm_memory_mb
-pub fn growth_max_mb(limit_mb: u32) -> Option<u64> {
-    #[cfg(windows)]
-    let total_mb = crate::power::read_memory().map(|(total_kb, _)| total_kb / 1024);
-    #[cfg(not(windows))]
-    let total_mb: Option<u64> = None;
-    total_mb.map(|total_mb| dsa_host_core::memory::vm_memory_mb(total_mb, limit_mb))
-}
 fn default_page_reporting_order() -> u8 {
     page_reporting_order_for_build(windows_build())
 }
@@ -203,7 +165,7 @@ pub struct HostConfig {
     #[serde(default)]
     pub kernel_cmdline: String,
     /// The VM's memory in MiB. Unset, it is sized to the computer and the user's limit
-    /// ([`host_sized_memory_mb`]); set, it is that, whatever the user's limit, for tests and
+    /// ([`start_mb`]); set, it is that, whatever the user's limit, for tests and
     /// development.
     #[serde(default)]
     pub memory_mb: Option<u32>,
@@ -317,6 +279,14 @@ pub struct HostConfig {
     /// the GPU writes, which the renderer gives back when an app frees it.
     #[serde(default)]
     pub graphics_shared_memory_mb: Option<u64>,
+    /// Give the Android VM Hyper-V's paravirtualized GPU (GPU-PV, the guest's `/dev/dxg`), as
+    /// WSL gives its own VM, for trying the guest's dxg graphics drivers. Off by default, and
+    /// off in every installation: Android renders through the host renderer either way, and
+    /// only an image built with the dxg drivers uses the GPU. The host's display driver must
+    /// support GPU paravirtualization (WDDM 2.9 or later); one that does not leaves the VM
+    /// without it, which the service logs.
+    #[serde(default)]
+    pub gpu_paravirtualization: bool,
     /// The machine's DSA folder: the folder the configuration file is in, which `dsa-hostd`
     /// fills in when it reads the file. Not a key of the file.
     #[serde(skip)]
@@ -511,25 +481,11 @@ impl HostConfig {
         }))
     }
 
-    /// Whether this installation downloads new Android images at all.
-    pub fn image_updates_available(&self) -> bool {
-        self.update.is_some() && self.images_dir.is_some()
-    }
-
     /// Whether this installation updates DSA itself at all.
     pub fn program_updates_available(&self) -> bool {
         self.update.as_ref().is_some_and(|update| {
             update.program && update.has_program_list() && update.program_dir.is_some()
         })
-    }
-
-    /// The channel of the installer that put version `running` here, which a computer whose
-    /// settings record no channel yet starts on.
-    pub fn installer_channel(&self, running: &str) -> ReleaseChannel {
-        self.update.as_ref().map_or_else(
-            || ReleaseChannel::of_version(running),
-            |update| update.installer_channel(running),
-        )
     }
 
     /// The service's log folder: the folder of `log_file`, when there is one. Split as
@@ -580,7 +536,7 @@ impl HostConfig {
                 ))
             }
         };
-        Ok(self.base_vm_config(&self.vm_name, data_disk, socket_sids))
+        self.base_vm_config(&self.vm_name, data_disk, socket_sids)
     }
 
     /// The VM of the user with SID `sid`, as the service runs it.
@@ -609,7 +565,7 @@ impl HostConfig {
         };
         let vm_name = format!("{}-{sid}", self.vm_name);
         let console_log = self.console_log_path(sid, &disk);
-        let mut config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
+        let mut config = self.base_vm_config(&vm_name, disk, vec![sid.into()])?;
         // The service writes the add-on and pstore disks as SYSTEM, so a user whose Android
         // disk is in their own profile, which they can change, has those two in the machine's
         // folder for them, which only SYSTEM and Administrators write. A `data_dir` folder is
@@ -628,14 +584,32 @@ impl HostConfig {
         })
     }
 
+    /// The rules this host reads an image by: the kernel names it boots, the one disk format
+    /// it attaches, the architecture it runs, and the kernel and command line its own
+    /// configuration supplies.
+    pub fn image_rules(&self) -> ImageRulesOwned {
+        ImageRulesOwned {
+            // An x86_64 image names its kernel bzImage; an arm64 one, Image, the name the
+            // arm64 kernel build gives it.
+            kernel_names: vec!["bzImage".into(), "Image".into()],
+            disk_extensions: vec!["vhdx".into()],
+            arch: Some(GuestArch::HOST),
+            fallback_kernel: Some(self.kernel.clone()),
+            extra_cmdline: self.kernel_cmdline.clone(),
+        }
+    }
+
     /// What to boot from `image_dir`, an image folder of the update store. Without a
     /// folder, the first image's folder, or `system_image` when updates are not used.
     ///
     /// An image made from the published AOSP builds carries `image.json`, `initrd.img` and
     /// `disk.vhdx`, the template of a user's Android disk; its kernel command line comes from
     /// `image.json`. An older image carries `system.vhdx`, attached beside the user's disk.
-    /// The image's own kernel (`bzImage`, or `Image` for arm64) wins over `kernel` either way.
-    pub fn image_files(&self, image_dir: Option<&std::path::Path>) -> ImageFiles {
+    /// The image's own kernel (`bzImage`, or `Image` for arm64) wins over `kernel` either way,
+    /// and an older image without an `initrd.img` boots the configuration's.
+    ///
+    /// The rules are [`HostConfig::image_rules`].
+    pub fn image_files(&self, image_dir: Option<&std::path::Path>) -> Result<ImageFiles, String> {
         let dir = image_dir.map(std::path::Path::to_path_buf).or_else(|| {
             match (&self.system_image, &self.images_dir, &self.first_image) {
                 (None, Some(root), Some(first)) => Some(root.join("images").join(&first.version)),
@@ -643,52 +617,23 @@ impl HostConfig {
             }
         });
         let Some(dir) = dir else {
-            return ImageFiles {
+            return Ok(ImageFiles {
                 kernel: self.kernel.clone(),
                 initrd: self.initrd.clone(),
                 kernel_cmdline: self.kernel_cmdline.clone(),
-                system_image: self.system_image.clone(),
+                system_disk: self.system_image.clone(),
                 disk_template: None,
-            };
+            });
         };
-        // An x86_64 image names its kernel bzImage; an arm64 one, Image, the name the
-        // arm64 kernel build gives it.
-        let kernel = ["bzImage", "Image"]
-            .iter()
-            .map(|name| dir.join(name))
-            .find(|own| own.exists())
-            .unwrap_or_else(|| self.kernel.clone());
-        let manifest = std::fs::read_to_string(dir.join("image.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
-        match manifest {
-            Some(manifest) => {
-                let image_cmdline = manifest["kernel_cmdline"].as_str().unwrap_or_default();
-                let system_vhdx = dir.join("system.vhdx");
-                let has_two_disks =
-                    system_vhdx.exists() || manifest["files"].get("system.vhdx").is_some();
-                let (system_image, disk_template) = if has_two_disks {
-                    (Some(system_vhdx), Some(dir.join("data.vhdx")))
-                } else {
-                    (None, Some(dir.join("disk.vhdx")))
-                };
-                ImageFiles {
-                    kernel,
-                    initrd: Some(dir.join("initrd.img")),
-                    kernel_cmdline: format!("{image_cmdline} {}", self.kernel_cmdline)
-                        .trim()
-                        .to_string(),
-                    system_image,
-                    disk_template,
-                }
-            }
-            None => ImageFiles {
-                kernel,
-                initrd: self.initrd.clone(),
-                kernel_cmdline: self.kernel_cmdline.clone(),
-                system_image: Some(dir.join("system.vhdx")),
-                disk_template: None,
-            },
+        let mut files = self.image_rules().read(&dir)?;
+        self.fill_initrd(&mut files);
+        Ok(files)
+    }
+
+    /// An older image without an `initrd.img` boots the configuration's.
+    pub fn fill_initrd(&self, files: &mut ImageFiles) {
+        if files.initrd.is_none() {
+            files.initrd = self.initrd.clone();
         }
     }
 
@@ -697,8 +642,8 @@ impl HostConfig {
         vm_name: &str,
         data_disk: PathBuf,
         socket_sids: Vec<String>,
-    ) -> AndroidVmConfig {
-        let files = self.image_files(None);
+    ) -> Result<AndroidVmConfig, HostConfigError> {
+        let files = self.image_files(None).map_err(HostConfigError)?;
         let pstore_disk = Some(crate::paths::pstore_disk_beside(&data_disk));
         let addon_disk = Some(crate::paths::addon_disk_beside(&data_disk));
         // The section is named after the user the VM belongs to, who may map it.
@@ -710,14 +655,14 @@ impl HostConfig {
             socket_sids.first().map(String::as_str),
             self.graphics_shared_memory_mb,
         );
-        AndroidVmConfig {
+        Ok(AndroidVmConfig {
             owner: format!("DSA ({vm_name})"),
             kernel: files.kernel,
             initrd: files.initrd,
             kernel_cmdline: files.kernel_cmdline,
-            memory_mb: self.memory_mb.unwrap_or_else(|| host_sized_memory_mb(0)),
+            memory_mb: self.memory_mb.unwrap_or_else(|| start_mb(0)),
             processors: self.processors,
-            system_image: files.system_image,
+            system_image: files.system_disk,
             data_disk,
             pstore_disk,
             addon_disk,
@@ -730,23 +675,42 @@ impl HostConfig {
             },
             hosting_process_name_suffix: None,
             fine_grained_memory: false,
+            always_allow_sparse_files: true,
             network_adapter: None,
             direct_mapped: None,
             picture_region,
             graphics_region,
-        }
+            gpu_paravirtualization: self.gpu_paravirtualization,
+        })
     }
+}
 
-    pub fn session_config(&self) -> SessionConfig {
-        SessionConfig {
-            connect_timeout: Duration::from_secs(self.connect_timeout_secs),
-            ready_timeout: Duration::from_secs(self.ready_timeout_secs),
-            stop_timeout: Duration::from_secs(self.stop_timeout_secs),
-            doze_delay: Duration::from_secs(self.doze_delay_secs),
-            freeze_after: self
-                .freeze_after_minutes
-                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
-            ..SessionConfig::default()
-        }
+impl HostConfigFile for HostConfig {
+    fn images_dir(&self) -> Option<&std::path::Path> {
+        self.images_dir.as_deref()
+    }
+    fn first_image(&self) -> Option<&InstalledImage> {
+        self.first_image.as_ref()
+    }
+    fn bundled_image(&self) -> Option<&InstalledImage> {
+        self.bundled_image.as_ref()
+    }
+    fn update(&self) -> Option<&UpdateSettings> {
+        self.update.as_ref()
+    }
+    fn connect_timeout_secs(&self) -> u64 {
+        self.connect_timeout_secs
+    }
+    fn ready_timeout_secs(&self) -> u64 {
+        self.ready_timeout_secs
+    }
+    fn stop_timeout_secs(&self) -> u64 {
+        self.stop_timeout_secs
+    }
+    fn doze_delay_secs(&self) -> u64 {
+        self.doze_delay_secs
+    }
+    fn freeze_after_minutes(&self) -> Option<u64> {
+        self.freeze_after_minutes
     }
 }

@@ -101,6 +101,26 @@ pub fn upload_problem(buffers: (u32, u32), size: (u32, u32), pixels_len: usize) 
     None
 }
 
+/// The size of the region a frame is copied with: the `frame` the app drew (0 in either
+/// direction says the whole texture), cut to the `source` texture it is in and the `target`
+/// buffer it goes to, as those two really are. A box past either one is read or written out
+/// of the resource, which ends the window manager inside the graphics driver, so the copy is
+/// cut to what both hold. `None` when nothing of the frame fits.
+pub fn copy_extent(
+    frame: (u32, u32),
+    source: (u32, u32),
+    target: (u32, u32),
+) -> Option<(u32, u32)> {
+    let frame = if frame.0 == 0 || frame.1 == 0 {
+        source
+    } else {
+        frame
+    };
+    let width = frame.0.min(source.0).min(target.0);
+    let height = frame.1.min(source.1).min(target.1);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
 /// Whether a shared texture of `current` pixels can take the frames of a ColorBuffer of
 /// `wanted` pixels. The texture is remade only when the ColorBuffer itself changes size,
 /// which the guest does only when the task passes a step of its size.
@@ -206,6 +226,40 @@ impl HiddenBuffers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr4_a_frame_smaller_than_its_new_larger_texture_is_copied_as_the_frame() {
+        // 1575x1337 in the 2048x1536 texture the window outgrew into, buffers of the same size.
+        assert_eq!(
+            copy_extent((1575, 1337), (2048, 1536), (2048, 1536)),
+            Some((1575, 1337))
+        );
+    }
+
+    #[test]
+    fn nfr5_a_frame_is_never_copied_past_the_texture_or_the_back_buffer() {
+        // The back buffer still has the size before the resize, the frame is of the new one.
+        assert_eq!(
+            copy_extent((1575, 1337), (2048, 1536), (1024, 768)),
+            Some((1024, 768))
+        );
+        // The frame says more than the texture holds.
+        assert_eq!(
+            copy_extent((3000, 2000), (2048, 1536), (2048, 1536)),
+            Some((2048, 1536))
+        );
+        // No size says the whole texture, still cut to the back buffer.
+        assert_eq!(
+            copy_extent((0, 0), (512, 512), (256, 1024)),
+            Some((256, 512))
+        );
+        assert_eq!(
+            copy_extent((100, 0), (512, 512), (512, 512)),
+            Some((512, 512))
+        );
+        // Nothing fits an empty buffer.
+        assert_eq!(copy_extent((100, 100), (512, 512), (0, 64)), None);
+    }
 
     #[test]
     fn nfr5_an_image_that_does_not_fit_its_swapchain_or_its_bytes_is_not_written() {

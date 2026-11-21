@@ -23,6 +23,11 @@
 
 ## What it is
 
+<p align="center">
+  <img src=".github/assets/dsa-concept.png" alt="DSA concept image: Android apps in their own windows on the Windows desktop" width="860"><br>
+  <sub>DSA concept image</sub>
+</p>
+
 DSA runs Android in a lightweight VM of its own and shows each Android task in a native
 desktop window. Each app has its own taskbar button, Start menu entry, notifications and
 entry in the list of installed apps, as it did with the Windows Subsystem for Android
@@ -35,6 +40,33 @@ pre-releases; from 1.0, releases come in a stable and a pre-release channel (see
 and checking them by hand on real hardware goes on with every release, so please report
 what you find. Linux and macOS are in progress and not released (see
 [Supported platforms](#supported-platforms)).
+
+**DSA 1.0 is here.** The first stable release brings Android apps back to the Windows
+desktop. [Watch the launch film](https://www.youtube.com/watch?v=4VgRY6QKiwM).
+
+## Supported platforms
+
+| Host | Status |
+|---|---|
+| Windows 11, x64 | Released as `DSA-v<version>-win-x64-setup.exe` |
+| Windows 11, ARM64 | Released as `DSA-v<version>-win-arm64-setup.exe`. Android is ARM64 too, so ARM apps run without translation |
+| Linux (x64, ARM64) | In progress, not released. The KVM host, the Wayland compositor and the `.deb` and `.rpm` packages build and run in CI |
+| macOS (Apple silicon) | In progress, not released. The host on Apple's Virtualization framework and its app bundle build in CI |
+
+### Android versions
+
+DSA supports the newest two Android major versions: today Android 16 and Android 17. A
+version leaves support when the second newer major ships, so Android 16 is supported until
+Android 18 is released. The image updater moves each user to a supported version and never
+to a lower major on its own. You can choose either supported version in DSA Settings or
+with `dsa android use`; moving to the older one erases the Android data, because Android
+cannot read data a newer version wrote.
+
+<p align="center">
+  <img src=".github/assets/android-support.svg" alt="Timeline of the Android versions DSA supports: Android 16 and 17 from DSA 0.1.0 in October 2026, Android 18 and 19 expected in 2027 and 2028" width="860">
+</p>
+
+Dates after today are expected dates, not releases.
 
 ## Features
 
@@ -85,8 +117,9 @@ what you find. Linux and macOS are in progress and not released (see
 - Apps that run in the background as notification area icons, with media keys and the
   Windows media controls for apps that play media.
 - Android widgets placed on the desktop, each in a window of its own.
-- Text clipboard shared both ways, web links opened in the Windows browser, Windows files
-  opened in and shared into Android apps, and your Windows folders shared with Android.
+- Text and image clipboard shared both ways, web links opened in the Windows browser,
+  Windows files opened in and shared into Android apps, and your Windows folders shared with
+  Android.
 - Android's files in File Explorer, under **Android** in the navigation pane.
 - APK install by double-click, from the context menu, by dropping the file on a window, or
   with `dsa install`, with a window that shows what the APK is before Android starts.
@@ -146,7 +179,7 @@ Settings or the command line.
   play protected video. At security level L3, streaming services send standard definition
   at most, so watch in high definition in a Windows browser or app.
 - **ARM translation.** On x64 PCs, apps built only for ARM run through a translator. The
-  open source translator Digitalis comes with the x64 image and is used from the first
+  open source translator [Digitalis](https://digitalisx64.github.io/) comes with the x64 image and is used from the first
   start. You can replace it with Google's translator (`dsa arm-translation fetch google`)
   or a package of your own. Only 64-bit ARM apps (`arm64-v8a`) run. On ARM64 PCs, Android
   runs ARM apps itself.
@@ -161,13 +194,15 @@ DSA exposes the user interface inside each Android app window to Windows UI Auto
 clients see an Android app's buttons, lists and text fields as elements of its window,
 rather than one picture.
 
-**How it works.** When a UIA client first asks a DSA app window for its tree, the window
-asks DSA's agent in Android to watch that task. The agent reads Android's accessibility
-nodes for that task only and sends them to the host: first the whole tree, then the
-changes. The host keeps the tree in the window process, so every property read and every
-navigation call is answered locally, without a round trip to the VM. When no UIA client
-has listened for 30 seconds, the watch stops, and Android stops reading nodes. Users who
-use no UIA client pay nothing for it.
+**How it works.** While a screen reader is on, or a UIA client listens for focus changes,
+the window asks DSA's agent in Android to watch its task. The agent reads Android's
+accessibility nodes for that task only and sends them to the host: first the whole tree,
+then the changes, with focus changes sent at once. The host keeps the tree in the window
+process, so every property read and every navigation call is answered locally, without a
+round trip to the VM. Any other UIA client gets the tree read once when it asks, at most
+every 5 seconds, because a continuous watch makes apps stutter. When no client is left, the
+watch stops, and Android stops reading nodes. Users who use no UIA client pay nothing for
+it.
 
 **What each element carries.**
 
@@ -193,8 +228,14 @@ use no UIA client pay nothing for it.
 | Value (`SetValue`) | `ACTION_SET_TEXT`, which replaces the field's whole text |
 | Toggle | `ACTION_CLICK` |
 | SelectionItem (`Select`) | `ACTION_SELECT`, or `ACTION_CLICK` when the node has no select action |
-| Scroll | `ACTION_SCROLL_FORWARD` and `ACTION_SCROLL_BACKWARD`, by page; no scroll percentage |
+| Scroll | `ACTION_SCROLL_FORWARD` and `ACTION_SCROLL_BACKWARD`, by page, with the scroll percentage |
 | `SetFocus` | `ACTION_FOCUS`, or `ACTION_ACCESSIBILITY_FOCUS` when the node cannot take input focus |
+| Text (edit fields) | ranges by character, word and line; `Select` moves the cursor |
+| RangeValue (sliders) | `ACTION_SET_PROGRESS` |
+| ExpandCollapse | `ACTION_EXPAND` and `ACTION_COLLAPSE` |
+| Grid, Table, GridItem, TableItem | lists and grids and their items |
+| ScrollItem | `ACTION_SHOW_ON_SCREEN`, or `ACTION_SCROLL_TO_POSITION` for an item off the screen |
+| Context menu, LegacyIAccessible | `ACTION_LONG_CLICK` for the context menu |
 
 These actions go to the node directly. They do not move the mouse or inject touches.
 
@@ -214,11 +255,10 @@ Insights for Windows, or libraries such as FlaUI. Find the app's window by its n
 its elements by AutomationId, name or control type. For scripts that need to press a point
 rather than an element, `dsa tap <package> <x> <y>` presses inside the app's task.
 
-**Not there yet.** There is no Text pattern, no RangeValue or ExpandCollapse pattern, no
-long press through UIA, no heading level, and no notification or live region events.
-Android's accessibility focus is not exported; only input focus is. Improvements are tracked
-in issue [#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744)
-(open).
+Headings carry their heading level, dialogs and pop-ups are windows that raise a window
+opened event, and live regions and the app's announcements and toasts are raised as
+notifications. The focus a client sees is whichever of Android's input focus and
+accessibility focus moved last.
 
 ## Accessibility
 
@@ -227,18 +267,16 @@ above: controls have names and roles, focus follows the keyboard, and buttons, s
 lists and text fields can be used without a mouse. JAWS uses the same tree; the project has
 not checked it yet, so reports are welcome.
 
-**What is being improved.** These come from a screen reader user's report, issue
-[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744). Each is
-open, tracked there:
+**What changed after a screen reader user's report.** Issue
+[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744) found three
+gaps. The code for each is in, and the issue stays open until screen reader users confirm
+it:
 
-- **Faster focus.** Today a focus change waits in Android before it reaches Windows, about
-  250 to 450 ms after a key press, and holding an arrow key moves at about four steps a
-  second. The plan is to send focus changes at once, read only the task an event came from,
-  and keep the short timings to times when a UIA client listens.
-- **Accessibility focus.** Only input focus is exported today, so moves of Android's
-  accessibility focus raise no focus event.
-- **Text pattern.** Edit fields have no Text pattern yet, which NVDA uses to read and review
-  text by character, word and line. Their value can be read and set.
+- **Faster focus.** While a screen reader listens, a focus change goes to Windows at once
+  instead of waiting 250 to 450 ms in Android, and Android reads only the node that changed.
+- **Accessibility focus.** Moves of Android's accessibility focus raise a focus event.
+- **Text pattern.** Edit fields have the Text pattern, which NVDA uses to read and review
+  text by character, word and line.
 
 **DSA's own windows.**
 
@@ -261,30 +299,6 @@ for Orca; Linux is not released yet. The macOS host does not export app trees ye
 screen reader and its version, the app, what you did, what you heard and what you expected.
 A diagnostic bundle from `dsa logs collect -o diag.zip` helps. The
 [DSA Discord](https://discord.gg/MtpQnR4eQQ) is open for questions too.
-
-## Supported platforms
-
-| Host | Status |
-|---|---|
-| Windows 11, x64 | Released as `DSA-v<version>-win-x64-setup.exe` |
-| Windows 11, ARM64 | Released as `DSA-v<version>-win-arm64-setup.exe`. Android is ARM64 too, so ARM apps run without translation |
-| Linux (x64, ARM64) | In progress, not released. The KVM host, the Wayland compositor and the `.deb` and `.rpm` packages build and run in CI |
-| macOS (Apple silicon) | In progress, not released. The host on Apple's Virtualization framework and its app bundle build in CI |
-
-### Android versions
-
-DSA supports the newest two Android major versions: today Android 16 and Android 17. A
-version leaves support when the second newer major ships, so Android 16 is supported until
-Android 18 is released. The image updater moves each user to a supported version and never
-to a lower major on its own. You can choose either supported version in DSA Settings or
-with `dsa android use`; moving to the older one erases the Android data, because Android
-cannot read data a newer version wrote.
-
-<p align="center">
-  <img src=".github/assets/android-support.svg" alt="Timeline of the Android versions DSA supports: Android 16 and 17 from DSA 0.1.0 in October 2026, Android 18 and 19 expected in 2027 and 2028" width="860">
-</p>
-
-Dates after today are expected dates, not releases.
 
 ## Install
 
@@ -351,13 +365,12 @@ host only while something reads it. Attach `diag.zip` to a problem report.
 These are true today:
 
 - Only Windows is released. Linux and macOS are in progress.
-- DSA Settings shows in English and Korean only.
 - Only 64-bit apps run: `arm64-v8a` and, on x64, `x86_64`. 32-bit apps do not run.
 - Widevine is L3, so protected streams play in standard definition at most.
 - Google Play is not Google-certified on DSA; Google may ask you to register the device.
-- The clipboard shares text only.
+- The clipboard shares text and images. An image larger than 12 MiB as PNG is not shared,
+  and other kinds of content, such as copied files, stay on the side they were copied on.
 - The **System (forced)** scaling choice is not available yet and works like **System**.
-- The UI Automation export has the gaps listed under [UI Automation](#ui-automation).
 - Address lookups without Google Play give the area (country down to city, or district in
   Korea), not street addresses.
 

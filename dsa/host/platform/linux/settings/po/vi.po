@@ -804,8 +804,8 @@ msgstr "Cài đặt này áp dụng cho mọi người dùng máy tính này, n�
 msgid "The newest supported version (now Android {0})"
 msgstr "Phiên bản được hỗ trợ mới nhất (hiện là Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} và các bản cập nhật bảo mật của nó"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Cố định ở Android {0}: chỉ nhận các bản cập nhật bảo mật và ảnh hệ thống của nó, không tự chuyển sang Android mới hơn"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Không có cập nhật Android đang chờ. DSA kiểm tra hằng ngày và khởi động lại Android để cập nhật khi không mở cửa sổ ứng dụng nào."
@@ -1251,8 +1251,8 @@ msgstr "Đang tải và cài Google Play. Việc này có thể mất vài phút
 msgid "Enter this number on Google's registration page."
 msgstr "Nhập số này vào trang đăng ký của Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Số này hiện ở đây khi Google Play đã được cài và Android đã khởi động."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID chưa có. Dịch vụ Google Play tạo ID này khi thiết bị lần đầu check-in với Google.\nViệc đó cần Google Play đã cài, Android khởi động cùng nó và có kết nối mạng.\nNếu vài phút sau vẫn trống, hãy khởi động lại Android.\nID là một số thập phân, định dạng mà trang đăng ký của Google chấp nhận."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android đã khởi động trước thay đổi này. Hãy dừng rồi khởi động Android để Google Play áp dụng nó."
@@ -1838,3 +1838,39 @@ msgstr "Theo mặc định (trên cả màn hình)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Theo mặc định (trong cửa sổ)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android dừng rồi khởi động lại.\n\nCác cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng khi nó đã khởi động xong."
+
+msgid "Alternative stores"
+msgstr "Cửa hàng thay thế"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng."
+
+msgid "Installed, version {0}"
+msgstr "Đã cài đặt, phiên bản {0}"
+
+msgid "Downloading and installing…"
+msgstr "Đang tải và cài đặt…"
+
+msgid "Not installed: {0}"
+msgstr "Chưa cài đặt: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Bộ nhớ nhiều tiến trình dùng chung, như hình ảnh cửa sổ và bộ đệm đồ họa. Được giải phóng khi các ứng dụng dùng nó đóng lại."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Bộ nhớ hiện không có gì dùng. Android trả lại cho PC, nên nó không chiếm RAM của PC."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Vùng làm việc kernel giữ cho mỗi luồng đang chạy. Giảm khi đóng ứng dụng."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Các bảng cho bộ xử lý biết bộ nhớ của mỗi ứng dụng nằm ở đâu trong RAM. Giảm khi đóng ứng dụng."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Các bộ đệm lớn kernel và trình điều khiển dành riêng, trong đó có cho đồ họa. Được giải phóng khi không còn cần."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Dữ liệu kernel giữ một bản cho mỗi lõi bộ xử lý. Kích thước được cố định khi Android khởi động."

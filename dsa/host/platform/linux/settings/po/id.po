@@ -804,8 +804,8 @@ msgstr "Pengaturan ini berlaku untuk setiap pengguna komputer ini, sehingga meng
 msgid "The newest supported version (now Android {0})"
 msgstr "Versi terbaru yang didukung (saat ini Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} dan pembaruan keamanannya"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Tetap di Android {0}: hanya pembaruan keamanan dan image-nya, tidak pernah pindah sendiri ke Android yang lebih baru"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Belum ada pembaruan Android. DSA memeriksa setiap hari dan memulai ulang Android ke pembaruan saat tidak ada jendela aplikasi terbuka."
@@ -1251,8 +1251,8 @@ msgstr "Mengunduh dan menginstal Google Play. Ini dapat memakan waktu beberapa m
 msgid "Enter this number on Google's registration page."
 msgstr "Masukkan nomor ini di halaman pendaftaran Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Nomor ini muncul di sini setelah Google Play terinstal dan Android dimulai."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID belum tersedia. Layanan Google Play membuatnya saat perangkat ini pertama kali check-in ke Google.\nUntuk itu Google Play harus terpasang, Android dimulai bersamanya, dan ada koneksi jaringan.\nJika tetap kosong beberapa menit kemudian, mulai ulang Android.\nID ini berupa angka desimal, format yang diterima halaman pendaftaran Google."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android dimulai sebelum perubahan ini. Hentikan lalu mulai Android agar Google Play mengikutinya."
@@ -1838,3 +1838,39 @@ msgstr "Ikuti bawaan (di seluruh layar)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Ikuti bawaan (di dalam jendela)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android berhenti lalu dimulai lagi.\n\nJendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai."
+
+msgid "Alternative stores"
+msgstr "Toko alternatif"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi."
+
+msgid "Installed, version {0}"
+msgstr "Terpasang, versi {0}"
+
+msgid "Downloading and installing…"
+msgstr "Mengunduh dan memasang…"
+
+msgid "Not installed: {0}"
+msgstr "Tidak terpasang: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Memori yang dipakai bersama oleh beberapa proses, seperti gambar jendela dan buffer grafis. Dilepas saat aplikasi yang memakainya ditutup."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Memori yang saat ini tidak dipakai apa pun. Android mengembalikannya ke PC, jadi tidak memakan RAM PC."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Ruang kerja yang disimpan kernel untuk setiap thread yang berjalan. Mengecil saat aplikasi ditutup."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Peta yang memberi tahu prosesor letak memori setiap aplikasi di RAM. Mengecil saat aplikasi ditutup."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Buffer besar yang disisihkan kernel dan drivernya, antara lain untuk grafis. Dilepas saat tidak diperlukan lagi."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Data yang disimpan kernel satu untuk setiap inti prosesor. Ukurannya ditetapkan saat Android mulai."

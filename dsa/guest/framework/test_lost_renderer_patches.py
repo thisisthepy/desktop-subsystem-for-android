@@ -80,5 +80,53 @@ class LostRendererPatchTests(unittest.TestCase):
             self.assertLess(names.index("0001"), names.index(numbers[0]), android)
 
 
+BASE = HERE / "patches/frameworks/base"
+
+
+def base_patch(android):
+    found = list((BASE / android).glob("0007-*.patch"))
+    assert len(found) == 1, android
+    return found[0].read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+class NoSurfacePatchTests(unittest.TestCase):
+    """FLO aborted with "drawRenderNode called on a context with no surface!" after the
+    renderer restarted: a frame reached getFrame() while the window's surface was gone."""
+
+    def test_nfr5_a_frame_with_no_surface_is_skipped_not_fatal(self):
+        for android in VERSIONS:
+            text = base_patch(android)
+            self.assertIn("+++ b/libs/hwui/renderthread/CanvasContext.cpp", text, android)
+            added, removed = lines_of(text)
+            self.assertEqual(removed, [], android)
+            joined = "\n".join(added)
+            self.assertIn("!mHardwareBuffer && !mRenderPipeline->isSurfaceReady()", joined, android)
+            self.assertIn("return SkippedFrameReason::NoOutputTarget;", joined, android)
+            # The check comes before the frame is taken, so getFrame() is never reached.
+            self.assertNotIn("Frame frame = getFrame();", joined, android)
+
+    def test_nfr5_a_skipped_frame_asks_for_a_new_surface_and_a_redraw(self):
+        for android in VERSIONS:
+            added, _ = lines_of(base_patch(android))
+            joined = "\n".join(added)
+            self.assertIn(
+                "if (*skippedFrameReason == SkippedFrameReason::NoOutputTarget) {", joined, android
+            )
+            self.assertIn("onDeviceReset();", joined, android)
+
+    def test_nfr5_it_builds_on_the_recovery_patch_and_every_hunk_line_has_a_marker(self):
+        for android in VERSIONS:
+            names = sorted(p.name[:4] for p in (BASE / android).glob("*.patch"))
+            self.assertLess(names.index("0001"), names.index("0007"), android)
+            in_hunk = False
+            for line in base_patch(android).splitlines():
+                if line.startswith("@@"):
+                    in_hunk = True
+                elif line.startswith("diff --git"):
+                    in_hunk = False
+                elif in_hunk:
+                    self.assertIn(line[:1], (" ", "+", "-"), (android, line))
+
+
 if __name__ == "__main__":
     unittest.main()

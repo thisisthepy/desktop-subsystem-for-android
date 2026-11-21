@@ -136,8 +136,8 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * so the host's start menu can show them. With a [MemorySource], it also reports the guest's
  * memory every few minutes and whenever the host asks. When the host says no task window is
  * shown the agent turns the screen off and puts the device into Doze, and the host's battery
- * becomes the guest's ([Lifecycle]). Text copied on the host becomes the guest's clipboard
- * text, and text copied in the guest goes to the host, while the user shares the clipboard
+ * becomes the guest's ([Lifecycle]). Text and images copied on the host become the guest's
+ * clip, and those copied in the guest go to the host, while the user shares the clipboard
  * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
  * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
  * that can open them ([FileReceiver]). Files and text an app drags out of its window go on to
@@ -1332,7 +1332,9 @@ class Agent(
         syncInputBounds()
         val packages = reported.mapNotNull(reporter::reportedPackage).toSet()
         // An app whose overlay is on the screen is open, though it has no task.
-        closedApps.tasks(packages + overlays.packages)
+        // An app with an activity in any task (under a permission dialog it opened, or on top
+        // of another app's task) is open too, though no task the host was told of is its own.
+        closedApps.tasks(packages + overlays.packages, inTasks = running.flatMap { it.activityPackages }.toSet())
         // Every task's app keeps its processes, a task the host was not told of included.
         cachedProcesses?.tasks(packages + overlays.packages + running.mapNotNull { it.packageName })
         appSound.tasks(packages, reporter.focusedTask()?.let(reporter::reportedPackage))

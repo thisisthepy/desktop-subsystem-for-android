@@ -11,40 +11,10 @@
 
 use dsa_host_core::ui_language::UiLanguage;
 
-/// The locale gettext would read messages in, from `LC_ALL`, `LC_MESSAGES` or `LANG`, the
-/// first that is set and not empty, as `var` reads them.
-fn messages_locale(var: &impl Fn(&str) -> Option<String>) -> Option<String> {
-    ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .into_iter()
-        .find_map(|name| var(name).filter(|value| !value.trim().is_empty()))
-}
-
-/// Whether `locale` is the C locale (`C`, `POSIX`, `C.UTF-8`), which names no language and
-/// under which gettext ignores `LANGUAGE`.
-fn is_c_locale(locale: &str) -> bool {
-    let name = locale.trim().split(['.', '@']).next().unwrap_or_default();
-    name == "C" || name == "POSIX"
-}
-
-/// The interface language of a session whose environment `var` reads: see the module.
+/// The interface language of a session whose environment `var` reads: see the module. The
+/// rule is gettext's and so the same on every POSIX host; it lives in core.
 pub fn ui_language_in(var: impl Fn(&str) -> Option<String>) -> UiLanguage {
-    let Some(locale) = messages_locale(&var) else {
-        return UiLanguage::English;
-    };
-    if is_c_locale(&locale) {
-        return UiLanguage::English;
-    }
-    if let Some(list) = var("LANGUAGE") {
-        let languages: Vec<&str> = list
-            .split(':')
-            .map(str::trim)
-            .filter(|language| !language.is_empty())
-            .collect();
-        if !languages.is_empty() {
-            return UiLanguage::first_supported(languages);
-        }
-    }
-    UiLanguage::from_tag_or_english(&locale)
+    UiLanguage::from_posix_env(var)
 }
 
 /// The interface language of this process's session, from its environment.

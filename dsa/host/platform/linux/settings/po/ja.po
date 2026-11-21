@@ -804,8 +804,8 @@ msgstr "この設定はこのコンピューターのすべてのユーザーに
 msgid "The newest supported version (now Android {0})"
 msgstr "対応する最新バージョン (現在は Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} とそのセキュリティアップデート"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Android {0} に固定: そのセキュリティ アップデートとイメージ アップデートのみを受け取り、新しい Android には自動で移りません"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "保留中の Android アップデートはありません。DSA は毎日確認し、アプリのウィンドウがすべて閉じたら Android を再起動して適用します。"
@@ -1251,8 +1251,8 @@ msgstr "Google Play をダウンロードしてインストールしています
 msgid "Enter this number on Google's registration page."
 msgstr "この番号を Google の登録ページに入力してください。"
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Google Play をインストールして Android を起動すると、ここに表示されます。"
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID はまだ利用できません。Google Play 開発者サービスは、この端末が初めて Google にチェックインするときに ID を作成します。\nそのためには、Google Play がインストールされ、Android がそれとともに起動し、ネットワークに接続している必要があります。\n数分たっても空のままの場合は Android を再起動してください。\nID は 10 進数で、Google の登録ページが受け付ける形式です。"
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android はこの変更の前に起動しました。Google Play に反映するには、Android を停止してから起動してください。"
@@ -1838,3 +1838,39 @@ msgstr "既定に従う (画面全体)"
 
 msgid "Follow the default (inside the window)"
 msgstr "既定に従う (ウィンドウ内)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android を停止してから、もう一度起動します。\n\nアプリのウィンドウは閉じます。起動が終わったら、アプリをもう一度開いてください。"
+
+msgid "Alternative stores"
+msgstr "代替ストア"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。"
+
+msgid "Installed, version {0}"
+msgstr "インストール済み、バージョン {0}"
+
+msgid "Downloading and installing…"
+msgstr "ダウンロードしてインストールしています…"
+
+msgid "Not installed: {0}"
+msgstr "インストールできませんでした: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "複数のプロセスが共有するメモリです。ウィンドウの画像やグラフィックスのバッファが含まれます。使っているアプリを閉じると解放されます。"
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "今は何も使っていないメモリです。Android が PC に返すので、PC の RAM を占めません。"
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "実行中のスレッドごとにカーネルが持つ作業領域です。アプリを閉じると減ります。"
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "各アプリのメモリが RAM のどこにあるかをプロセッサーに伝える対応表です。アプリを閉じると減ります。"
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "カーネルとドライバーが確保する大きなバッファです。グラフィックスなどに使います。不要になると解放されます。"
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "カーネルがプロセッサーのコアごとに 1 つずつ持つデータです。サイズは Android の起動時に決まります。"

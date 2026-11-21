@@ -61,7 +61,12 @@ class TaskReporter(
         val current = LinkedHashMap<Int, TaskSnapshot>()
         for (task in tasks) {
             // The host is not told a task's screen size in dp, so a change to it alone is no news.
-            if (reportable(task) && task.taskId !in current) current[task.taskId] = task.copy(screenDp = null)
+            if (!reportable(task) || task.taskId in current) continue
+            // A task stays the app's that owned it when the host was first told of it: a
+            // permission dialog or another app's activity that the framework names as its root
+            // once the app's own activities finish does not make it another app's window.
+            val owner = told[task.taskId]?.packageName ?: task.packageName
+            current[task.taskId] = task.copy(packageName = owner, screenDp = null, activityPackages = emptySet())
         }
         for (taskId in told.keys.toList()) {
             if (taskId !in current && send(Messages.taskRemoved(taskId))) told.remove(taskId)

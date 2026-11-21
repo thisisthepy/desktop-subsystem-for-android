@@ -77,20 +77,7 @@ pub fn first_day_of_week(first_weekday: i64) -> u32 {
     }
 }
 
-/// Whether an `NSDateFormatter` hour format is a 24-hour clock.
-pub fn is_24_hour(hour_format: &str) -> bool {
-    // Pattern letters outside quotes: H and k are 24-hour; h and K are 12-hour.
-    let mut quoted = false;
-    for c in hour_format.chars() {
-        match c {
-            '\'' => quoted = !quoted,
-            'H' | 'k' if !quoted => return true,
-            'h' | 'K' if !quoted => return false,
-            _ => {}
-        }
-    }
-    false
-}
+pub use dsa_host_core::system_settings::is_24_hour_pattern as is_24_hour;
 
 /// The accent color as 0xAARRGGBB for macOS's `AppleAccentColor`. The default (multicolor)
 /// is blue, as apps show it.

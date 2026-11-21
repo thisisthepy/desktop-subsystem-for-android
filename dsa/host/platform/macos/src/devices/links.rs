@@ -7,13 +7,11 @@
 //! one argument, never shell text, and it starts with `http`, so `open` cannot take it for
 //! one of its options.
 
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::Command;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
-use dsa_host_core::host_api::HostApiClient;
 use dsa_transport::Connector;
 
 use super::Log;
@@ -21,30 +19,14 @@ use super::Log;
 /// The build the follower names itself by.
 const BUILD: &str = "dsa-devices links";
 
-/// How long the watch waits for a link before it looks at `stop` again.
-const POLL: Duration = Duration::from_millis(200);
-
-/// How long the watch waits before it reconnects to the service.
-const RETRY: Duration = Duration::from_secs(2);
-
 /// The program that opens a link in the user's default browser.
 pub const OPEN: &str = "/usr/bin/open";
 
-/// Opens a link the user's Android opened.
-pub trait LinkOpener: Send {
-    fn open(&mut self, url: &str) -> Result<(), String>;
-}
+pub use dsa_host_core::links::LinkOpener;
 
 /// The command that opens `url` in the user's browser.
 pub fn open_command(url: &str) -> Result<Command, String> {
-    let url = dsa_host_core::links::web_url(url)?;
-    let mut command = Command::new(OPEN);
-    command
-        .arg(url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    Ok(command)
+    dsa_host_core::links::open_command(OPEN, url)
 }
 
 /// Opens links with `/usr/bin/open`.
@@ -64,51 +46,14 @@ impl LinkOpener for MacOpener {
 }
 
 /// Watches the links of the user's Android through `connector` and opens each with `opener`,
-/// until `stop` is set. A lost connection is made again; a link that fails the check is
-/// dropped and logged.
+/// until `stop` is set.
 pub fn follow(
     mut connector: Box<dyn Connector>,
     opener: &mut dyn LinkOpener,
     stop: Arc<AtomicBool>,
     log: Log,
 ) {
-    let mut warned = false;
-    while !stop.load(Ordering::Relaxed) {
-        let stream = HostApiClient::connect(&mut *connector, BUILD, Duration::from_secs(5))
-            .and_then(|client| client.watch_links());
-        let mut stream = match stream {
-            Ok(stream) => {
-                warned = false;
-                stream
-            }
-            Err(why) => {
-                if !warned {
-                    log(&format!("links: cannot watch Android's links yet: {why}"));
-                    warned = true;
-                }
-                super::wait(&stop, RETRY);
-                continue;
-            }
-        };
-        while !stop.load(Ordering::Relaxed) {
-            match stream.next(POLL) {
-                Ok(None) => {}
-                Ok(Some(url)) => match dsa_host_core::links::web_url(&url) {
-                    Ok(url) => {
-                        if let Err(why) = opener.open(url) {
-                            log(&format!("links: {why}"));
-                        }
-                    }
-                    Err(why) => log(&format!("links: dropped a link from Android: {why}")),
-                },
-                Err(why) => {
-                    log(&format!("links: the watch of Android's links ended: {why}"));
-                    super::wait(&stop, RETRY);
-                    break;
-                }
-            }
-        }
-    }
+    dsa_host_core::links::follow(&mut *connector, BUILD, opener, &stop, &*log);
 }
 
 #[cfg(test)]

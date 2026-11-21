@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! dsa-hostd serve [config.json]          serve the local API until stopped (launchd runs this)
-//! dsa-hostd install-agent [config.json]  install and start the launchd agent for this user
-//! dsa-hostd uninstall-agent              stop and remove it
+//! dsa-hostd install-agent [config.json]  register and start this user's launchd agents
+//! dsa-hostd uninstall-agent              stop and remove them
 //! dsa-hostd check [config.json]          check the image and the VM with the framework,
 //!                                        without starting it
 //! dsa-hostd version
@@ -12,9 +12,15 @@
 //! Without a configuration file named, the agent reads the user's, then the machine's
 //! (`dsa-hostd.json` in the DSA folder of each). The binary must be signed with the
 //! `com.apple.security.virtualization` entitlement (`dsa-hostd.entitlements`).
+//!
+//! `install-agent` run from DSA.app registers the agents whose property lists DSA.app carries
+//! (`Contents/Library/LaunchAgents`) through `SMAppService`, so macOS names them DSA. Run from
+//! elsewhere, given a configuration, or where that registration fails, it writes legacy agents
+//! to `~/Library/LaunchAgents` instead. It says which it did.
 
 #[cfg(target_os = "macos")]
 fn main() {
+    dsa_host_macos::app_service::log_to_agent_file();
     std::process::exit(match macos::run(std::env::args().skip(1).collect()) {
         Ok(()) => 0,
         Err(why) => {
@@ -99,15 +105,13 @@ mod macos {
                     std::env::current_exe().map_err(|e| format!("finding this program: {e}"))?;
                 let config = args.get(1).map(PathBuf::from);
                 let uid = dsa_host_unix::socket::current_uid();
-                let plist =
-                    dsa_host_macos::launchd::install(&home, uid, &program, config.as_deref())?;
-                println!("installed and started {}", plist.display());
+                dsa_host_macos::app_service::install(&home, uid, &program, config.as_deref())?;
                 Ok(())
             }
             Some("uninstall-agent") => {
                 let uid = dsa_host_unix::socket::current_uid();
-                dsa_host_macos::launchd::uninstall(&home, uid)?;
-                println!("removed the agent");
+                dsa_host_macos::app_service::uninstall(&home, uid)?;
+                println!("removed the agents");
                 Ok(())
             }
             Some("check") => {
@@ -155,12 +159,15 @@ mod macos {
             })
             .collect();
         disks.push(Disk {
-            path: files.disk_template.clone(),
+            path: files
+                .disk_template
+                .clone()
+                .ok_or("the image has no disk to make the user's from")?,
             read_only: true,
         });
         let vm = MacVmConfig {
             kernel: files.kernel.clone(),
-            initrd: files.initrd.clone(),
+            initrd: files.initrd.clone().ok_or("the image has no initrd.img")?,
             cmdline: dsa_host_macos::cmdline::for_virtualization_framework(
                 &files.kernel_cmdline,
                 &config.kernel_cmdline,

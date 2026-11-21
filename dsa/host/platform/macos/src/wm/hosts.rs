@@ -17,8 +17,10 @@ use std::time::{Duration, Instant};
 use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, HostId,
 };
-use dsa_host_unix::socket::{current_uid, UnixLocalListener};
+use dsa_host_core::host_api::HostApiClient;
+use dsa_host_unix::socket::{current_uid, UnixLocalConnector, UnixLocalListener};
 use dsa_protocol::window_host::types::envelope::Body;
+use dsa_protocol::window_host::HandshakeError;
 use dsa_protocol::window_host::{decode, encode_body};
 use dsa_transport::local::LocalListener;
 use dsa_transport::{Connection, FrameSender, TransportError};
@@ -29,6 +31,17 @@ use super::present::Presenter;
 
 /// The build the window manager names itself by to the window hosts.
 pub const BUILD: &str = concat!("dsa-wm ", env!("CARGO_PKG_VERSION"));
+
+/// How long one call to the service may take.
+const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A client of the service's local API at `host_api`, named by [`BUILD`].
+pub fn connect(host_api: &Path) -> Result<HostApiClient, String> {
+    let mut connector = UnixLocalConnector {
+        path: host_api.to_path_buf(),
+    };
+    HostApiClient::connect(&mut connector, BUILD, CALL_TIMEOUT).map_err(|e| e.to_string())
+}
 
 /// How long a window host may take over its handshake.
 const HANDSHAKE: Duration = Duration::from_secs(5);
@@ -49,6 +62,23 @@ impl HostLink {
 
     pub fn process_id(&self) -> u32 {
         self.process_id
+    }
+
+    /// A link that sends nowhere but succeeds, for tests of what depends on one.
+    #[cfg(test)]
+    pub fn silent(id: HostId, process_id: u32) -> HostLink {
+        struct Silent;
+        impl FrameSender for Silent {
+            fn send(&mut self, _frame: &[u8]) -> Result<(), TransportError> {
+                Ok(())
+            }
+        }
+        HostLink {
+            id,
+            process_id,
+            sender: Mutex::new(Some(Box::new(Silent))),
+            closed: AtomicBool::new(false),
+        }
     }
 
     /// Sends `body` to the window host. False when the connection is gone.
@@ -132,6 +162,14 @@ pub fn listen(
     Ok(())
 }
 
+/// Whether a failed handshake says something. The service checks that the window manager is
+/// up by connecting to its socket and dropping the connection without a word, about every
+/// five seconds, so a peer that closes before its hello is that check and not a window host
+/// that failed: logging it filled the log with a refusal per check.
+fn refusal_is_worth_logging(why: &str) -> bool {
+    why != HandshakeError::Transport(TransportError::Closed).to_string()
+}
+
 fn serve(
     mut connection: Box<dyn Connection>,
     id: HostId,
@@ -143,7 +181,9 @@ fn serve(
     let attach = match accept_window_host(&mut *connection, BUILD, HANDSHAKE) {
         Ok(attach) => attach,
         Err(why) => {
-            log(&format!("refused an app window's connection: {why}"));
+            if refusal_is_worth_logging(&why) {
+                log(&format!("refused an app window's connection: {why}"));
+            }
             return;
         }
     };
@@ -218,5 +258,30 @@ fn read(
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dsa_protocol::window_host::HandshakeError;
+
+    #[test]
+    fn a_liveness_probe_that_closes_without_a_hello_is_not_logged_as_a_refusal() {
+        // The service checks the window manager is up by connecting to its socket and
+        // dropping the connection, about every five seconds.
+        assert!(!refusal_is_worth_logging(
+            &HandshakeError::Transport(TransportError::Closed).to_string()
+        ));
+    }
+
+    #[test]
+    fn a_window_host_that_sends_a_broken_hello_is_still_logged() {
+        assert!(refusal_is_worth_logging(
+            &HandshakeError::Malformed("not a hello".into()).to_string()
+        ));
+        assert!(refusal_is_worth_logging(
+            &HandshakeError::Transport(TransportError::Timeout).to_string()
+        ));
     }
 }

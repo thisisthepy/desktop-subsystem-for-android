@@ -596,6 +596,43 @@ jobs:
           path: .scratch/gms-probe/dsa-gms-probe.apk
           if-no-files-found: error
 
+  # The default apps (dsa/apps), as the guest agent is built above: each LineageOS app fetched
+  # at its pinned commit, patched with DSA's design and package name, and built with its own
+  # Gradle build into an unsigned release APK that make-image.py signs. DocumentsUI builds only
+  # in an Android tree, so the image job takes it from the Framework build instead.
+  default-apps:
+    needs: approval
+    name: Build the default app (ubuntu-latest, ${{ matrix.app }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [deskclock, gallery, camera, music, calculator, recorder]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Fetch and patch the app
+        run: uv run dsa/apps/apps.py fetch ${{ matrix.app }}
+
+      - name: Build the app
+        run: uv run dsa/apps/apps.py build ${{ matrix.app }} --out .scratch/default-apps
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-default-app-${{ matrix.app }}
+          path: .scratch/default-apps/
+          if-no-files-found: error
+
 
   # What the boot checks below run, built once on a runner of its own while the guest programs
   # and the images are made: the VM programs (crosvm, passt and gfxstream's renderer), and the
@@ -717,7 +754,7 @@ jobs:
   # because the boot checks wait for that one image only, not for the whole matrix.
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
-    needs: [guest-programs, agent]
+    needs: [guest-programs, agent, default-apps]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -889,6 +926,20 @@ jobs:
           name: guest-agent
           path: .scratch/agent
 
+      # The default apps (dsa/apps), built above, and DocumentsUI, which builds only in an
+      # Android tree and comes from the Framework build's services job.
+      - name: Download the default apps
+        uses: actions/download-artifact@v4
+        with:
+          pattern: guest-default-app-*
+          path: .scratch/default-apps
+          merge-multiple: true
+
+      - name: Download the patched DocumentsUI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/apps/download-documentsui.sh ${{ matrix.android }} .scratch/default-apps
+
       # The default ARM translator a released x86_64 Android 17 image carries, from the newest
       # release that has one, so the image booted below lays it over its system as a release
       # does and the overlay check has it to look at. Releases are published by the official
@@ -936,12 +987,13 @@ jobs:
           args+=(--power-hal .scratch/power-hal)
           args+=(--gnss-hal .scratch/gnss-hal/dsa-gnss)
           args+=(--agent .scratch/agent/DsaAgent.apk)
+          args+=(--default-apps .scratch/default-apps)
           args+=(--aapt2 .scratch/build-tools/aapt2)
           args+=(${{ steps.translator.outputs.args }})
           printf '%s\n' "${args[@]}" > .scratch/image-args
           programs=(.scratch/guest-graphics .scratch/channeld .scratch/hwcomposer .scratch/codec2 .scratch/audio
                     .scratch/sensors .scratch/camera .scratch/power-hal .scratch/gnss-hal .scratch/agent
-                    .scratch/build-tools/aapt2)
+                    .scratch/default-apps .scratch/build-tools/aapt2)
           [[ -d .scratch/arm-translation ]] && programs+=(.scratch/arm-translation)
           {
             echo "runner: $ImageOS"
@@ -953,7 +1005,7 @@ jobs:
           inputs="$(sha256sum < "$RUNNER_TEMP/image-inputs.txt" | cut -c1-16)"
           prefix="guest-image-android-${{ matrix.android }}-${{ matrix.arch }}-"
           # Braces: the hash is hex, so "$prefix<hash>" would name one unset variable.
-          key="${prefix}${{ hashFiles('dsa/android-versions.json', 'dsa/guest/image/**', 'dsa/guest/framework/**', 'dsa/guest/*/*.rc', 'dsa/guest/*/*.xml', '!dsa/guest/**/__pycache__/**') }}-$inputs"
+          key="${prefix}${{ hashFiles('dsa/android-versions.json', 'dsa/guest/image/**', 'dsa/guest/framework/**', 'dsa/apps/**', 'dsa/guest/*/*.rc', 'dsa/guest/*/*.xml', '!dsa/guest/**/__pycache__/**') }}-$inputs"
           echo "the image's key: $key"
           echo "key=$key" >> "$GITHUB_OUTPUT"
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
@@ -1118,7 +1170,7 @@ jobs:
   # handed to the boot checks. One combination is enough to boot, and the runner's KVM is x86_64.
   boot-image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
-    needs: [guest-programs, agent]
+    needs: [guest-programs, agent, default-apps]
     if: github.event_name != 'workflow_dispatch' || inputs.android == '17' || inputs.android == 'all'
     runs-on: ubuntu-latest
     timeout-minutes: 60

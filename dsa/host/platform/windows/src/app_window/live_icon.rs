@@ -23,30 +23,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SM_CXICON, SM_CXSMICON, WM_SETICON,
 };
 
+use dsa_host_core::compositor::caption_icon::{
+    caption_icon_source, CaptionIconSource, MAX_ICON_SOURCE,
+};
+
 use crate::compositor::widgets::png::{size, with_com, Decoder};
 
 /// The app's icon and its title bar's icon, as PNG images.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LiveIcon {
-    pub icon_png: Vec<u8>,
-    /// An adaptive icon's foreground layer alone; empty when the icon is not adaptive.
-    pub caption_icon_png: Vec<u8>,
-}
-
-impl LiveIcon {
-    /// The image the title bar draws: the foreground layer when there is one.
-    pub fn caption_png(&self) -> &[u8] {
-        if self.caption_icon_png.is_empty() {
-            &self.icon_png
-        } else {
-            &self.caption_icon_png
-        }
-    }
-}
-
-/// The largest image a window's icon is decoded from, in pixels on a side, so a broken
-/// message cannot take much memory.
-const MAX_SOURCE: u32 = 2048;
+pub type LiveIcon = CaptionIconSource;
 
 thread_local! {
     /// The windows' thread's icon: every window of the program is on that one thread, and a
@@ -58,20 +42,10 @@ thread_local! {
 /// image that is not a PNG of a sensible size is ignored, and the windows keep the icon they
 /// have. Returns whether it was taken.
 pub fn set(icon_png: Vec<u8>, caption_icon_png: Vec<u8>) -> bool {
-    let readable = |png: &[u8]| size(png).is_some_and(|(w, h)| w <= MAX_SOURCE && h <= MAX_SOURCE);
-    if !readable(&icon_png) {
+    let Some(icon) = caption_icon_source(icon_png, caption_icon_png) else {
         return false;
-    }
-    let caption_icon_png = if readable(&caption_icon_png) {
-        caption_icon_png
-    } else {
-        Vec::new()
     };
-    let icon = Arc::new(LiveIcon {
-        icon_png,
-        caption_icon_png,
-    });
-    CURRENT.with(|current| *current.borrow_mut() = Some(icon));
+    CURRENT.with(|current| *current.borrow_mut() = Some(Arc::new(icon)));
     true
 }
 
@@ -94,7 +68,8 @@ pub fn premultiplied(png: &[u8], side: u32) -> Option<Vec<u8>> {
 /// foreground is ([`dsa_host_core::compositor::caption::caption_icon`]).
 pub fn caption_logo(png: &[u8], side: u32) -> Option<Vec<u8>> {
     let (width, height) = size(png)?;
-    if side == 0 || width == 0 || height == 0 || width > MAX_SOURCE || height > MAX_SOURCE {
+    if side == 0 || width == 0 || height == 0 || width > MAX_ICON_SOURCE || height > MAX_ICON_SOURCE
+    {
         return None;
     }
     let pixels = with_com(|| Decoder::new().ok()?.decode(png, width, height).ok())?;
@@ -239,20 +214,6 @@ pub fn icon(pixels: &[u8], side: u32) -> HICON {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fr7_the_title_bar_draws_the_foreground_when_there_is_one() {
-        let adaptive = LiveIcon {
-            icon_png: vec![1],
-            caption_icon_png: vec![2],
-        };
-        assert_eq!(adaptive.caption_png(), &[2]);
-        let plain = LiveIcon {
-            icon_png: vec![1],
-            caption_icon_png: Vec::new(),
-        };
-        assert_eq!(plain.caption_png(), &[1]);
-    }
 
     #[test]
     fn fr7_a_window_icon_grows_with_its_monitors_scale() {

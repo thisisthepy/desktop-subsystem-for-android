@@ -193,17 +193,7 @@ pub fn follow(hub: Arc<PowerHub>, stop: Arc<AtomicBool>) {
             .ok()
             .and_then(|t| parse_meminfo(&t))
         {
-            let was_low = pressure.low();
-            let low = pressure.update(total_kb, available_kb);
-            if low != was_low {
-                eprintln!(
-                    "host memory: {} MiB of {} MiB available, {}",
-                    available_kb / 1024,
-                    total_kb / 1024,
-                    if low { "short" } else { "no longer short" }
-                );
-            }
-            hub.update_memory(low);
+            pressure.observe(&hub, total_kb, available_kb);
         }
         let mut waited = Duration::ZERO;
         while waited < POLL && !stop.load(Ordering::Relaxed) {

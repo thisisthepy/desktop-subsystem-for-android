@@ -4,10 +4,10 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+use dsa_host_core::boot_signs::{explain_unfinished_boot, explain_unreachable_agent, BootSigns};
 use dsa_host_windows::console_log::{
-    boot_header, clean_line, explain_unfinished_boot, explain_unreachable_agent, failure_report,
-    old_copy_path, rotate_if_large, utc_timestamp, ConsoleLog, ConsoleSigns, ConsoleTail,
-    BOOT_LIMIT_BYTES, ROTATE_AT_BYTES, TAIL_LINES,
+    boot_header, clean_line, failure_report, old_copy_path, rotate_if_large, utc_timestamp,
+    ConsoleLog, ConsoleTail, BOOT_LIMIT_BYTES, BOOT_WORDS, ROTATE_AT_BYTES, TAIL_LINES,
 };
 
 fn scratch(name: &str) -> PathBuf {
@@ -85,6 +85,7 @@ fn fr2_a_refused_agent_is_counted_with_its_domain_and_gets_a_way_out_that_keeps_
         tail.signs(),
         Path::new("android.log"),
         Some(Path::new("android.vhdx")),
+        &BOOT_WORDS,
     );
     assert!(said.contains("3 times"), "{said}");
     assert!(said.contains("priv_app"), "{said}");
@@ -97,11 +98,12 @@ fn fr2_a_refused_agent_is_counted_with_its_domain_and_gets_a_way_out_that_keeps_
 fn fr2_an_unreachable_renderer_is_named_as_the_cause_of_an_unfinished_boot() {
     let mut tail = ConsoleTail::new(2);
     tail.push(b"HWC W cannot reach the host renderer on vsock port 5567: No such device\n");
-    let said = explain_unfinished_boot(tail.signs(), Path::new("android.log"));
+    let said = explain_unfinished_boot(tail.signs(), Path::new("android.log"), &BOOT_WORDS);
     assert!(said.contains("1 times"), "{said}");
     assert!(said.contains("dsa-wm"), "{said}");
 
-    let said = explain_unfinished_boot(&ConsoleSigns::default(), Path::new("android.log"));
+    let said =
+        explain_unfinished_boot(&BootSigns::default(), Path::new("android.log"), &BOOT_WORDS);
     assert!(said.contains("android.log"), "{said}");
     assert!(!said.contains("dsa-wm"), "{said}");
 }
@@ -292,8 +294,8 @@ fn fr21_one_boot_writes_at_most_its_limit_to_the_console_log() {
 
 #[test]
 fn fr21_signs_from_the_guest_log_add_to_the_consoles() {
-    let mut console = ConsoleSigns::default();
-    let mut log = ConsoleSigns::default();
+    let mut console = BootSigns::default();
+    let mut log = BootSigns::default();
     log.read_line(
         "servicemanager: avc: denied { find } for pid=1 \
          name=io.github.thisisthepy.dsa.channel.IChannel/default \
@@ -301,4 +303,14 @@ fn fr21_signs_from_the_guest_log_add_to_the_consoles() {
     );
     console.merge(&log);
     assert!(console.agent_refused_for_keys());
+}
+
+#[test]
+fn fr14_a_console_with_only_the_boot_header_shows_the_guest_never_ran() {
+    let dir = scratch("guest-printed");
+    let mut log = ConsoleLog::begin_boot(&dir.join("android.log"), "boot header");
+    log.note("the Android VM never opened its console");
+    assert!(!log.guest_printed(), "a header and notes are the host's");
+    log.record(b"Linux version 6.12\n");
+    assert!(log.guest_printed());
 }

@@ -21,6 +21,15 @@ public partial class App : Application
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
+    static App()
+    {
+        // Software rendering, as the settings app, set before the application's resources load
+        // and before the first window: hardware rendering creates a Direct3D device in the
+        // graphics driver, with private heaps of its own, for one window of text and a
+        // progress bar.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);

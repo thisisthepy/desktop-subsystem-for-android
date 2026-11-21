@@ -34,7 +34,7 @@ pub struct RendererClient {
     sockets: (PathBuf, PathBuf),
     display: (u32, u32),
     link: Mutex<Option<RendererLink>>,
-    book: Mutex<TextureBook<usize>>,
+    book: Mutex<TextureBook<u64>>,
     memory: Pending<MemoryReport>,
     /// Each DeviceState the renderer sent: a change is a GPU reset.
     device_changes: DeviceChanges,
@@ -120,13 +120,13 @@ impl RendererClient {
     }
 
     fn answer(&self, request: TargetRequest, link: &RendererLink) {
-        let raw = self.presenter.target_for(
+        let (raw, serial) = self.presenter.target_with_serial(
             request.display_id,
             request.width,
             request.height,
             request.exact,
         );
-        let handle = (!raw.is_null()).then_some(raw as usize);
+        let handle = (!raw.is_null()).then_some(serial);
         let given = self.book.lock().unwrap_or_else(|e| e.into_inner()).give(
             request.display_id,
             handle,

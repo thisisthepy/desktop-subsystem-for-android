@@ -313,6 +313,17 @@
             android:grantUriPermissions="true" />
 
         <!--
+          The image the host copied, read only, to the app that pastes it
+          (platform/AndroidClipboard.kt). Not exported: the clipboard service grants the app
+          that pastes the clip its read permission.
+        -->
+        <provider
+            android:name=".platform.HostClipboardProvider"
+            android:authorities="io.github.thisisthepy.dsa.agent.clipboard"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!--
           The guest's only input method. It is no keyboard: it has no view and is never shown,
           and it puts the text the host's input method composes and commits into the focused
           editor. BIND_INPUT_METHOD keeps every caller but the input method manager out.

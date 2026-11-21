@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::app_windows::AppWindows;
 use dsa_host_core::compositor::frame_stall::{restart_in_background, Stall};
+use dsa_host_core::compositor::resize_queue::{DrawnFrames, ResizeQueue};
+use dsa_host_core::compositor::task_watch::{follow_tasks, next_batch, send_request, TaskFeed};
 use dsa_host_core::compositor::window_hosts::{to_wire, HostId, ToHost};
 use dsa_host_core::compositor::GraphicsStreamKind;
 use dsa_host_core::guest_display::display_or_smallest;
@@ -22,7 +24,7 @@ use dsa_host_core::notifications::Notification;
 use dsa_host_core::tasks::{AppInfo, PinShortcutRequest, TaskRequest};
 use dsa_host_unix::socket::UnixLocalConnector;
 
-use super::hosts::{self, Links, BUILD};
+use super::hosts::{self, connect, Links, BUILD};
 use super::launch::{installed_window_host, AppLauncher};
 use super::log;
 use super::manager::{Manager, ManagerEvent, Platform, Route};
@@ -34,17 +36,19 @@ use crate::host_config::{user_root_in, MacHostConfig, UserFolders};
 use crate::launchd::WM_LABEL;
 use crate::service::relay_socket;
 use crate::shell::app_stubs;
-use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
+use dsa_host_core::android_presence::{follow_in_background as follow_presence, SharedPresence};
+use dsa_host_core::compositor::window_sizing::{MANAGER_TICK, PRESENT_WAIT};
+use dsa_host_core::renderer::{spawn_supervisor_for, RendererHandler};
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
 
 /// How long to wait for the service before trying again.
 const RETRY: Duration = Duration::from_secs(2);
-/// How long one call to the service may take.
-const TIMEOUT: Duration = Duration::from_secs(5);
-/// How often the manager looks at its timers.
-const TICK: Duration = Duration::from_millis(500);
-/// How often the presenter looks for window hosts that are late.
-const PRESENT_TICK: Duration = Duration::from_millis(100);
+/// How often the manager looks at its timers: the same on every host.
+const TICK: Duration = MANAGER_TICK;
+/// How often the presenter looks for window hosts that are late: a fifth of the time one may
+/// take, so a late window host is let go within a fifth of [`PRESENT_WAIT`] of its deadline.
+/// (The Windows host waits for each answer on the frame's own thread instead.)
+const PRESENT_TICK: Duration = Duration::from_millis(PRESENT_WAIT.as_millis() as u64 / 5);
 /// How often the user's window settings for each app are read again.
 const APP_WINDOWS_EVERY: Duration = Duration::from_secs(30);
 
@@ -94,30 +98,32 @@ impl Places {
 }
 
 /// The renderer library: `DSA_RENDERER` when set, else `libgfxstream_backend.dylib` in the
-/// `Frameworks` folder of the bundle this program is in.
+/// `Frameworks` folder of DSA.app, which this program runs in (from its helper bundle).
 pub fn renderer_path() -> PathBuf {
     if let Some(path) = std::env::var_os("DSA_RENDERER") {
         return PathBuf::from(path);
     }
     let exe = std::env::current_exe().unwrap_or_default();
-    let macos = exe.parent().map(Path::to_path_buf).unwrap_or_default();
-    macos.join("../Frameworks/libgfxstream_backend.dylib")
+    let contents = crate::app_layout::app_contents(&exe).unwrap_or_default();
+    contents.join("Frameworks/libgfxstream_backend.dylib")
+}
+
+/// The graphics renderer program (`dsa-gfx`): in DSA.app's `Contents/MacOS`, which this
+/// program finds from its own helper bundle, else beside this program (a development build).
+pub fn renderer_program() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let program =
+        crate::app_layout::programs_dir(&exe)?.join(dsa_host_core::renderer::RENDERER_PROGRAM);
+    program.is_file().then_some(program)
 }
 
 /// The Vulkan driver description (MoltenVK's) DSA.app carries beside the renderer, for the
 /// Vulkan loader to find, when this program is in the bundle.
 pub fn bundled_vulkan_driver() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let contents = exe.parent()?.parent()?;
+    let contents = crate::app_layout::app_contents(&exe)?;
     let driver = contents.join("Resources/vulkan/icd.d/MoltenVK_icd.json");
     driver.is_file().then_some(driver)
-}
-
-fn connect(host_api: &Path) -> Result<HostApiClient, String> {
-    let mut connector = UnixLocalConnector {
-        path: host_api.to_path_buf(),
-    };
-    HostApiClient::connect(&mut connector, BUILD, TIMEOUT).map_err(|e| e.to_string())
 }
 
 /// What the manager does outside itself, on a Mac.
@@ -251,47 +257,25 @@ fn watch_tasks(host_api: PathBuf, events: Sender<ManagerEvent>) {
     let _ = thread::Builder::new()
         .name("dsa-wm-tasks".into())
         .spawn(move || {
-            let mut warned = false;
-            loop {
-                let watch = connect(&host_api)
-                    .and_then(|client| client.watch_tasks().map_err(|e| e.to_string()));
-                let mut stream = match watch {
-                    Ok(stream) => stream,
-                    Err(why) => {
-                        if !warned {
-                            log(&format!("waiting for the DSA service: {why}"));
-                            warned = true;
-                        }
-                        thread::sleep(RETRY);
-                        continue;
-                    }
-                };
-                warned = false;
-                if events
-                    .send(ManagerEvent::Sync(stream.current().events()))
-                    .is_err()
-                {
-                    return;
-                }
-                loop {
-                    match stream.next(Duration::from_secs(1)) {
-                        Ok(Some(event)) => {
-                            if events.send(ManagerEvent::Task(Box::new(event))).is_err() {
-                                return;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(why) => {
-                            log(&format!("the task watch ended: {why}"));
-                            break;
-                        }
-                    }
-                }
-                if events.send(ManagerEvent::Lost).is_err() {
-                    return;
-                }
-                thread::sleep(RETRY);
-            }
+            follow_tasks(
+                || {
+                    connect(&host_api)
+                        .and_then(|client| client.watch_tasks().map_err(|e| e.to_string()))
+                },
+                |feed| {
+                    events
+                        .send(match feed {
+                            TaskFeed::Sync(tasks) => ManagerEvent::Sync(tasks),
+                            TaskFeed::Task(event) => ManagerEvent::Task(event),
+                            TaskFeed::Lost => ManagerEvent::Lost,
+                        })
+                        .is_ok()
+                },
+                &AtomicBool::new(false),
+                RETRY,
+                Duration::from_secs(1),
+                &log,
+            );
         });
 }
 
@@ -324,29 +308,26 @@ fn serve_requests(
     host_api: PathBuf,
     requests: Receiver<TaskRequest>,
     events: Sender<ManagerEvent>,
+    drawn: DrawnFrames,
 ) {
     let _ = thread::Builder::new()
         .name("dsa-wm-requests".into())
         .spawn(move || {
             let mut client: Option<HostApiClient> = None;
-            for request in requests {
-                if client.is_none() {
-                    client = connect(&host_api)
-                        .map_err(|why| log(&format!("cannot reach the DSA service: {why}")))
-                        .ok();
-                }
-                let result = match client.as_mut() {
-                    Some(open) => open.request(&request).map_err(|e| e.to_string()),
-                    None => Err("the DSA service is not reachable".to_string()),
-                };
-                if let Err(why) = result {
-                    log(&format!(
-                        "{} did not reach Android: {why}",
-                        request.describe()
-                    ));
-                    client = None;
-                    if let TaskRequest::Close { task_id } = request {
-                        let _ = events.send(ManagerEvent::CloseFailed(task_id));
+            let mut queue = ResizeQueue::new(drawn);
+            // Sizes held for a frame are looked at again every few milliseconds; with none
+            // held, the next request is waited for.
+            while let Some(incoming) = next_batch(&requests, queue.waiting()) {
+                for request in queue.step(incoming, Instant::now()) {
+                    let result = send_request(&mut client, &request, || connect(&host_api));
+                    if let Err(why) = result {
+                        log(&format!(
+                            "{} did not reach Android: {why}",
+                            request.describe()
+                        ));
+                        if let TaskRequest::Close { task_id } = request {
+                            let _ = events.send(ManagerEvent::CloseFailed(task_id));
+                        }
                     }
                 }
             }
@@ -402,9 +383,10 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         }
     };
     let links: Links = Arc::default();
-    let presenter = Arc::new(Presenter::new(Arc::clone(&links), ports));
-    // The renderer runs in a process of its own, dsa-gfx, which this process starts and
-    // starts again whenever it ends: a crash in the renderer or MoltenVK then ends only that
+    let drawn = DrawnFrames::new();
+    let presenter = Arc::new(Presenter::new(Arc::clone(&links), ports, drawn.clone()));
+    // The renderer runs in a process of its own, dsa-gfx, which this process starts while
+    // Android runs (none runs while it is stopped) and starts again whenever it ends: a crash in the renderer or MoltenVK then ends only that
     // process, and the app windows keep their last frame. It serves the guest's streams on the
     // relay sockets.
     let sockets = (
@@ -414,16 +396,34 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     let client = RendererClient::new(Arc::clone(&presenter), sockets, display_or_smallest(None));
     let fds: CurrentFds = Arc::default();
     let mut launcher = UnixLauncher::installed(fds);
+    if let Some(program) = renderer_program() {
+        launcher.program = program;
+    }
     if std::env::var_os("DSA_RENDERER").is_none() {
         launcher
             .env
             .push(("DSA_RENDERER".into(), places.renderer.display().to_string()));
     }
-    if let Err(why) = spawn_supervisor(
+    let presence = SharedPresence::new();
+    {
+        let host_api = places.host_api.clone();
+        if let Err(why) = follow_presence(
+            move || connect(&host_api),
+            Arc::clone(&presence),
+            Arc::clone(&stop),
+        ) {
+            log(&format!(
+                "graphics: Android's state cannot be followed ({why}); the renderer starts \
+                 only once"
+            ));
+        }
+    }
+    if let Err(why) = spawn_supervisor_for(
         Box::new(launcher),
         Arc::clone(&client) as Arc<dyn RendererHandler>,
         BUILD.to_string(),
         Arc::clone(&stop),
+        presence,
     ) {
         log(&format!(
             "graphics: the renderer cannot be started ({why}); task windows open but show no \
@@ -440,7 +440,7 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         Arc::clone(&stop),
     )?;
     let (requests, to_send) = channel();
-    serve_requests(places.host_api.clone(), to_send, events.clone());
+    serve_requests(places.host_api.clone(), to_send, events.clone(), drawn);
     watch_tasks(places.host_api.clone(), events.clone());
     watch_app_windows(places.host_api.clone(), events.clone(), Arc::clone(&stop));
     drop(events);
@@ -462,6 +462,28 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         news_posted,
         Arc::clone(&launcher),
     );
+    super::clipboard::share(places.host_api.clone(), Arc::clone(&stop));
+    // Android that crashes is said in the Notification Center, as DSA's own news.
+    {
+        let news = Mutex::new(news.clone());
+        let tell: Arc<dyn Fn(Notification) + Send + Sync> = Arc::new(move |notice| {
+            let sent = news.lock().unwrap_or_else(|e| e.into_inner()).send(notice);
+            if sent.is_err() {
+                log("the notifications have ended; the user is not told that Android crashed");
+            }
+        });
+        if let Err(why) = dsa_host_core::guest_crash::watch_in_background(
+            Box::new(UnixLocalConnector {
+                path: places.host_api.clone(),
+            }),
+            format!("{BUILD} crash watch"),
+            Arc::new(crate::ui_language::current),
+            tell,
+            Arc::new(|line: &str| log(line)),
+        ) {
+            log(&format!("a crash of Android will not be told: {why}"));
+        }
+    }
     let platform = MacPlatform {
         links: Arc::clone(&links),
         presenter: Arc::clone(&presenter),
@@ -508,4 +530,16 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     }
     log("dsa-wm stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use dsa_host_core::compositor::window_sizing::vectors::TIMING;
+
+    #[test]
+    fn nfr8_the_macos_manager_keeps_the_shared_timing() {
+        assert_eq!(super::TICK, TIMING.tick);
+        assert_eq!(super::super::frame_slots::PRESENT_WAIT, TIMING.present_wait);
+        assert!(super::PRESENT_TICK < TIMING.present_wait);
+    }
 }

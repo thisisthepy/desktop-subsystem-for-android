@@ -19,31 +19,28 @@
 //! (older than Windows 10 version 1903) still runs the window manager, and its ceremonies
 //! are unavailable with that reason.
 
-use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::passkeys::{Ceremony, CeremonyResult, PasskeyEvent};
+pub use dsa_host_core::passkeys::follower::Cancel;
+use dsa_host_core::passkeys::follower::{
+    follow_passkeys, perform_guarded, PasskeyFollowing, PasskeyLog, PasskeyRun,
+};
+use dsa_host_core::passkeys::{Ceremony, CeremonyResult};
 use dsa_transport::Connector;
 
 use crate::compositor::log::{note, CompositorLogger};
 
-/// What the window manager calls itself to the service.
-const BUILD: &str = "dsa-wm passkeys";
-
-/// How long a request to the service is waited for.
-const ANSWER: Duration = Duration::from_secs(5);
-
-/// How long to wait before connecting again after the service could not be reached.
-const RETRY: Duration = Duration::from_secs(1);
-
-/// How long the watch waits for the service before it looks for finished ceremonies again.
-const POLL: Duration = Duration::from_millis(100);
+/// How the follower talks to the service.
+const FOLLOWING: PasskeyFollowing = PasskeyFollowing {
+    build: "dsa-wm passkeys",
+    answer: Duration::from_secs(5),
+    retry: Duration::from_secs(1),
+    poll: Duration::from_millis(100),
+    thread_name: "dsa-wm-passkey",
+};
 
 /// Performs one ceremony. The window manager's is Windows Hello ([`WindowsHello`]); a test's
 /// answers as it is told.
@@ -51,45 +48,6 @@ pub trait Authenticator: Send + Sync {
     /// Makes or uses a passkey as `ceremony` says. `cancel` is withdrawn when Android no
     /// longer wants it; the ceremony then ends, canceled.
     fn perform(&self, ceremony: &Ceremony, cancel: &Cancel) -> CeremonyResult;
-}
-
-type Hook = Box<dyn Fn() + Send>;
-
-/// Whether a ceremony is still wanted, and how to stop it while it runs.
-#[derive(Default)]
-pub struct Cancel {
-    withdrawn: AtomicBool,
-    hook: Mutex<Option<Hook>>,
-}
-
-impl Cancel {
-    pub fn new() -> Cancel {
-        Cancel::default()
-    }
-
-    /// Android no longer wants the ceremony: stops it if it runs.
-    pub fn withdraw(&self) {
-        self.withdrawn.store(true, Ordering::SeqCst);
-        if let Some(hook) = self.hook.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            hook();
-        }
-    }
-
-    pub fn is_withdrawn(&self) -> bool {
-        self.withdrawn.load(Ordering::SeqCst)
-    }
-
-    /// Sets what stops the ceremony while it runs. False when it was withdrawn already, so it
-    /// is not started; a withdrawal from now on calls `hook`.
-    pub fn while_running(&self, hook: Hook) -> bool {
-        *self.hook.lock().unwrap_or_else(|e| e.into_inner()) = Some(hook);
-        !self.is_withdrawn()
-    }
-
-    /// The ceremony is over; nothing is left to stop.
-    pub fn finished(&self) {
-        *self.hook.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    }
 }
 
 /// Performs the passkey ceremonies of the user's Android until `stop`, reconnecting to the
@@ -101,137 +59,17 @@ pub fn serve(
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
-    let (done_tx, done) = mpsc::channel();
-    let mut running: HashMap<u64, Arc<Cancel>> = HashMap::new();
-    let mut last_error = String::new();
-    while !stop.load(Ordering::Relaxed) {
-        let watch = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_passkeys());
-        let mut watch = match watch {
-            Ok(watch) => watch,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    note(
-                        logger.as_deref(),
-                        &format!("passkeys cannot reach the service: {error}"),
-                    );
-                    last_error = error;
-                }
-                report(&mut *connector, &done, &mut running, logger.as_deref());
-                thread::sleep(RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        while !stop.load(Ordering::Relaxed) {
-            report(&mut *connector, &done, &mut running, logger.as_deref());
-            match watch.next(POLL) {
-                Ok(Some(PasskeyEvent::Ceremony { id, ceremony })) => {
-                    let cancel = Arc::new(Cancel::new());
-                    running.insert(id, Arc::clone(&cancel));
-                    start_ceremony(
-                        id,
-                        *ceremony,
-                        Arc::clone(&authenticator),
-                        cancel,
-                        done_tx.clone(),
-                        logger.clone(),
-                    );
-                }
-                Ok(Some(PasskeyEvent::Withdrawn { id })) => {
-                    if let Some(cancel) = running.get(&id) {
-                        cancel.withdraw();
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    note(
-                        logger.as_deref(),
-                        &format!("the passkeys' connection to the service ended: {error}"),
-                    );
-                    break;
-                }
-            }
-        }
-    }
-    // The window manager is ending: what still runs is canceled in Windows Hello.
-    for cancel in running.values() {
-        cancel.withdraw();
-    }
-}
-
-/// Passes what became of each finished ceremony to the service. A withdrawn one has nobody
-/// waiting for it, and is not reported.
-fn report(
-    connector: &mut dyn Connector,
-    done: &Receiver<(u64, CeremonyResult)>,
-    running: &mut HashMap<u64, Arc<Cancel>>,
-    logger: Option<&CompositorLogger>,
-) {
-    while let Ok((id, result)) = done.try_recv() {
-        let withdrawn = running
-            .remove(&id)
-            .is_some_and(|cancel| cancel.is_withdrawn());
-        if withdrawn {
-            continue;
-        }
-        let sent = HostApiClient::connect(connector, BUILD, ANSWER)
-            .and_then(|mut client| client.report_passkey_ceremony(id, &result));
-        if let Err(error) = sent {
-            note(
-                logger,
-                &format!("what became of passkey ceremony {id} did not reach Android: {error}"),
-            );
-        }
-    }
-}
-
-/// What a ceremony is, for the log: never the user's name or any secret.
-fn describe(ceremony: &Ceremony) -> String {
-    let what = if ceremony.create {
-        "making a passkey"
-    } else {
-        "signing in with a passkey"
-    };
-    let who = if ceremony.app_label.is_empty() {
-        &ceremony.package
-    } else {
-        &ceremony.app_label
-    };
-    format!("{what} for {} ({who})", ceremony.rp_id)
-}
-
-/// Performs one ceremony on a thread of its own, and sends what became of it on `done`.
-fn start_ceremony(
-    id: u64,
-    ceremony: Ceremony,
-    authenticator: Arc<dyn Authenticator>,
-    cancel: Arc<Cancel>,
-    done: Sender<(u64, CeremonyResult)>,
-    logger: Option<Arc<CompositorLogger>>,
-) {
-    let failed = done.clone();
-    let spawned = thread::Builder::new()
-        .name("dsa-wm-passkey".into())
-        .spawn(move || {
-            let result = perform_one(&ceremony, &*authenticator, &cancel);
-            match &result {
-                CeremonyResult::Created { .. } | CeremonyResult::Asserted { .. } => {}
-                CeremonyResult::Canceled(why)
-                | CeremonyResult::Unavailable(why)
-                | CeremonyResult::NotAllowed(why)
-                | CeremonyResult::Failed(why) => note(
-                    logger.as_deref(),
-                    &format!("{}: {why}", describe(&ceremony)),
-                ),
-            }
-            let _ = done.send((id, result));
-        });
-    if let Err(error) = spawned {
-        let why = format!("the window manager could not start Windows Hello: {error}");
-        let _ = failed.send((id, CeremonyResult::Failed(why)));
-    }
+    let run: PasskeyRun =
+        Arc::new(move |_, ceremony, cancel| authenticator.perform(ceremony, cancel));
+    let log: PasskeyLog = Arc::new(move |line| note(logger.as_deref(), line));
+    follow_passkeys(
+        &mut *connector,
+        &FOLLOWING,
+        &run,
+        &stop,
+        &thread::sleep,
+        &log,
+    );
 }
 
 /// Performs `ceremony`, unless it was withdrawn first; a panic in the authenticator's code is a
@@ -241,17 +79,7 @@ pub fn perform_one(
     authenticator: &dyn Authenticator,
     cancel: &Cancel,
 ) -> CeremonyResult {
-    if cancel.is_withdrawn() {
-        return CeremonyResult::Canceled("Android withdrew the request".into());
-    }
-    let performed = catch_unwind(AssertUnwindSafe(|| authenticator.perform(ceremony, cancel)));
-    cancel.finished();
-    let result =
-        performed.unwrap_or_else(|_| CeremonyResult::Failed("the passkey code failed".into()));
-    if cancel.is_withdrawn() {
-        return CeremonyResult::Canceled("Android withdrew the request".into());
-    }
-    result
+    perform_guarded(cancel, || authenticator.perform(ceremony, cancel))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -895,6 +723,7 @@ mod hello {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{mpsc, Mutex};
 
     fn ceremony(create: bool) -> Ceremony {
         Ceremony {

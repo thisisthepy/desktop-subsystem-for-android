@@ -804,8 +804,8 @@ msgstr "此设置适用于此计算机的所有用户，因此更改它需要管
 msgid "The newest supported version (now Android {0})"
 msgstr "支持的最新版本（当前为 Android {0}）"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} 及其安全更新"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "固定为 Android {0}：只接收其安全更新和映像更新，不会自动换成更新的 Android"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "没有待安装的 Android 更新。DSA 每天检查一次，并在没有打开任何应用窗口时重启 Android 以应用更新。"
@@ -1251,8 +1251,8 @@ msgstr "正在下载并安装 Google Play。这可能需要几分钟。"
 msgid "Enter this number on Google's registration page."
 msgstr "请在 Google 的注册页面上输入此号码。"
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "安装 Google Play 且 Android 启动后，它会显示在这里。"
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID 暂时不可用。Google Play 服务会在此设备首次向 Google 签到时生成它。\n这需要已安装 Google Play、Android 带着它启动，并且网络已连接。\n如果几分钟后仍为空，请重新启动 Android。\n该 ID 是十进制数字，是 Google 注册页面接受的格式。"
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android 在此更改之前已启动。停止并重新启动 Android，Google Play 才会遵循此更改。"
@@ -1838,3 +1838,39 @@ msgstr "跟随默认设置（整个屏幕）"
 
 msgid "Follow the default (inside the window)"
 msgstr "跟随默认设置（在窗口内）"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android 会停止并重新启动。\n\n它的应用窗口会关闭。启动完成后，请重新打开应用。"
+
+msgid "Alternative stores"
+msgstr "其他应用商店"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。在应用列表中移除应用商店。"
+
+msgid "Installed, version {0}"
+msgstr "已安装，版本 {0}"
+
+msgid "Downloading and installing…"
+msgstr "正在下载并安装…"
+
+msgid "Not installed: {0}"
+msgstr "未安装：{0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "多个进程共用的内存，例如窗口画面和图形缓冲区。使用它的应用关闭后即释放。"
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "当前没有任何东西在用的内存。Android 会把它还给电脑，因此不占用电脑的内存。"
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "内核为每个运行中的线程保留的工作空间。关闭应用后会减少。"
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "告诉处理器每个应用的内存位于内存条何处的映射表。关闭应用后会减少。"
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "内核及其驱动预留的大块缓冲区，用于图形等。不再需要时释放。"
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "内核为每个处理器核心各保留一份的数据。大小在 Android 启动时确定。"

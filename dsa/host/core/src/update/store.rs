@@ -28,6 +28,18 @@ use super::{from_hex, to_hex, UpdateError};
 pub trait Fetch {
     /// Writes the body of `url` to `out`, returning how many bytes were written.
     fn fetch(&self, url: &str, out: &mut dyn Write) -> Result<u64, String>;
+
+    /// As [`Fetch::fetch`], asking with `user_agent` when one is given, for a server that
+    /// serves a file to some browsers only. A fetcher that cannot set one fetches as usual.
+    fn fetch_as(
+        &self,
+        url: &str,
+        user_agent: Option<&str>,
+        out: &mut dyn Write,
+    ) -> Result<u64, String> {
+        let _ = user_agent;
+        self.fetch(url, out)
+    }
 }
 
 /// Fetches `file:` URLs and plain paths, for a local mirror and for tests.
@@ -70,6 +82,38 @@ pub struct State {
     /// build's own list stands in.
     #[serde(default)]
     pub supported_majors: Vec<u32>,
+    /// The Android major an installer fixed this computer to, once it was applied: a preset
+    /// installer (such as `a16`) names one, and the service applies it only once, so a later
+    /// choice of the user stands. While the channel is still that major, it is fixed: it takes
+    /// updates within that major and never moves to a newer one on its own.
+    #[serde(default)]
+    pub preset_major: Option<u32>,
+}
+
+impl State {
+    /// The major this computer is fixed to: the installer's preset, while the channel is still
+    /// on it.
+    pub fn pinned_major(&self) -> Option<u32> {
+        self.preset_major
+            .filter(|major| self.channel == Channel::Major(*major))
+    }
+}
+
+/// The news for a computer fixed to Android `major` once that major lost support.
+pub(crate) fn pinned_unsupported(major: u32) -> String {
+    format!(
+        "Android {major} is no longer supported and this installation is fixed to it, so it \
+         gets no more Android updates; choose a newer Android in the settings app to move up, \
+         keeping apps and their data"
+    )
+}
+
+/// The major `state`'s channel leads to: the fixed major while it is fixed, even once it lost
+/// support, else [`versions::target_major`].
+fn target_of(state: &State, supported: &[u32]) -> Option<u32> {
+    state
+        .pinned_major()
+        .or_else(|| versions::target_major(state.channel, supported))
 }
 
 /// What [`ImageStore::recover`] found and did.
@@ -214,6 +258,7 @@ impl ImageStore {
                 channel: Channel::Latest,
                 older_allowed: false,
                 supported_majors: Vec::new(),
+                preset_major: None,
             })?;
         }
         store.state()?;
@@ -337,21 +382,58 @@ impl ImageStore {
         sorted.sort_unstable();
         sorted.dedup();
         let mut notice = None;
-        if let Channel::Major(chosen) = state.channel {
-            if !sorted.contains(&chosen) {
-                if let Some(next) = versions::target_major(state.channel, &sorted) {
-                    state.channel = Channel::Major(next);
-                    notice = Some(format!(
-                        "Android {chosen} is no longer supported, so this computer moves up to \
-                         Android {next}; apps and their data are kept"
-                    ));
-                }
+        let mut moved = false;
+        if let Some(chosen) = match state.channel {
+            Channel::Major(chosen) if !sorted.contains(&chosen) => Some(chosen),
+            _ => None,
+        } {
+            if state.pinned_major() == Some(chosen) {
+                notice = Some(pinned_unsupported(chosen));
+            } else if let Some(next) = versions::target_major(state.channel, &sorted) {
+                state.channel = Channel::Major(next);
+                moved = true;
+                notice = Some(format!(
+                    "Android {chosen} is no longer supported, so this computer moves up to \
+                     Android {next}; apps and their data are kept"
+                ));
             }
         }
-        if sorted != state.supported_majors || notice.is_some() {
+        if sorted != state.supported_majors || moved {
             state.supported_majors = sorted;
             self.write_state(&state)?;
         }
+        Ok(notice)
+    }
+
+    /// Fixes this computer to Android `major`, as a preset installer asks: the channel moves to
+    /// that major, once. The same preset named again changes nothing, so a version the user
+    /// chose later stands. A major older than the running one is not taken, since moving down
+    /// erases user data, and neither is one that is not supported; the text returned says so.
+    pub fn apply_preset(&self, major: u32) -> Result<Option<String>, UpdateError> {
+        let mut state = self.state()?;
+        if state.preset_major == Some(major) {
+            return Ok(None);
+        }
+        let supported = self.supported_majors()?;
+        state.preset_major = Some(major);
+        let notice = if !supported.contains(&major) {
+            Some(format!(
+                "this installer is for Android {major}, which this version of DSA does not \
+                 support, so the Android version is left as it was"
+            ))
+        } else if major < state.current.android_major {
+            Some(format!(
+                "this installer is for Android {major}, but Android {} already runs here and \
+                 moving down would erase every user's Android data, so Android {} is kept; \
+                 choose Android {major} in the settings app to move with its data erased",
+                state.current.android_major, state.current.android_major
+            ))
+        } else {
+            state.channel = Channel::Major(major);
+            state.older_allowed = false;
+            None
+        };
+        self.write_state(&state)?;
         Ok(notice)
     }
 
@@ -408,8 +490,7 @@ impl ImageStore {
         Ok(VersionReport {
             build_id: source("build_id"),
             security_patch: source("security_patch"),
-            target_major: versions::target_major(state.channel, &supported)
-                .unwrap_or(state.current.android_major),
+            target_major: target_of(&state, &supported).unwrap_or(state.current.android_major),
             version: state.current.version,
             android_major: state.current.android_major,
             build: state.current.build,
@@ -429,8 +510,7 @@ impl ImageStore {
         let (Ok(state), Ok(supported)) = (self.state(), self.supported_majors()) else {
             return false;
         };
-        versions::target_major(state.channel, &supported)
-            .is_some_and(|target| target != state.current.android_major)
+        target_of(&state, &supported).is_some_and(|target| target != state.current.android_major)
     }
 
     /// Records that the current image booted: it stays, and images other than it and the

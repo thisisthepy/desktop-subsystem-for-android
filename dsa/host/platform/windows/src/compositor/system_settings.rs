@@ -73,20 +73,7 @@ pub fn first_day_from_windows(value: &str) -> u32 {
     }
 }
 
-/// Whether a time format (`LOCALE_SSHORTTIME`, such as "HH:mm" or "h:mm tt") shows a 24-hour
-/// clock: it has an hour in capital H.
-pub fn is_24_hour(format: &str) -> bool {
-    // Quoted text is literal, not a pattern.
-    let mut quoted = false;
-    for c in format.chars() {
-        match c {
-            '\'' => quoted = !quoted,
-            'H' if !quoted => return true,
-            _ => {}
-        }
-    }
-    false
-}
+pub use dsa_host_core::system_settings::is_24_hour_pattern as is_24_hour;
 
 /// The strings in a list of null-terminated UTF-16 strings that ends with an empty one, as
 /// `GetUserPreferredUILanguages` returns them.

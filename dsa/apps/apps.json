@@ -1,0 +1,104 @@
+{
+  "comment": "The default apps of the guest image: where each one's source is pinned, the patches and design files apps.py lays over it, how it is built, and where make-image.py puts it. The LineageOS apps come from their lineage-24.0 branch, pinned to a commit; DocumentsUI comes from AOSP at the commit each image's own build was made from (the build's manifest_<build_id>.xml names it), so it matches the framework it runs on. Move a pin by changing its commit and checking that the app's patches still apply (apps.py fetch).",
+  "branch": "lineage-24.0",
+  "apps": [
+    {
+      "name": "deskclock",
+      "label": "Clock",
+      "package": "com.android.deskclock",
+      "upstream": "LineageOS DeskClock",
+      "url": "https://github.com/LineageOS/android_packages_apps_DeskClock",
+      "commit": "dc237b5b6dde798688be22f3b7f69906b751a37b",
+      "build": {"kind": "gradle", "module": "", "java": "src", "res": "res", "preference": true},
+      "image": "SYSTEM/app/DsaClock/DsaClock.apk",
+      "replaces": ["DeskClock", "AlarmClock"],
+      "sysconfig": ["<allow-in-power-save package=\"com.android.deskclock\" />"],
+      "default_permissions": ["android.permission.POST_NOTIFICATIONS"]
+    },
+    {
+      "name": "gallery",
+      "label": "Gallery",
+      "package": "com.android.gallery3d",
+      "upstream": "LineageOS Glimpse",
+      "url": "https://github.com/LineageOS/android_packages_apps_Glimpse",
+      "commit": "882ceef7e8caba7cbc2a23eace4b2a05e610c7a4",
+      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": true},
+      "image": "SYSTEM/app/DsaGallery/DsaGallery.apk",
+      "replaces": ["Gallery2", "Gallery", "Gallery3D", "GalleryNew3D", "Glimpse"],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "camera",
+      "label": "Camera",
+      "package": "com.android.camera2",
+      "upstream": "LineageOS Aperture",
+      "url": "https://github.com/LineageOS/android_packages_apps_Aperture",
+      "commit": "479b2f3edff71b4a279fcfd9d5319b772276ce87",
+      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": true},
+      "image": "SYSTEM/app/DsaCamera/DsaCamera.apk",
+      "replaces": ["Camera2", "Aperture"],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "music",
+      "label": "Music",
+      "package": "com.android.music",
+      "upstream": "LineageOS Twelve",
+      "url": "https://github.com/LineageOS/android_packages_apps_Twelve",
+      "commit": "bc89c9e51509ac25e5c11e3ff6dfc5e47809b5ac",
+      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": true},
+      "image": "SYSTEM/app/DsaMusic/DsaMusic.apk",
+      "replaces": ["Music", "Eleven", "Twelve"],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "calculator",
+      "label": "Calculator",
+      "package": "com.android.calculator2",
+      "upstream": "LineageOS ExactCalculator",
+      "url": "https://github.com/LineageOS/android_packages_apps_ExactCalculator",
+      "commit": "f76cfbe2428de5744c0e0c4b74fb77708fb15b95",
+      "build": {"kind": "gradle", "module": "", "java": "src", "res": "res", "preference": false},
+      "image": "SYSTEM/app/DsaCalculator/DsaCalculator.apk",
+      "replaces": ["Calculator", "ExactCalculator"],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "recorder",
+      "label": "Recorder",
+      "package": "com.android.soundrecorder",
+      "upstream": "LineageOS Recorder",
+      "url": "https://github.com/LineageOS/android_packages_apps_Recorder",
+      "commit": "04edbaa8fa1ead58687daaa423269de2649bfe2b",
+      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": false},
+      "image": "SYSTEM/app/DsaRecorder/DsaRecorder.apk",
+      "replaces": ["SoundRecorder", "Recorder"],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "documentsui",
+      "label": "Files",
+      "package": "com.android.documentsui",
+      "upstream": "AOSP DocumentsUI",
+      "url": "https://android.googlesource.com/platform/packages/apps/DocumentsUI",
+      "commits": {
+        "android16": "ca99454776b47322576e6dfb5f00cb778e3b3fd0",
+        "android17": "4568ed0bc0a62f71d4126503ef92a91f42a22c4e"
+      },
+      "build": {"kind": "aosp", "tree_path": "packages/apps/DocumentsUI", "module": "DocumentsUI",
+                "installed": "system/priv-app/DocumentsUI/DocumentsUI.apk",
+                "java": "src", "res": "res", "preference": false,
+                "flags": {"package": "com.android.documentsui.flags", "enabled": ["use_material3"]}},
+      "image": "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
+      "certificate": "platform",
+      "replaces": [],
+      "sysconfig": [],
+      "default_permissions": []
+    }
+  ]
+}

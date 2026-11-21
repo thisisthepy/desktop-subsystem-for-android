@@ -718,6 +718,25 @@ impl TaskWindows {
 
     /// Records a change to the guest's tasks, and returns what the windows must do.
     pub fn apply(&mut self, event: &TaskEvent) -> Vec<WindowChange> {
+        // A task stays the app's whose window it opened in: an older guest may name another
+        // package for it (a permission dialog that became the task's root), and taking that
+        // would move the window to another app's program or close the app's.
+        if let TaskEvent::Updated(task) = event {
+            if let Some(owner) = self
+                .tasks
+                .get(&task.task_id)
+                .map(|known| known.package_name.clone())
+                .filter(|owner| !owner.is_empty() && *owner != task.package_name)
+            {
+                self.notes.push(format!(
+                    "task {} was reported as {}'s, but its window is {}'s; it stays {}'s",
+                    task.task_id, task.package_name, owner, owner
+                ));
+                let mut kept = task.clone();
+                kept.package_name = owner;
+                return self.apply(&TaskEvent::Updated(kept));
+            }
+        }
         match event {
             TaskEvent::Updated(task) if task.is_overlay() => self.overlay_updated(task),
             TaskEvent::Removed { task_id } if self.overlays.contains_key(task_id) => {
@@ -783,6 +802,14 @@ impl TaskWindows {
                                 asked.1,
                                 describe_size(task.min_size()),
                                 describe_size(task.max_size()),
+                            ));
+                        }
+                        if let Some((late, kept)) = sizing.take_stale() {
+                            self.notes.push(format!(
+                                "task {} reported {}x{}, a size its window was dragged past, \
+                                 after it had reported {}x{}: the window keeps the size the \
+                                 user let go at and asks Android for it again",
+                                task.task_id, late.0, late.1, kept.0, kept.1,
                             ));
                         }
                         follow
@@ -1123,11 +1150,19 @@ impl TaskWindows {
         if !self.has_window(task_id) {
             return Vec::new();
         }
-        self.sizes
-            .get_mut(&task_id)
-            .and_then(|sizing| sizing.view_resized(view, now))
-            .into_iter()
-            .collect()
+        let Some(sizing) = self.sizes.get_mut(&task_id) else {
+            return Vec::new();
+        };
+        let request = sizing.view_resized(view, now);
+        if let Some(late) = sizing.take_late_echo() {
+            self.notes.push(format!(
+                "task {task_id}: its window reported {}x{}, a size the drag passed, after the \
+                 drag ended at another; Android is not asked for it, and keeps the size the \
+                 user let go at",
+                late.0, late.1,
+            ));
+        }
+        request.into_iter().collect()
     }
 
     /// The task's window is on a monitor of `dpi` now. Returns what the window must hear (the
@@ -1474,6 +1509,40 @@ mod tests {
             task_id,
             tone: None,
         }
+    }
+
+    #[test]
+    fn fr3_a_task_whose_root_became_a_permission_dialog_keeps_its_apps_window() {
+        // ONE store's task 133: the guest named the permission dialog the app opened as the
+        // task's package once the app's own activities finished.
+        let mut windows = TaskWindows::new();
+        let mut store = task(133, "ONE store", 720, 1280);
+        store.package_name = "com.skt.skaf.A000Z00040".into();
+        let opened = windows.apply(&TaskEvent::Updated(store.clone()));
+        assert!(opened
+            .iter()
+            .any(|change| matches!(change, WindowChange::Open { task_id: 133, .. })));
+        let mut dialog = store.clone();
+        dialog.package_name = "com.android.permissioncontroller".into();
+        let changes = windows.apply(&TaskEvent::Updated(dialog));
+        assert!(
+            changes.iter().all(|change| !matches!(
+                change,
+                WindowChange::Open { .. } | WindowChange::Close { .. }
+            )),
+            "{changes:?}"
+        );
+        assert_eq!(
+            windows
+                .tasks
+                .get(&133)
+                .map(|task| task.package_name.as_str()),
+            Some("com.skt.skaf.A000Z00040")
+        );
+        let changes = windows.apply(&TaskEvent::Updated(store));
+        assert!(changes
+            .iter()
+            .all(|change| !matches!(change, WindowChange::Close { .. })));
     }
 
     #[test]
@@ -2202,16 +2271,15 @@ mod tests {
                 }]
             )
         );
-        assert_eq!(
-            windows.window_dpi(1, 96),
-            (
-                vec![],
-                vec![TaskRequest::SetDensity {
-                    task_id: 1,
-                    density_dpi: 130
-                }]
-            )
-        );
+        // A later report is a move: nothing is asked while it lasts, and once it has ended the
+        // task is asked for the density of the monitor it is on.
+        assert_eq!(windows.window_dpi(1, 96), (vec![], vec![]));
+        assert!(windows
+            .reconfigures(Instant::now())
+            .contains(&TaskRequest::SetDensity {
+                task_id: 1,
+                density_dpi: 130
+            }));
     }
 
     /// A task window on a 100% monitor whose task draws at 130 dpi, as Android starts on a
@@ -2608,8 +2676,8 @@ mod tests {
         let now = Instant::now();
         let (_, requests) = windows.window_dpi(1, 192);
         assert!(!asks_for_density(&requests), "not before the move ends");
-        // The desktop doubles the window; the task, still at 130 dpi, is shown scaled into it.
-        assert_eq!(windows.window_resized(1, (800, 600), now), vec![]);
+        // The desktop doubles the window (400x300 at the scale 262 over 130 is 806x605); the task, still at 130 dpi, is shown scaled into it.
+        assert_eq!(windows.window_resized(1, (806, 605), now), vec![]);
         // The move has ended: the monitor's density, and the window's size 1:1.
         let requests = windows.reconfigures(now);
         assert!(requests.contains(&TaskRequest::SetDensity {
@@ -2618,15 +2686,15 @@ mod tests {
         }));
         assert!(requests.contains(&TaskRequest::Resize {
             task_id: 1,
-            width: 800,
-            height: 600,
+            width: 806,
+            height: 605,
             live: true,
         }));
         // Another activity on top that does not say so: the task keeps the density it has
         // from now on, and a later move scales the window instead.
         notes.density_dpi = 262;
-        notes.bounds.right = notes.bounds.left + 800;
-        notes.bounds.bottom = notes.bounds.top + 600;
+        notes.bounds.right = notes.bounds.left + 806;
+        notes.bounds.bottom = notes.bounds.top + 605;
         notes.handles_density_change = false;
         windows.apply(&TaskEvent::Updated(notes));
         assert_eq!(windows.scale(1), (1, 1));
@@ -3363,5 +3431,71 @@ mod tests {
         let again = windows.reopen(LYRICS);
         assert!(matches!(again[0], WindowChange::Open { width: 508, .. }));
         assert_eq!(again[2], placed(158, 82, false, true));
+    }
+
+    #[test]
+    fn fr4_the_flo_drag_ends_at_the_size_the_user_let_go_at() {
+        // The trace of FLO (task 134) dragged to 677x987, 16:47:51.767 to 52.375.
+        let live = |width, height| TaskRequest::Resize {
+            task_id: 1,
+            width,
+            height,
+            live: true,
+        };
+        let end = TaskRequest::Resize {
+            task_id: 1,
+            width: 677,
+            height: 987,
+            live: false,
+        };
+        let resizes = |changes: &[WindowChange]| {
+            changes
+                .iter()
+                .any(|change| matches!(change, WindowChange::Resize { .. }))
+        };
+        let mut windows = TaskWindows::new();
+        windows.apply(&updated(1, "FLO"));
+        let now = Instant::now();
+        assert_eq!(windows.window_dragging(1, true, now), vec![]);
+        // 51.767: 670x977 asked, and drawn.
+        assert_eq!(
+            windows.window_resized(1, (670, 977), now),
+            vec![live(670, 977)]
+        );
+        assert!(!resizes(
+            &windows.apply(&TaskEvent::Updated(task(1, "FLO", 670, 977)))
+        ));
+        // 51.927 and 52.065: 676x986 and 677x987 asked; the app draws both.
+        assert_eq!(
+            windows.window_resized(1, (676, 986), now),
+            vec![live(676, 986)]
+        );
+        assert_eq!(
+            windows.window_resized(1, (677, 987), now),
+            vec![live(677, 987)]
+        );
+        for (width, height) in [(676, 986), (677, 987)] {
+            assert!(!resizes(
+                &windows.apply(&TaskEvent::Updated(task(1, "FLO", width, height)))
+            ));
+        }
+        // The user lets go: the task is reconfigured at the size it was let go at.
+        let released = windows.window_dragging(1, false, now);
+        assert_eq!(released, vec![end.clone()]);
+        // 52.374: a late frame of 670x977 had the window report that size. Android is not
+        // asked for it.
+        assert_eq!(windows.window_resized(1, (670, 977), now), vec![]);
+        // A late report of 670x977 does not resize the window either.
+        assert!(!resizes(
+            &windows.apply(&TaskEvent::Updated(task(1, "FLO", 670, 977)))
+        ));
+        assert_eq!(windows.task_size(1), Some((677, 987)));
+        // Even had the echo been asked, the drag's end goes out last, with the released size.
+        let mut queued = released;
+        queued.push(live(670, 977));
+        assert_eq!(crate::tasks::coalesce(queued), vec![end]);
+        assert!(!resizes(
+            &windows.tick(now + super::super::window_sizing::SETTLE * 2)
+        ));
     }
 }

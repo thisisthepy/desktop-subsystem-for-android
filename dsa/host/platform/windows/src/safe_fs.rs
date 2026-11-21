@@ -28,11 +28,11 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Security::{ImpersonateLoggedOnUser, TOKEN_IMPERSONATE, TOKEN_QUERY};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FileDispositionInfo, GetFileInformationByHandle, GetFinalPathNameByHandleW,
-    SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, OPEN_EXISTING,
-    SYNCHRONIZE, VOLUME_NAME_DOS,
+    GetLongPathNameW, SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FILE_TRAVERSE, OPEN_EXISTING, SYNCHRONIZE, VOLUME_NAME_DOS,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken, SetThreadToken};
 
@@ -100,6 +100,28 @@ pub fn final_path(file: &File) -> io::Result<PathBuf> {
     }
 }
 
+/// `path` with any 8.3 short names (`RUNNER~1`) spelled out in full, as the final path of a
+/// handle spells them. It only rewrites names; it follows no link. When the path cannot be
+/// expanded it is returned as it is.
+fn with_long_names(path: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut buffer = vec![0u16; 1024];
+    loop {
+        // SAFETY: a NUL-terminated path and a buffer of the length given.
+        let length =
+            unsafe { GetLongPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
+                as usize;
+        if length == 0 {
+            return path.to_path_buf();
+        }
+        if length < buffer.len() {
+            return PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]));
+        }
+        buffer.resize(length + 1, 0);
+    }
+}
+
 /// Refuses `file`, opened at `path`, unless it is a plain folder (`folder`) or a plain file
 /// with one name, at the path the service asked for.
 fn check(file: &File, path: &Path, folder: bool) -> Result<(), String> {
@@ -126,7 +148,7 @@ fn check(file: &File, path: &Path, folder: bool) -> Result<(), String> {
         ));
     }
     let real = final_path(file).map_err(|e| format!("reading {}: {e}", path.display()))?;
-    if !same_path(&real, path) {
+    if !same_path(&real, path) && !same_path(&real, &with_long_names(path)) {
         return Err(format!(
             "{} is really {}, so the service leaves it alone",
             path.display(),

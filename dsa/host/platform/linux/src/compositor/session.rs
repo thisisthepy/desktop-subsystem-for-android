@@ -20,13 +20,16 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_stall::{restart_in_background, FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::resize_queue::{DrawnFrames, ResizeQueue};
 use dsa_host_core::compositor::shown_windows::ShownWindows;
+use dsa_host_core::compositor::task_watch::{follow_tasks, next_batch, send_request, TaskFeed};
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{FromHost, MenuWork};
 use dsa_host_core::drag::{DragOffer, DragOut};
 use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::input::InputEvent;
+use dsa_host_core::input_relay::InputRelay;
 use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{NotificationAction, NotificationEvent};
 use dsa_host_core::tasks::{AppInfo, PinShortcutRequest, TaskEvent, TaskRequest};
@@ -37,7 +40,7 @@ use dsa_transport::Connector;
 use super::frames::{LatestFrames, Shown};
 use super::gfxstream::{self, FrameSink};
 use super::wayland::{Desktop, Event, Events, Wake};
-use super::window_menu::{app_page_arguments, menu_work};
+use super::window_menu::menu_work;
 use crate::accessibility::objects::{widget_facts, window_facts, TitleCommand, WindowFacts};
 use crate::accessibility::watch::{ApiConnect, Shared as Accessibility};
 use crate::input::evdev::EvdevGamepads;
@@ -47,7 +50,8 @@ use crate::shell::dbus::{Notifier, Signal};
 use crate::shell::desktop_entry::{self, Folders};
 use crate::shell::notifications::{dsa_notice, Shown as ShownNotifications, UPDATE_PAGE_ARGUMENTS};
 use crate::shell::pin_shortcuts::{self, Questions};
-use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
+use dsa_host_core::android_presence::{follow_in_background as follow_presence, SharedPresence};
+use dsa_host_core::renderer::{spawn_supervisor_for, RendererHandler};
 use dsa_host_core::update::alerts::is_update_key;
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
 
@@ -56,6 +60,9 @@ pub const BUILD: &str = env!("CARGO_PKG_VERSION");
 
 /// How long to wait for the service before trying again.
 const RETRY: Duration = Duration::from_secs(2);
+
+/// How long input waits after it could not reach the service before it tries again.
+const INPUT_RETRY: Duration = Duration::from_millis(500);
 
 /// How long one call to the service may take.
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -122,11 +129,7 @@ fn open_app_page(package: &str) -> Result<(), String> {
     let program = std::env::current_exe()
         .map_err(|e| format!("this program's place is not known: {e}"))?
         .with_file_name("dsa-settings");
-    std::process::Command::new(&program)
-        .args(app_page_arguments(package))
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("could not start {}: {e}", program.display()))
+    dsa_host_core::links::open_app_page_with(&program, package)
 }
 
 /// Opens DSA Settings on the Updates page, as a click on DSA's news about an update does.
@@ -159,7 +162,7 @@ enum Message {
     /// The task watch ended: the windows stay until the next watch says otherwise.
     TasksLost,
     /// The guest copied text.
-    GuestClipboard(String),
+    GuestClipboard(dsa_host_core::clipboard::Clip),
     /// An app drags `offer` out of task `task_id`'s window, from the press `serial`; `client`
     /// reads its files and ends it.
     DragOut {
@@ -261,97 +264,90 @@ impl ToMain {
 
 fn watch_tasks(to_main: ToMain) {
     std::thread::spawn(move || {
-        let mut warned = false;
-        loop {
-            let watch = connect()
-                .and_then(|client| client.watch_tasks().map_err(|error| error.to_string()));
-            let mut stream = match watch {
-                Ok(stream) => stream,
-                Err(why) => {
-                    if !warned {
-                        log(&format!("waiting for the DSA service: {why}"));
-                        warned = true;
-                    }
-                    std::thread::sleep(RETRY);
-                    continue;
-                }
-            };
-            warned = false;
-            if !to_main.send(Message::Tasks(stream.current().events())) {
-                return;
-            }
-            loop {
-                match stream.next(Duration::from_secs(1)) {
-                    Ok(Some(event)) => {
-                        if !to_main.send(Message::Task(event)) {
-                            return;
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(why) => {
-                        log(&format!("the task watch ended: {why}"));
-                        break;
-                    }
-                }
-            }
-            if !to_main.send(Message::TasksLost) {
-                return;
-            }
-            std::thread::sleep(RETRY);
-        }
+        follow_tasks(
+            || connect().and_then(|client| client.watch_tasks().map_err(|error| error.to_string())),
+            |feed| {
+                to_main.send(match feed {
+                    TaskFeed::Sync(tasks) => Message::Tasks(tasks),
+                    TaskFeed::Task(event) => Message::Task(*event),
+                    TaskFeed::Lost => Message::TasksLost,
+                })
+            },
+            &AtomicBool::new(false),
+            RETRY,
+            Duration::from_secs(1),
+            &log,
+        );
     });
 }
 
 fn send_input(events: Receiver<InputEvent>) {
     std::thread::spawn(move || {
-        let mut stream = None;
+        let mut relay = InputRelay::new(INPUT_RETRY);
         for event in events {
-            if stream.is_none() {
-                stream = connect()
-                    .and_then(|client| client.stream_input().map_err(|error| error.to_string()))
-                    .map_err(|why| log(&format!("input cannot reach Android: {why}")))
-                    .ok();
+            let open =
+                || connect().and_then(|client| client.stream_input().map_err(|e| e.to_string()));
+            if let Some(why) = relay.send(&event, Instant::now(), open) {
+                log(&format!("input cannot reach Android: {why}"));
             }
-            if let Some(open) = stream.as_mut() {
-                if open.send_input(&event).is_err() {
-                    stream = None;
+        }
+    });
+}
+
+fn serve_requests(requests: Receiver<Request>, drawn: DrawnFrames) {
+    std::thread::spawn(move || {
+        let mut client: Option<HostApiClient> = None;
+        // The sizes of a drag go once a frame of the size before has been drawn, and only the
+        // latest of the sizes in between.
+        let mut queue = ResizeQueue::new(drawn);
+        while let Some(incoming) = next_batch(&requests, queue.waiting()) {
+            let mut tasks = Vec::new();
+            for request in incoming {
+                match request {
+                    Request::Task(request) => tasks.push(request),
+                    Request::OpenFile(file) => {
+                        let opened = connect().and_then(|client| {
+                            client.open_file(&file).map_err(|error| error.to_string())
+                        });
+                        if let Err(why) = opened {
+                            log(&format!("{} did not open in Android: {why}", file.name));
+                        }
+                    }
+                    Request::Notification(action) => {
+                        send_to_service(&mut client, |open| open.act_on_notification(&action));
+                    }
+                }
+            }
+            for request in queue.step(tasks, Instant::now()) {
+                if let Err(why) = send_request(&mut client, &request, connect) {
+                    log(&format!(
+                        "could not ask Android to {}: {why}",
+                        request.describe()
+                    ));
                 }
             }
         }
     });
 }
 
-fn serve_requests(requests: Receiver<Request>) {
-    std::thread::spawn(move || {
-        let mut client: Option<HostApiClient> = None;
-        for request in requests {
-            if let Request::OpenFile(file) = &request {
-                let opened = connect()
-                    .and_then(|client| client.open_file(file).map_err(|error| error.to_string()));
-                if let Err(why) = opened {
-                    log(&format!("{} did not open in Android: {why}", file.name));
-                }
-                continue;
-            }
-            if client.is_none() {
-                client = connect()
-                    .map_err(|why| log(&format!("cannot reach the DSA service: {why}")))
-                    .ok();
-            }
-            let Some(open) = client.as_mut() else {
-                continue;
-            };
-            let result = match &request {
-                Request::Task(request) => open.request(request),
-                Request::Notification(action) => open.act_on_notification(action),
-                Request::OpenFile(_) => Ok(()),
-            };
-            if let Err(why) = result {
-                log(&format!("a request to Android failed: {why}"));
-                client = None;
-            }
-        }
-    });
+/// Sends one request on the connection to the service, made first when there is none, and
+/// drops the connection when it fails so the next request makes it again.
+fn send_to_service<E: std::fmt::Display>(
+    client: &mut Option<HostApiClient>,
+    send: impl FnOnce(&mut HostApiClient) -> Result<(), E>,
+) {
+    if client.is_none() {
+        *client = connect()
+            .map_err(|why| log(&format!("cannot reach the DSA service: {why}")))
+            .ok();
+    }
+    let Some(open) = client.as_mut() else {
+        return;
+    };
+    if let Err(why) = send(open) {
+        log(&format!("a request to Android failed: {why}"));
+        *client = None;
+    }
 }
 
 /// Asks the service whether an app drags out of the window a press left (`out`), on a thread
@@ -394,7 +390,7 @@ fn ask_drag_out(to_main: ToMain, out: DragOut, serial: u32) {
     });
 }
 
-fn sync_clipboard(to_main: ToMain, outgoing: Receiver<String>) {
+fn sync_clipboard(to_main: ToMain, outgoing: Receiver<dsa_host_core::clipboard::Clip>) {
     let outgoing = Arc::new(Mutex::new(outgoing));
     std::thread::spawn(move || loop {
         let mut stream = match connect()
@@ -409,8 +405,20 @@ fn sync_clipboard(to_main: ToMain, outgoing: Receiver<String>) {
         loop {
             let mut ended = false;
             if let Ok(outgoing) = outgoing.lock() {
-                while let Ok(text) = outgoing.try_recv() {
-                    if stream.send(&text).is_err() {
+                while let Ok(clip) = outgoing.try_recv() {
+                    let sent = match &clip {
+                        dsa_host_core::clipboard::Clip::Text(text) => stream.send(text),
+                        dsa_host_core::clipboard::Clip::Image(png) => stream.send_image(png),
+                    };
+                    if let Err(dsa_host_core::host_api::ClientError::Malformed(why)) = &sent {
+                        log(&format!(
+                            "clipboard: dropped an image copied on the desktop: {why}"
+                        ));
+                    }
+                    if matches!(
+                        sent,
+                        Err(dsa_host_core::host_api::ClientError::Transport(_))
+                    ) {
                         ended = true;
                         break;
                     }
@@ -419,9 +427,9 @@ fn sync_clipboard(to_main: ToMain, outgoing: Receiver<String>) {
             if ended {
                 break;
             }
-            match stream.next(Duration::from_millis(100)) {
-                Ok(Some(text)) => {
-                    if !to_main.send(Message::GuestClipboard(text)) {
+            match stream.next_clip(Duration::from_millis(100)) {
+                Ok(Some(clip)) => {
+                    if !to_main.send(Message::GuestClipboard(clip)) {
                         return;
                     }
                 }
@@ -702,8 +710,9 @@ fn follow_gamepads(active: Arc<AtomicBool>) {
     });
 }
 
-/// Starts the graphics renderer process (`dsa-gfx`), and starts it again whenever it ends;
-/// its frames go to `frames` and `images`. The renderer runs on the GPU the user's render GPU
+/// Starts the graphics renderer process (`dsa-gfx`) while Android runs, and starts it again
+/// whenever it ends; while Android is stopped none runs. Its frames go to `frames` and
+/// `images`. The renderer runs on the GPU the user's render GPU
 /// setting names, read once now.
 fn start_renderer(
     frames: Arc<Mutex<LatestFrames>>,
@@ -722,11 +731,19 @@ fn start_renderer(
     let fds: CurrentFds = Arc::default();
     let client = RendererClient::new(sink, Arc::clone(&fds), render_gpu, Box::new(log));
     let stop = Arc::new(AtomicBool::new(false));
-    if let Err(why) = spawn_supervisor(
+    let presence = SharedPresence::new();
+    if let Err(why) = follow_presence(connect, Arc::clone(&presence), Arc::clone(&stop)) {
+        log(&format!(
+            "graphics: Android's state cannot be followed ({why}); the renderer starts only \
+             once"
+        ));
+    }
+    if let Err(why) = spawn_supervisor_for(
         Box::new(UnixLauncher::installed(fds)),
         Arc::clone(&client) as Arc<dyn RendererHandler>,
         format!("dsa-compositor {BUILD}"),
         stop,
+        presence,
     ) {
         log(&format!(
             "graphics: the renderer cannot be started ({why}); task windows open but show no \
@@ -750,6 +767,31 @@ fn start_accessibility(to_main: ToMain) -> Arc<Accessibility> {
         }),
         Arc::new(log),
     )
+}
+
+/// Tells the user when Android crashes, as DSA's own notice in the session's notification
+/// service, from a thread of its own.
+fn tell_crashes(icons: Option<PathBuf>) {
+    let icons = icons.unwrap_or_else(std::env::temp_dir);
+    let tell: Arc<dyn Fn(dsa_host_core::notifications::Notification) + Send + Sync> =
+        Arc::new(move |notice| {
+            let shown = Notifier::connect(icons.clone())
+                .and_then(|notifier| notifier.notify(&dsa_notice(&notice), &[]).map(drop));
+            if let Err(why) = shown {
+                log(&format!(
+                    "the user was not told that Android crashed: {why}"
+                ));
+            }
+        });
+    if let Err(why) = dsa_host_core::guest_crash::watch_in_background(
+        Box::new(connector()),
+        format!("dsa-compositor {BUILD} crash watch"),
+        Arc::new(ui_language),
+        tell,
+        Arc::new(|line: &str| log(line)),
+    ) {
+        log(&format!("a crash of Android will not be told: {why}"));
+    }
 }
 
 /// The guest's compositor did not recover from a GPU reset: tells the user, as DSA's own
@@ -789,7 +831,7 @@ struct Main {
     shown: ShownWindows,
     requests: Sender<Request>,
     input: Sender<InputEvent>,
-    clipboard: Sender<String>,
+    clipboard: Sender<dsa_host_core::clipboard::Clip>,
     frames: Arc<Mutex<LatestFrames>>,
     images: Option<gfxstream::GpuImages>,
     active: Arc<AtomicBool>,
@@ -797,7 +839,7 @@ struct Main {
     apps: BTreeMap<String, AppInfo>,
     folders: Option<Folders>,
     /// What the guest copied last, so its echo from the desktop is not sent back.
-    guest_clipboard: Option<String>,
+    guest_clipboard: Option<dsa_host_core::clipboard::Clip>,
     focused: Option<i32>,
     /// Where the threads that ask about drags hand their offers.
     to_main: ToMain,
@@ -819,6 +861,8 @@ struct Main {
     stall: FrameStall,
     /// How many frames have reached a task window.
     frames_shown: u64,
+    /// Told of each frame a task window shows, so a size of a drag held back for it may go.
+    drawn: DrawnFrames,
 }
 
 impl Main {
@@ -935,9 +979,9 @@ impl Main {
             }
             Message::Task(event) => self.task_event(&event),
             Message::TasksLost => {}
-            Message::GuestClipboard(text) => {
-                self.guest_clipboard = Some(text.clone());
-                self.desktop.state.set_clipboard(text);
+            Message::GuestClipboard(clip) => {
+                self.guest_clipboard = Some(clip.clone());
+                self.desktop.state.set_clipboard(clip);
             }
             Message::DragOut {
                 task_id,
@@ -1019,9 +1063,9 @@ impl Main {
             Event::X11Widget { widget_id, input } => {
                 self.desktop.state.x11_widget_input(widget_id, input)
             }
-            Event::HostClipboard(text) => {
-                if self.guest_clipboard.as_deref() != Some(text.as_str()) {
-                    let _ = self.clipboard.send(text);
+            Event::HostClipboard(clip) => {
+                if self.guest_clipboard.as_ref() != Some(&clip) {
+                    let _ = self.clipboard.send(clip);
                 }
             }
             Event::DragOut { mut out, serial } => {
@@ -1160,6 +1204,12 @@ impl Main {
             if self.desktop.state.windows.contains_key(&window) {
                 self.frames_shown += 1;
             }
+            // The app has drawn this size: the next size of a drag may go to it.
+            let size = match &frame {
+                Shown::Pixels(frame) => (frame.width, frame.height),
+                Shown::Gpu(frame) => (frame.width, frame.height),
+            };
+            self.drawn.frame_drawn(task_id, size);
             match frame {
                 Shown::Pixels(frame) => self.desktop.state.present(window, frame),
                 Shown::Gpu(frame) => self.desktop.state.present_gpu(window, display_id, frame),
@@ -1291,12 +1341,14 @@ pub fn run() -> Result<(), String> {
 
     watch_tasks(to_main.clone());
     send_input(input_receiver);
-    serve_requests(request_receiver);
+    let drawn = DrawnFrames::new();
+    serve_requests(request_receiver, drawn.clone());
     sync_clipboard(to_main.clone(), clipboard_receiver);
     if let Some(folders) = &folders {
         show_notifications(requests.clone(), folders.icons.join("notifications"));
     }
     let pins = folders.clone().map(ask_pins);
+    tell_crashes(folders.as_ref().map(|folders| folders.icons.clone()));
     follow_gamepads(active.clone());
     let images = desktop
         .state
@@ -1331,6 +1383,7 @@ pub fn run() -> Result<(), String> {
         resets: GpuResetWindows::new(),
         stall: FrameStall::new(),
         frames_shown: 0,
+        drawn,
     };
     // The user's window settings for apps, and the full screen choices every app follows, are
     // read when the windows start and again now and then, so a change made in the settings
@@ -1377,12 +1430,71 @@ pub fn run() -> Result<(), String> {
 /// pinned shortcut on the desktop: starts Android when it is off, then the shortcut.
 pub fn launch_shortcut(package: &str, id: &str) -> Result<(), String> {
     let mut client = connect()?;
+    let mut starting = None;
     client
-        .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {})
+        .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {
+            show_starting(&mut starting, package)
+        })
         .map_err(|error| error.to_string())?;
-    client
+    let watch = starting.as_ref().and_then(|_| watch_for_window(package));
+    let launched = client
         .launch_shortcut(package, id)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+    fade_into_app(starting, watch, launched.is_ok());
+    launched
+}
+
+type WindowWatch = (
+    dsa_host_core::host_api::TaskStream,
+    dsa_host_core::compositor::boot_splash::AppWindowWait,
+);
+
+/// Watches the tasks, before the app is asked for, so the app's first frame is not missed.
+fn watch_for_window(package: &str) -> Option<WindowWatch> {
+    let stream = connect().ok()?.watch_tasks().ok()?;
+    let current = stream.current();
+    let wait = dsa_host_core::compositor::boot_splash::AppWindowWait::new(
+        package,
+        &current.tasks,
+        &current.frames,
+    );
+    Some((stream, wait))
+}
+
+/// Keeps the starting window until the app's window shows its first frame (or the wait
+/// gives up, or the launch failed), so the logo fades into the app rather than into nothing.
+fn fade_into_app(
+    starting: Option<super::starting_splash::StartingWindow>,
+    watch: Option<WindowWatch>,
+    launched: bool,
+) {
+    use dsa_host_core::compositor::boot_splash::APP_WINDOW_WAIT;
+    if let (true, Some((mut stream, mut wait)), true) = (starting.is_some(), watch, launched) {
+        let deadline = std::time::Instant::now() + APP_WINDOW_WAIT;
+        while !wait.shown() {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                log("the app's window did not show in time; the starting window goes");
+                break;
+            }
+            match stream.next(left) {
+                Ok(Some(event)) => {
+                    wait.see(&event);
+                }
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+    }
+    // The DSA logo fades out over the app's first frame.
+    drop(starting);
+}
+
+/// Shows the window with the DSA logo the first time a launch has to wait for Android.
+fn show_starting(starting: &mut Option<super::starting_splash::StartingWindow>, package: &str) {
+    if starting.is_none() {
+        *starting = Some(super::starting_splash::StartingWindow::show(package));
+    }
 }
 
 /// `--launch <package>` and the launcher entry's actions: one request, then exit.
@@ -1390,12 +1502,18 @@ pub fn one_shot(action: &str, package: &str) -> Result<(), String> {
     let mut client = connect()?;
     match action {
         "--launch" => {
+            let mut starting = None;
             client
-                .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {})
+                .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {
+                    show_starting(&mut starting, package)
+                })
                 .map_err(|error| error.to_string())?;
-            client
+            let watch = starting.as_ref().and_then(|_| watch_for_window(package));
+            let launched = client
                 .launch_app(package)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string());
+            fade_into_app(starting, watch, launched.is_ok());
+            launched
         }
         "--app-settings" => client
             .open_app_settings(Some(package))
@@ -1410,8 +1528,6 @@ pub fn one_shot(action: &str, package: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn fr25_the_run_as_arm_notices_follow_the_sessions_language() {
         use crate::interface_language::ui_language_in;

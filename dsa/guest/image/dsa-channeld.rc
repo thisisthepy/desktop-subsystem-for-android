@@ -99,15 +99,18 @@ on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
 # under memory pressure, whether or not the host is short. vendor.dsa.memory.trim_size says
 # how many MiB: all of the excess at once. The kernel takes them from the
 # root cgroup, which every process's memory is charged under, coldest pages first, so the hot
-# pages of running apps and system_server stay. "swappiness=0" takes page cache only: app
-# memory moves to zram in the idle reclaim, not while an app is in use. The root's file is
+# pages of running apps and system_server stay. "swappiness=30" takes mostly page cache and a
+# little anonymous memory, the coldest of it, into zram: pages no process has touched since
+# the last trims, such as a background service's heap. The hot pages of the shown app stay on
+# the active list and are not taken. With "swappiness=0" the trim took files only, so the open
+# app's own working files went first while cold heap stayed resident. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
 # open it. The pages it frees are scattered among pages in use. On a host that takes back only
 # whole free blocks (androidboot.dsa.memory_compaction=on), compaction then gathers them and they
 # go back to the host at once rather than whenever background compaction gets to them; a host
 # that takes back every free page gets them as they are, without moving any memory.
 on property:vendor.dsa.memory.trim=1
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"
 
 on property:vendor.dsa.memory.trim=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1
@@ -205,6 +208,25 @@ service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect
 on property:vendor.dsa.dns=*
     start dsa_dns_redirect
 
+# The Google Services Framework Android ID, which Google's page for uncertified devices asks
+# for. Google Play services keep it in a file of their own app user that no other domain may
+# read, and refuse it to the agent, so the daemon asks for it: it sets
+# vendor.dsa.google_device_id to "request" when the agent has none, and init runs
+# dsa-channeld --google-device-id as root in a domain of its own (channeld.cil). The helper
+# reads the one file and sets the property to the ID in decimal, or to "none", and ends.
+# DAC_READ_SEARCH is the only capability it has: root does not own the file.
+service dsa_google_id /vendor/bin/dsa-channeld --google-device-id
+    user root
+    group root
+    capabilities DAC_READ_SEARCH
+    seclabel u:r:dsa_google_id:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:vendor.dsa.google_device_id=request
+    start dsa_google_id
+
 # KeyMint's root key, which the host keeps sealed by the user's credential store and gives
 # once each boot. dsa-channeld --keymint-key asks for it on the host's KeyMint port and writes
 # it to /dev/dsa_keymint/root_key, a tmpfs file only KeyMint's domain may read
@@ -234,7 +256,8 @@ service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
     stdio_to_kmsg
 
 # What the guest kernel's own memory is made of: the largest slab caches, vmalloc users and
-# threads, which only root may read. dsa-channeld --memory-report reads them, writes them to
+# threads, and on a kernel built with allocation profiling its largest allocation sites
+# (/proc/allocinfo), which only root may read. dsa-channeld --memory-report reads them, writes them to
 # the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
 # root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
 # read (channeld.cil), and in the readproc group, which lets it see every process under /proc.

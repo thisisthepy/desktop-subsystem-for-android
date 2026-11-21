@@ -70,7 +70,10 @@
 //! host's latest text goes to it again each time it gets there, as when Android starts. Text
 //! the guest copies goes to every [`Session::watch_clipboard`] watcher. Text that came from one
 //! side is never sent back to it, and text longer than
-//! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross.
+//! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross. Images go
+//! the same way as PNG ([`Session::host_clipboard_image`], [`Session::watch_clips`]), in
+//! pieces on the control channel so other messages pass between them; a PNG longer than
+//! [`MAX_IMAGE_BYTES`](crate::clipboard::MAX_IMAGE_BYTES) does not cross.
 //!
 //! The guest's notifications go to every [`Session::watch_notifications`] watcher, checked
 //! and limited in rate ([`crate::notifications`]); when the guest stops, each one shown is
@@ -207,14 +210,21 @@ pub enum StopReason {
     Requested,
     /// The launcher could not start the guest.
     GuestFailedToStart(String),
+    /// The host did not run the guest: it refused to create or start it, or the guest's
+    /// process ended before the guest printed anything ([`GuestLauncher::failure_side`]). The
+    /// image is not to blame. `diagnostics` is what the launcher could tell about the boot.
+    HostFailed {
+        why: String,
+        diagnostics: Option<String>,
+    },
     /// The agent did not connect within the configured time. `diagnostics` is what the
     /// launcher could tell about the guest's boot, such as the end of its console output.
     AgentDidNotConnect {
         waited: Duration,
         diagnostics: Option<String>,
     },
-    /// The guest ended by itself before the agent connected. `why` is the launcher's account
-    /// of it and `diagnostics` what it could tell about the boot.
+    /// The guest ended by itself, during boot or later. `why` is the launcher's account of it
+    /// and `diagnostics` what it could tell about the boot.
     GuestExited {
         why: String,
         diagnostics: Option<String>,
@@ -230,6 +240,15 @@ pub enum StopReason {
     ListenerFailed(String),
     /// The control channel was lost while the session was active.
     ChannelLost(String),
+    /// The guest's kernel crashed while it ran: it panicked, or its VM was reset without
+    /// being asked. `why` is a short account of the crash from the guest's console, such as
+    /// `kernel panic in binder_transaction`, and `diagnostics` the console around it and
+    /// what else the launcher could tell. Its English account starts with
+    /// [`crate::guest_crash::CRASH_PREFIX`].
+    GuestCrashed {
+        why: String,
+        diagnostics: Option<String>,
+    },
     /// Stopping the guest failed and some of its processes may still run. The session stays
     /// in `Stopping`; asking to stop again retries.
     StopFailed(String),
@@ -243,6 +262,10 @@ impl fmt::Display for StopReason {
         match self {
             StopReason::Requested => write!(f, "stopped on request"),
             StopReason::GuestFailedToStart(why) => write!(f, "the guest did not start: {why}"),
+            StopReason::HostFailed { why, diagnostics } => {
+                f.write_str(&crate::start_failure::host_problem(why))?;
+                write_diagnostics(f, diagnostics)
+            }
             StopReason::AgentDidNotConnect {
                 waited,
                 diagnostics,
@@ -270,6 +293,10 @@ details: {why}"
                 write!(f, "could not listen for the agent: {why}")
             }
             StopReason::ChannelLost(why) => write!(f, "the control channel was lost: {why}"),
+            StopReason::GuestCrashed { why, diagnostics } => {
+                f.write_str(&crate::guest_crash::crashed(why))?;
+                write_diagnostics(f, diagnostics)
+            }
             StopReason::StopFailed(why) => write!(f, "the guest did not stop: {why}"),
             StopReason::PrerequisiteLost(why) => {
                 write!(
@@ -375,7 +402,9 @@ pub trait GuestLauncher: Send + 'static {
 
     /// Whether the guest has ended by itself since it was started, as a sentence saying so.
     /// The session asks while it waits for the agent, so a guest that dies during boot ends
-    /// the start at once instead of after the whole connect timeout. It must not block.
+    /// the start at once instead of after the whole connect timeout, and about once a second
+    /// while the guest runs, so a guest that dies later is reported stopped even when its
+    /// control channel stays open. It must not block.
     fn exited(&mut self) -> Option<String> {
         None
     }
@@ -384,6 +413,22 @@ pub trait GuestLauncher: Send + 'static {
     /// the last lines the guest printed and where the rest is kept. The session asks after
     /// the guest has been stopped and puts the answer in the reason it reports.
     fn diagnostics(&mut self) -> Option<String> {
+        None
+    }
+
+    /// Which side the start that just failed failed on: the host, when it never ran the
+    /// guest, or the guest. The session asks right after a start failed or the guest ended
+    /// during boot, before it stops the guest. Only a guest-side failure counts against the
+    /// image. The default, for a launcher that cannot tell, is the guest.
+    fn failure_side(&mut self) -> crate::start_failure::FailureSide {
+        crate::start_failure::FailureSide::Guest
+    }
+
+    /// The guest's console around a kernel crash in the boot that just ended, when the
+    /// launcher saw one ([`crate::guest_crash::ConsoleWatch`]). The session asks after the
+    /// guest has been stopped, when the guest ended or its control channel was lost while it
+    /// ran, and reads the crash from it; without it, from [`GuestLauncher::diagnostics`].
+    fn crash_console(&mut self) -> Option<String> {
         None
     }
 
@@ -522,6 +567,9 @@ pub struct SessionConfig {
     /// freezes it on its own: a frozen guest gets no notifications, alarms or widget
     /// updates.
     pub freeze_after: Option<Duration>,
+    /// How long the same notice about one app is held back after it was shown, so an app that
+    /// fails at every start is reported once for the burst.
+    pub notice_burst: Duration,
 }
 
 /// The default of [`SessionConfig::doze_delay`].
@@ -546,6 +594,7 @@ impl Default for SessionConfig {
             stop_timeout: Duration::from_secs(30),
             doze_delay: DEFAULT_DOZE_DELAY,
             freeze_after: None,
+            notice_burst: Duration::from_secs(20),
         }
     }
 }
@@ -607,7 +656,8 @@ enum RefreshInput {
 }
 
 enum Command {
-    Start,
+    /// Starts the guest; the text says who asked, for the log.
+    Start(String),
     Stop,
     Send(Vec<u8>, Sender<Result<(), SessionError>>),
     Shutdown,
@@ -631,8 +681,8 @@ enum Command {
     Freeze(Sender<Result<(), SessionError>>),
     /// Whether web links open in the guest rather than on the host.
     LinksInAndroid(bool),
-    /// The host's clipboard got new text.
-    HostClipboard(String),
+    /// The host's clipboard got new text or a new image.
+    HostClipboard(clipboard::Clip),
     /// Whether the clipboards are shared.
     ShareClipboard(bool),
     /// The user did something with a notification on the host.
@@ -704,6 +754,8 @@ struct Shared {
     live_resizes: Mutex<crate::guest_refresh::LiveResizes>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// Who hears of the text and the images the guest copies.
+    clip_watchers: Mutex<Vec<Sender<clipboard::Clip>>>,
     /// Who plays the rumble effects the guest's apps play on the host's controllers.
     rumble_watchers: Mutex<Vec<Sender<GamepadRumble>>>,
     /// Who hears of the guest's notifications.
@@ -1116,8 +1168,14 @@ impl Shared {
         if !hub.table.apply(&event) {
             return;
         }
+        // A task that outlived the agent which reported it gets its display back.
+        let restored = match &event {
+            TaskEvent::Updated(task) => hub.table.restore_frames(task.task_id),
+            _ => None,
+        };
+        let events: Vec<TaskEvent> = std::iter::once(event).chain(restored).collect();
         hub.watchers
-            .retain(|watcher| watcher.send(event.clone()).is_ok());
+            .retain(|watcher| events.iter().all(|e| watcher.send(e.clone()).is_ok()));
     }
 
     /// The user's first display language as the host last said it; empty while it has not.
@@ -1332,11 +1390,19 @@ impl Shared {
             .retain(|watcher| watcher.send(rumble).is_ok());
     }
 
-    fn publish_clipboard(&self, text: &str) {
-        self.clipboard_watchers
+    /// Hands what the guest copied to every clipboard watcher still listening: text to the
+    /// watchers of text and of clips, an image to the watchers of clips.
+    fn publish_clipboard(&self, clip: &clipboard::Clip) {
+        if let clipboard::Clip::Text(text) = clip {
+            self.clipboard_watchers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|watcher| watcher.send(text.clone()).is_ok());
+        }
+        self.clip_watchers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain(|watcher| watcher.send(text.to_string()).is_ok());
+            .retain(|watcher| watcher.send(clip.clone()).is_ok());
     }
 
     /// Hands the agent's answer about widgets to whoever asked. An answer nobody waits for
@@ -1439,7 +1505,23 @@ impl Shared {
                 .all(|event| watcher.send(event.clone()).is_ok())
         });
     }
+
+    /// Removes every task the agent reported, as when the agent has gone away while the
+    /// guest and its hwcomposer stay. Each task's display is kept for the next agent's report.
+    fn clear_reported_tasks(&self) {
+        let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        let removed = hub.table.clear_reported();
+        hub.watchers.retain(|watcher| {
+            removed
+                .iter()
+                .all(|event| watcher.send(event.clone()).is_ok())
+        });
+    }
 }
+
+/// What [`Session::android_files_with_token`] says while Android is stopped. The files door
+/// answers it at once instead of waiting for a start nobody asked for.
+pub const ANDROID_STOPPED: &str = "Android is stopped";
 
 /// A guest session. Dropping it stops the guest if it is running.
 pub struct Session {
@@ -1493,6 +1575,7 @@ impl Session {
             clock_trace: Mutex::new(None),
             live_resizes: Mutex::new(Default::default()),
             clipboard_watchers: Mutex::new(Vec::new()),
+            clip_watchers: Mutex::new(Vec::new()),
             rumble_watchers: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
             print_watchers: Mutex::new(Vec::new()),
@@ -1586,6 +1669,7 @@ impl Session {
             agent_lost_at: None,
             prerequisite_missing: None,
             next_prerequisite_check: Instant::now(),
+            next_exit_check: Instant::now(),
             next_diagnosis: Instant::now(),
             guest_is_idle: false,
             stall_doze: None,
@@ -1596,8 +1680,11 @@ impl Session {
             clipboard_sharing: true,
             host_clipboard: None,
             clipboard_last: None,
+            clipboard_image_in: clipboard::ImageAssembler::default(),
+            clipboard_image_out: 0,
             notifications: HashMap::new(),
             notification_limit: RateLimit::new(Instant::now()),
+            notice_posted: HashMap::new(),
             dismissals: Vec::new(),
             offered_reinstalls: HashMap::new(),
             host_asleep: None,
@@ -1906,7 +1993,13 @@ impl Session {
             .clone()
             .ok_or_else(|| "this host cannot reach Android's files".to_string())?;
         if self.state() == SessionState::Stopped {
-            self.start();
+            // Only a caller that asked for the address itself starts Android. The files door
+            // answers whatever connects to its port, Explorer and the Web Client service
+            // included, so it must not bring back an Android the user stopped.
+            match wanted {
+                None => self.start_because("a request for the address of Android's files"),
+                Some(_) => return Err(ANDROID_STOPPED.to_string()),
+            }
         }
         let mut bridge = self
             .android_files_bridge
@@ -2011,7 +2104,13 @@ impl Session {
 
     /// Asks the session to start. Ignored unless the session is `Stopped`.
     pub fn start(&self) {
-        let _ = self.commands.send(Command::Start);
+        self.start_because("a start request");
+    }
+
+    /// As [`Session::start`], and `reason` (who asked, and why) goes to the log when the
+    /// start goes in, so that a start nobody remembers asking for can be traced.
+    pub fn start_because(&self, reason: &str) {
+        let _ = self.commands.send(Command::Start(reason.to_string()));
     }
 
     /// Asks the session to stop. From `Stopping` after a failed stop, it retries.
@@ -2709,7 +2808,30 @@ impl Session {
     /// the guest is `Active` or `Dozing`; otherwise the latest text waits for the guest to get
     /// there. Taken in every state.
     pub fn host_clipboard(&self, text: String) {
-        let _ = self.commands.send(Command::HostClipboard(text));
+        let _ = self
+            .commands
+            .send(Command::HostClipboard(clipboard::Clip::Text(text)));
+    }
+
+    /// Says that the host's clipboard got an image, as PNG. It goes to the guest in the same
+    /// way as text, in pieces; a PNG longer than
+    /// [`MAX_IMAGE_BYTES`](crate::clipboard::MAX_IMAGE_BYTES) is dropped and logged.
+    pub fn host_clipboard_image(&self, png: Vec<u8>) {
+        let _ = self
+            .commands
+            .send(Command::HostClipboard(clipboard::Clip::Image(png.into())));
+    }
+
+    /// The text and the images the guest copies from now on, while sharing is on. The watch
+    /// lasts across restarts of the guest.
+    pub fn watch_clips(&self) -> Receiver<clipboard::Clip> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .clip_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
     }
 
     /// Shares the clipboards (`on`, the default) or stops sharing them, as the user's setting
@@ -4033,6 +4155,20 @@ impl Session {
         })
     }
 
+    /// Why no log can come from a guest that was stopped for speaking another protocol than
+    /// this host: the handshake's account, which names both builds and both schema hashes.
+    pub fn log_problem(&self) -> Option<String> {
+        if self.state() != SessionState::Stopped {
+            return None;
+        }
+        match self.last_reason() {
+            Some(
+                reason @ (StopReason::GuestFromOtherRelease(_) | StopReason::HandshakeRejected(_)),
+            ) => Some(reason.to_string()),
+            _ => None,
+        }
+    }
+
     /// The guest's records the host holds now, oldest first.
     pub fn recent_log(&self) -> Vec<LogEntry> {
         let hub = self.shared.logs.lock().unwrap_or_else(|e| e.into_inner());
@@ -4357,6 +4493,17 @@ const PROGRESS_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often the session asks the launcher for what the guest cannot run without.
 const PREREQUISITE_POLL: Duration = Duration::from_secs(1);
 
+/// How often a running session asks the launcher whether the guest has ended by itself. A VM
+/// can end without its control channel closing (the Virtualization framework keeps the
+/// host's end of a vsock connection open after the guest is gone), so the channel alone does
+/// not tell the session.
+const EXIT_POLL: Duration = Duration::from_secs(1);
+
+/// How long a session whose control channel was lost while it ran waits for the launcher to
+/// see that the guest ended or was reset, so that a crash is reported as one. A kernel panic
+/// resets the VM within a moment of closing the channel.
+const GONE_WAIT: Duration = Duration::from_secs(2);
+
 /// How often a reported problem's detail is read again, as the counts in it grow.
 const DIAGNOSIS_POLL: Duration = Duration::from_secs(10);
 
@@ -4431,6 +4578,8 @@ struct Worker {
     /// Since when a prerequisite is missing, and what the launcher says about it.
     prerequisite_missing: Option<(Instant, String)>,
     next_prerequisite_check: Instant,
+    /// When the session next asks the launcher whether the guest has ended by itself.
+    next_exit_check: Instant,
     next_diagnosis: Instant,
     /// The agent's last word on whether the device is idle. Unknown, so false, for a new agent.
     guest_is_idle: bool,
@@ -4448,13 +4597,21 @@ struct Worker {
     next_clock_probe: Instant,
     /// Whether the clipboards are shared, as the user last said.
     clipboard_sharing: bool,
-    /// The host's latest clipboard text while sharing is on, for a guest that gets ready later.
-    host_clipboard: Option<String>,
-    /// The last text that crossed, either way, since the agent connected. Text equal to it is
-    /// not sent, so what one side was given never comes back to it.
-    clipboard_last: Option<String>,
+    /// The host's latest clipboard text or image while sharing is on, for a guest that gets
+    /// ready later.
+    host_clipboard: Option<clipboard::Clip>,
+    /// The last clip that crossed, either way, since the agent connected. A clip equal to it is
+    /// not sent, so what one side was given never comes back to it. An image is held once,
+    /// shared with `host_clipboard`.
+    clipboard_last: Option<clipboard::Clip>,
+    /// The pieces of the image the guest is sending.
+    clipboard_image_in: clipboard::ImageAssembler,
+    /// The id of the last image sent to the guest.
+    clipboard_image_out: u32,
     /// The guest's notifications the watchers were given, by key.
     notifications: HashMap<String, Notification>,
+    /// When each of the host's own notices was last shown, by key.
+    notice_posted: HashMap<String, Instant>,
     /// How many notifications reach the watchers.
     notification_limit: RateLimit,
     /// Dismissals for a frozen guest, sent once it is thawed.
@@ -4488,7 +4645,7 @@ impl Worker {
                         return;
                     }
                     match self.commands.recv() {
-                        Ok(Command::Start) => self.start(),
+                        Ok(Command::Start(reason)) => self.start(&reason),
                         Ok(Command::Stop) => {}
                         Ok(Command::Send(_, reply))
                         | Ok(Command::Freeze(reply))
@@ -4523,7 +4680,7 @@ impl Worker {
                     }
                     match self.commands.recv() {
                         Ok(Command::Stop) => self.stop(StopReason::Requested),
-                        Ok(Command::Start) => {}
+                        Ok(Command::Start(_)) => {}
                         Ok(Command::Send(_, reply))
                         | Ok(Command::Freeze(reply))
                         | Ok(Command::Notification(_, reply))
@@ -4565,7 +4722,7 @@ impl Worker {
     /// has left the running states.
     fn handle_running(&mut self, command: Command) -> bool {
         match command {
-            Command::Start => true,
+            Command::Start(_) => true,
             Command::Stop => {
                 self.stop(StopReason::Requested);
                 false
@@ -4864,7 +5021,29 @@ impl Worker {
     }
 
     /// Shows one of the host's own notifications, replacing the one with its key.
+    ///
+    /// A notice about the same app within `SessionConfig::notice_burst` of the last one is the
+    /// same news told again (an app that fails at each start), and is not shown twice. A notice the watchers
+    /// still hold from before is withdrawn first: Windows updates the toast of a tag it has
+    /// without popping it up, so a notice the user left in the notification centre would
+    /// otherwise never be seen again.
     fn post_notice(&mut self, notification: Notification) {
+        let now = Instant::now();
+        if let Some(last) = self.notice_posted.get(&notification.key) {
+            if now.duration_since(*last) < self.config.notice_burst {
+                eprintln!(
+                    "notices: {} was told a moment ago; not shown again",
+                    notification.key
+                );
+                return;
+            }
+        }
+        self.notice_posted.insert(notification.key.clone(), now);
+        if self.notifications.contains_key(&notification.key) {
+            let key = notification.key.clone();
+            self.remove_notice(&key);
+        }
+        eprintln!("notices: showing {}", notification.key);
         self.deliver_notification(notification);
     }
 
@@ -5110,6 +5289,7 @@ impl Worker {
     /// Removes every notification the watchers have, as when the guest stops.
     fn clear_notifications(&mut self) {
         self.notification_limit.clear();
+        self.notice_posted.clear();
         self.dismissals.clear();
         self.offered_reinstalls.clear();
         let keys: Vec<String> = self.notifications.drain().map(|(key, _)| key).collect();
@@ -5426,22 +5606,22 @@ impl Worker {
         }
     }
 
-    /// Takes new text from the host's clipboard. It is sent at once if the guest can take it,
-    /// and kept for when it can.
-    fn host_clipboard(&mut self, text: String) {
+    /// Takes new text or a new image from the host's clipboard. It is sent at once if the
+    /// guest can take it, and kept for when it can.
+    fn host_clipboard(&mut self, clip: clipboard::Clip) {
         if !self.clipboard_sharing {
             return;
         }
-        if !clipboard::fits(&text) {
-            eprintln!("{}", clipboard::too_long(&text, "host"));
+        if let Err(why) = clip.check("host") {
+            eprintln!("{why}");
             return;
         }
-        self.host_clipboard = Some(text);
+        self.host_clipboard = Some(clip);
         self.offer_host_clipboard();
     }
 
-    /// Sends the host's latest clipboard text to a guest that is ready for it and does not
-    /// have it yet.
+    /// Sends the host's latest clipboard text or image to a guest that is ready for it and does
+    /// not have it yet. An image goes in pieces, which other threads' messages pass between.
     fn offer_host_clipboard(&mut self) {
         if !self.clipboard_sharing
             || !self.agent_connected
@@ -5449,35 +5629,57 @@ impl Worker {
         {
             return;
         }
-        let Some(text) = &self.host_clipboard else {
+        let Some(clip) = &self.host_clipboard else {
             return;
         };
-        if self.clipboard_last.as_ref() == Some(text) {
+        if self.clipboard_last.as_ref() == Some(clip) {
             return;
         }
-        let text = text.clone();
-        self.clipboard_last = Some(text.clone());
-        self.send_body(Body::ClipboardText(control::ClipboardText { text }));
+        let clip = clip.clone();
+        self.clipboard_last = Some(clip.clone());
+        match clip {
+            clipboard::Clip::Text(text) => {
+                self.send_body(Body::ClipboardText(control::ClipboardText { text }))
+            }
+            clipboard::Clip::Image(png) => {
+                self.clipboard_image_out = self.clipboard_image_out.wrapping_add(1);
+                for piece in clipboard::image_pieces(self.clipboard_image_out, &png) {
+                    self.send_body(Body::ClipboardImage(piece));
+                }
+            }
+        }
     }
 
-    /// Takes text the guest copied, and hands it to the watchers unless it is what the guest
-    /// was just given.
-    fn guest_clipboard(&mut self, text: String) {
+    /// Takes a piece of an image the guest copied, and the whole image once it is there.
+    fn guest_clipboard_image(&mut self, piece: control::ClipboardImage) {
         if !self.clipboard_sharing {
-            eprintln!("clipboard: dropped text copied in Android; sharing is off");
             return;
         }
-        if !clipboard::fits(&text) {
-            eprintln!("{}", clipboard::too_long(&text, "guest"));
+        match self.clipboard_image_in.take(piece) {
+            Ok(Some(png)) => self.guest_clipboard(clipboard::Clip::Image(png.into())),
+            Ok(None) => {}
+            Err(why) => eprintln!("clipboard: dropped an image copied in Android: {why}"),
+        }
+    }
+
+    /// Takes text or an image the guest copied, and hands it to the watchers unless it is what
+    /// the guest was just given.
+    fn guest_clipboard(&mut self, clip: clipboard::Clip) {
+        if !self.clipboard_sharing {
+            eprintln!("clipboard: dropped a clip copied in Android; sharing is off");
             return;
         }
-        if self.clipboard_last.as_ref() == Some(&text) {
+        if let Err(why) = clip.check("guest") {
+            eprintln!("{why}");
             return;
         }
-        self.clipboard_last = Some(text.clone());
+        if self.clipboard_last.as_ref() == Some(&clip) {
+            return;
+        }
+        self.clipboard_last = Some(clip.clone());
         // The host's clipboard is about to hold it, so it is not offered back.
-        self.host_clipboard = Some(text.clone());
-        self.shared.publish_clipboard(&text);
+        self.host_clipboard = Some(clip.clone());
+        self.shared.publish_clipboard(&clip);
     }
 
     /// Turns clipboard sharing on or off, and tells a connected agent.
@@ -5489,6 +5691,7 @@ impl Worker {
         // Nothing copied while sharing was off crosses later; the next copy does.
         self.host_clipboard = None;
         self.clipboard_last = None;
+        self.clipboard_image_in.reset();
         eprintln!("clipboard: sharing is {}", if on { "on" } else { "off" });
         if self.running() && self.agent_connected {
             self.send_body(Body::ClipboardSharing(control::ClipboardSharing { on }));
@@ -5795,14 +5998,20 @@ impl Worker {
             return;
         }
         self.host_memory_low = low;
-        if low {
-            eprintln!("lifecycle: the host is short of memory; asking the guest to give some back");
-        }
+        // Only a guest whose agent is connected hears it; an agent that connects later is
+        // told when it does. Without one there is nobody to ask, and nothing to log.
         match self.state() {
             SessionState::Starting
             | SessionState::Stalled
             | SessionState::Active
-            | SessionState::Dozing => {
+            | SessionState::Dozing
+                if self.agent_connected =>
+            {
+                if low {
+                    eprintln!(
+                        "lifecycle: the host is short of memory; asking the guest to give some back"
+                    );
+                }
                 self.send_body(Body::HostMemory(control::HostMemory { low }));
             }
             SessionState::Frozen => self.host_memory_pending = true,
@@ -6100,7 +6309,8 @@ impl Worker {
                     ));
                 }
             }
-            // A new agent takes the clipboards to be shared, and has none of the host's text.
+            // A new agent takes the clipboards to be shared, and has none of the host's clips.
+            self.clipboard_image_in.reset();
             self.clipboard_last = None;
             if !self.clipboard_sharing {
                 self.send_body(Body::ClipboardSharing(control::ClipboardSharing {
@@ -6127,8 +6337,10 @@ impl Worker {
             // restarts, which ends every app's task with it. Their windows close rather than
             // keep a last frame nothing answers, and a task number the new framework hands out
             // again is a new task. Tasks that outlived an agent alone are reported again by the
-            // next one, and their windows open again.
-            self.shared.clear_tasks();
+            // next one, and their windows open again. The hwcomposer, which stays, keeps
+            // posting such a task to the display it announced once, so that pairing is kept
+            // for it.
+            self.shared.clear_reported_tasks();
             eprintln!("lifecycle: the agent is gone; the tasks it reported have ended");
         }
     }
@@ -6225,6 +6437,14 @@ impl Worker {
             return true;
         }
         let now = Instant::now();
+        if now >= self.next_exit_check {
+            self.next_exit_check = now + EXIT_POLL;
+            if let Some(why) = self.launcher.exited() {
+                eprintln!("lifecycle: {why}; Android is stopped and starts again when asked");
+                self.stop_guest_gone(Some(why), None);
+                return false;
+            }
+        }
         self.check_prerequisite(now);
         if let Some((since, why)) = &self.prerequisite_missing {
             if now.duration_since(*since) >= self.config.prerequisite_stop_after {
@@ -6310,7 +6530,8 @@ impl Worker {
         }
     }
 
-    fn start(&mut self) {
+    fn start(&mut self, reason: &str) {
+        eprintln!("session: starting Android, asked by: {reason}");
         self.shared.set(SessionState::Starting, None);
         self.boot_completed_at = None;
         self.agent_connected = false;
@@ -6342,12 +6563,17 @@ impl Worker {
             .unwrap_or_else(|e| e.into_inner()) = Some(secret.clone());
         self.secret = Some(secret);
         if let Err(why) = started {
+            let side = self.launcher.failure_side();
             // The launcher may have got part of the way; make sure nothing is left behind.
             let _ = self.launcher.stop(self.config.stop_timeout);
-            self.shared.set(
-                SessionState::Stopped,
-                Some(StopReason::GuestFailedToStart(why)),
-            );
+            let reason = match side {
+                crate::start_failure::FailureSide::Host => StopReason::HostFailed {
+                    why,
+                    diagnostics: None,
+                },
+                crate::start_failure::FailureSide::Guest => StopReason::GuestFailedToStart(why),
+            };
+            self.shared.set(SessionState::Stopped, Some(reason));
             return;
         }
         // The guest renders while it boots, before the agent connects, and the compositor
@@ -6390,7 +6616,7 @@ impl Worker {
                 }
             }
             if let Some(why) = self.launcher.exited() {
-                self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics });
+                self.stop_exited_during_boot(why);
                 return;
             }
             let now = Instant::now();
@@ -6482,7 +6708,7 @@ impl Worker {
     /// Handles a request while starting. Returns false once the start was abandoned.
     fn handle_starting(&mut self, command: Command) -> bool {
         match command {
-            Command::Start => true,
+            Command::Start(_) => true,
             Command::Send(_, reply)
             | Command::Freeze(reply)
             | Command::Notification(_, reply)
@@ -6601,12 +6827,20 @@ impl Worker {
                 Err(error) => {
                     // A guest that dies while it boots has its console to show for it.
                     if matches!(self.state(), SessionState::Starting | SessionState::Stalled) {
-                        self.stop_failed_start(|diagnostics| StopReason::GuestExited {
-                            why: format!("the control channel was lost during boot: {error}"),
-                            diagnostics,
-                        });
+                        self.stop_exited_during_boot(format!(
+                            "the control channel was lost during boot: {error}"
+                        ));
                     } else {
-                        self.stop(StopReason::ChannelLost(error.to_string()));
+                        // A guest that crashed takes its channel with it; the launcher may
+                        // need a moment to see that the VM ended or was reset.
+                        let lost = error.to_string();
+                        let deadline = Instant::now() + GONE_WAIT;
+                        let mut exited = self.launcher.exited();
+                        while exited.is_none() && Instant::now() < deadline {
+                            thread::sleep(POLL);
+                            exited = self.launcher.exited();
+                        }
+                        self.stop_guest_gone(exited, Some(lost));
                     }
                     return;
                 }
@@ -6845,7 +7079,10 @@ impl Worker {
             Some(Body::GuestSleepReady(_)) => self.guest_sleep_ready(),
             Some(Body::OpenLink(link)) => self.guest_link(link.url),
             Some(Body::FileProgress(progress)) => self.shared.file_progress(progress),
-            Some(Body::ClipboardText(clip)) => self.guest_clipboard(clip.text),
+            Some(Body::ClipboardText(clip)) => {
+                self.guest_clipboard(clipboard::Clip::Text(clip.text))
+            }
+            Some(Body::ClipboardImage(piece)) => self.guest_clipboard_image(piece),
             Some(Body::GamepadRumble(rumble)) => self
                 .shared
                 .publish_rumble(GamepadRumble::from_control(&rumble)),
@@ -7215,6 +7452,58 @@ impl Worker {
     /// Stops a guest whose start failed, and reports `reason` with the launcher's
     /// diagnostics. They are asked for once the guest is gone, so they cover all of its
     /// output.
+    /// Stops a guest that ended during boot, as a host-side failure when the launcher says the
+    /// guest never ran.
+    fn stop_exited_during_boot(&mut self, why: String) {
+        match self.launcher.failure_side() {
+            crate::start_failure::FailureSide::Host => {
+                self.stop_failed_start(|diagnostics| StopReason::HostFailed { why, diagnostics })
+            }
+            crate::start_failure::FailureSide::Guest => {
+                self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics })
+            }
+        }
+    }
+
+    /// Stops a guest that ended by itself (`exited`, the launcher's account of it) or whose
+    /// control channel was lost (`lost`) while it ran. When its console shows a kernel crash
+    /// it is reported as one, with the console around it; otherwise as the guest ending, with
+    /// the launcher's diagnostics, or as the lost channel.
+    fn stop_guest_gone(&mut self, exited: Option<String>, lost: Option<String>) {
+        self.stop_with(move |launcher| {
+            let diagnostics = launcher.diagnostics();
+            let console = launcher.crash_console();
+            let crash = console
+                .as_deref()
+                .or(diagnostics.as_deref())
+                .and_then(crate::guest_crash::summary)
+                // A launcher that kept the console of a crash saw the VM reset even when the
+                // console does not say why.
+                .or_else(|| {
+                    console
+                        .as_ref()
+                        .map(|_| "the VM restarted by itself".to_string())
+                });
+            if let Some(why) = crash {
+                eprintln!("lifecycle: Android crashed ({why}); it starts again when asked");
+                let diagnostics = match (console, diagnostics) {
+                    (Some(console), Some(rest)) => Some(format!(
+                        "the guest's console at the crash:\n{console}\n{rest}"
+                    )),
+                    (Some(console), None) => {
+                        Some(format!("the guest's console at the crash:\n{console}"))
+                    }
+                    (None, rest) => rest,
+                };
+                return StopReason::GuestCrashed { why, diagnostics };
+            }
+            match (exited, lost) {
+                (Some(why), _) => StopReason::GuestExited { why, diagnostics },
+                (None, lost) => StopReason::ChannelLost(lost.unwrap_or_default()),
+            }
+        });
+    }
+
     fn stop_failed_start(&mut self, reason: impl FnOnce(Option<String>) -> StopReason) {
         self.stop_with(|launcher| reason(launcher.diagnostics()));
     }

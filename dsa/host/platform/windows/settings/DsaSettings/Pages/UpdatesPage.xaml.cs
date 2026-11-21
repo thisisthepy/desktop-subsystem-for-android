@@ -33,8 +33,8 @@ public partial class UpdatesPage : Page
         // The gate follows the update; the button inside it follows the settings.
         UpdateNowGate.DataContext = ProgramUpdate;
         UpdateNowButton.DataContext = ViewModel;
-        _androidTimer.Tick += async (_, _) => await Android.RefreshAsync();
-        _programTimer.Tick += async (_, _) => await ProgramUpdate.PollAsync();
+        _androidTimer.Tick += PollingTimers.Once(Android.RefreshAsync);
+        _programTimer.Tick += PollingTimers.Once(ProgramUpdate.PollAsync);
         PollingTimers.Attach(this, _androidTimer, _programTimer);
         Loaded += async (_, _) =>
         {

@@ -1192,10 +1192,15 @@ impl UserAndroid for WithProgramStatus {
     fn problem(&self) -> Option<String> {
         self.android.problem()
     }
-    fn start(&self) {
+    fn start_because(&self, reason: &str) {
         if self.status.installing().is_none() {
-            self.android.start();
+            self.android.start_because(reason);
+        } else {
+            eprintln!("start of Android asked by {reason} was held back: the program is updating");
         }
+    }
+    fn start(&self) {
+        self.start_because("a start request");
     }
     fn stop(&self) {
         self.android.stop();
@@ -1244,6 +1249,9 @@ impl UserAndroid for WithProgramStatus {
     }
     fn watch_log(&self, filter: crate::guest_log::LogFilter) -> Option<crate::guest_log::LogWatch> {
         self.android.watch_log(filter)
+    }
+    fn log_problem(&self) -> Option<String> {
+        self.android.log_problem()
     }
     fn dump_log(
         &self,
@@ -1356,6 +1364,12 @@ impl UserAndroid for WithProgramStatus {
     }
     fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         self.android.watch_clipboard()
+    }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        self.android.host_clipboard_image(png)
+    }
+    fn watch_clips(&self) -> Option<std::sync::mpsc::Receiver<crate::clipboard::Clip>> {
+        self.android.watch_clips()
     }
     fn watch_notifications(
         &self,

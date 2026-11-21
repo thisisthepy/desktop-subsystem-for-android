@@ -9,6 +9,16 @@
 //!
 //! `DSA_RENDERER` names the renderer library to load instead of the one in DSA.app.
 
+/// The program's Info.plist, the same one its helper bundle (`DSA Window Manager.app` in
+/// DSA.app's `Contents/Helpers`) carries. In DSA.app macOS reads the bundle's copy; this one
+/// gives a development build run outside the bundle the same identity and `LSUIElement`, so it
+/// has no Dock icon and no menu bar either.
+#[cfg(target_os = "macos")]
+#[used]
+#[link_section = "__TEXT,__info_plist"]
+static INFO_PLIST: [u8; include_bytes!("../../packaging/dsa-wm-Info.plist").len()] =
+    *include_bytes!("../../packaging/dsa-wm-Info.plist");
+
 #[cfg(not(target_os = "macos"))]
 fn main() -> std::process::ExitCode {
     eprintln!("dsa-wm: this build is the macOS window manager and runs on macOS only");
@@ -22,6 +32,8 @@ fn main() -> std::process::ExitCode {
     use std::sync::{Arc, OnceLock};
 
     use dsa_host_macos::wm::run::{run, Places};
+
+    dsa_host_macos::app_service::log_to_agent_file();
 
     static STOP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
     extern "C" fn on_signal(_: libc::c_int) {

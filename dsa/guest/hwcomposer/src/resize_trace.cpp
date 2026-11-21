@@ -132,6 +132,33 @@ std::vector<std::string> ResizeTrace::posted(int32_t task, int64_t width, int64_
     return out;
 }
 
+std::vector<std::string> ResizeTrace::appBuffer(int32_t task, int64_t width, int64_t height,
+                                                int64_t bufferWidth, int64_t bufferHeight,
+                                                double monoMs, int64_t wallMs) {
+    std::vector<std::string> out;
+    auto it = mPending.find(task);
+    if (it == mPending.end() || it->second.width != width || it->second.height != height ||
+        bufferWidth != width || bufferHeight != height) {
+        return out;
+    }
+    if (auto l = stage(task, "hwc.appbuffer", width, height,
+                       "since_bounds=" + ms1(monoMs - it->second.learnedMs), monoMs, wallMs)) {
+        out.push_back(*l);
+    }
+    return out;
+}
+
+std::vector<std::string> ResizeTrace::colorBuffer(int32_t task, int64_t width, int64_t height,
+                                                  const char* kind, double tookMs, double monoMs,
+                                                  int64_t wallMs) {
+    std::vector<std::string> out;
+    if (mDetailed) {
+        out.push_back(line(task, "hwc.colorbuffer", width, height,
+                           std::string("kind=") + kind + " took=" + ms1(tookMs), monoMs, wallMs));
+    }
+    return out;
+}
+
 void ResizeTrace::forget(int32_t task) {
     mPending.erase(task);
     mSummaries.erase(task);

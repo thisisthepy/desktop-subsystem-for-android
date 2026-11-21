@@ -1,0 +1,61 @@
+Subject: SurfaceFlinger: free the client target's buffers that were never composed into
+
+The release that 0005 adds gives the client target's buffers back only while the surface holds
+a current buffer, one SurfaceFlinger composed into. The buffers of a display that has needed no
+client composition are never acquired, so they were never freed: the queue holds two of the
+display's size from the time the display is set up, and a DSA build showed both still held
+after hours idle (2 x 57,600 KiB at 3840x3840, frame 0, state FREE, usesClientComposition=false),
+112.5 MiB of the guest's shared memory for nothing.
+
+The release now also runs when the queue may hold free buffers that were never acquired: at
+first, and again after any frame composes into the surface. Once it has run it does not run
+again until a frame composes here, so an idle display does not discard on every frame. The next
+frame that needs the client target allocates its buffers as before.
+
+Applies to frameworks/native at ae266dcb706d083868578cfedce381ef44488a07 (Android 17), after 0005.
+---
+diff --git a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h
+--- a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h
++++ b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h
+@@ -126,4 +126,8 @@
+     // The buffers were given back since takeBuffersReleased last asked.
+     bool mBuffersReleased = false;
++    // The queue may hold free buffers that were never given back: true at first, since the
++    // queue holds buffers from the time the display is set up, before any frame is composed
++    // here, and again once a frame is.
++    bool mMayHoldFreeBuffers = true;
+ 
+     // Gives the current buffer back to the queue and frees every buffer the queue holds.
+diff --git a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp
+--- a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp
++++ b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp
+@@ -104,18 +104,20 @@
+     status_t err = acquireBufferLocked(&item, 0);
+     if (err == BufferQueue::NO_BUFFER_AVAILABLE) {
+         mDataspace = Dataspace::UNKNOWN;
+         // Nothing was composed into this surface for this frame. Once that has been so for a
+         // while, the buffers go back when the frame is committed: the display stops showing
+         // the client target with it.
+-        mReleaseWhenCommitted = mCurrentBuffer != nullptr &&
++        // Buffers the queue holds that nothing was ever composed into go back too.
++        mReleaseWhenCommitted = (mCurrentBuffer != nullptr || mMayHoldFreeBuffers) &&
+                 systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientFrameTime >= kReleaseIdleBuffersAfter;
+         return NO_ERROR;
+     } else if (err != NO_ERROR) {
+         ALOGE("error acquiring buffer: %s (%d)", strerror(-err), err);
+         mDataspace = Dataspace::UNKNOWN;
+         return err;
+     }
+     mLastClientFrameTime = systemTime(SYSTEM_TIME_MONOTONIC);
+     mReleaseWhenCommitted = false;
++    mMayHoldFreeBuffers = true;
+ 
+     // If the BufferQueue has freed and reallocated a buffer in mCurrentSlot
+@@ -210,6 +212,7 @@
+     for (auto& id : mHwcBufferIds) {
+         id = UINT64_MAX;
+     }
+     mBuffersReleased = true;
++    mMayHoldFreeBuffers = false;
+     ALOGI("%s: nothing composed into the client target for %" PRId64 " ms; its buffers are freed",
+           to_string(mDisplayId).c_str(),

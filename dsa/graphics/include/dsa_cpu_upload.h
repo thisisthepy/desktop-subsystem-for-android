@@ -268,6 +268,9 @@ class UploadTracker {
     }
     void uploaded(uint64_t buffer, uint64_t print) { mPrints[buffer] = print; }
     void forget(uint64_t buffer) { mPrints.erase(buffer); }
+    // Whether the buffer's ColorBuffer holds the picture last copied into it: its last copy
+    // succeeded. Until then it holds zeros, which a YUV layer shows as solid green.
+    bool holds(uint64_t buffer) const { return mPrints.count(buffer) != 0; }
     size_t size() const { return mPrints.size(); }
 
    private:

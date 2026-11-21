@@ -613,6 +613,61 @@ class AccessibilityExportTest {
     }
 
     @Test
+    fun nfr5_an_event_whose_app_does_not_answer_never_holds_up_the_thread_that_delivers_it() {
+        // Android calls the service on the agent's UI thread, which also takes HomeActivity's
+        // input. Asking Android about an event's node waits on the app that owns the window, up
+        // to five seconds when that app is closing: input to HomeActivity then timed out.
+        val reader = FakeScheduler()
+        locator.up = daemon
+        tasks.running = listOf(appTask(3, bounds = TaskBounds(30, 20, 430, 620)))
+        Agent(
+            AGENT, tasks, FakeActions(), locator, FakeWindowing(), FakeInjector(), scheduler, log,
+            accessibility = service,
+            accessibilityReader = reader,
+            clock = { scheduler.now },
+        ).start()
+        scheduler.runDue()
+        service.windows[3] = listOf(list)
+        watch(3, true)
+        scheduler.advance(10)
+        reader.runDue()
+        scheduler.runDue()
+        listen(3, true)
+        val sent = trees().size
+
+        var asked = 0
+        row.info = row.info.copy(focused = true)
+        // The thread that delivers the event asks nothing: the question waits on the reader.
+        service.onEvent!!.invoke(
+            AccessibilityChange(
+                AccessibilityChange.Kind.FOCUS,
+                resolve = {
+                    asked++
+                    AccessibilityChange(AccessibilityChange.Kind.FOCUS, 3, row)
+                },
+            ),
+        )
+        assertEquals(0, asked)
+        scheduler.runDue()
+        assertEquals("the scheduler asks nothing either", 0, asked)
+        reader.runDue()
+        assertEquals(1, asked)
+        scheduler.advance(AccessibilityExport.MIN_INTERVAL_MILLIS)
+        reader.runDue()
+        scheduler.runDue()
+        assertTrue(trees().size > sent)
+        assertTrue(trees().last().nodesList.any { it.focused })
+
+        // An event about nothing the export follows (an answer of null) changes nothing, and
+        // one whose question fails is read as a change somewhere, not a crash.
+        service.onEvent!!.invoke(AccessibilityChange(AccessibilityChange.Kind.CONTENT, resolve = { null }))
+        service.onEvent!!.invoke(AccessibilityChange(AccessibilityChange.Kind.CONTENT, resolve = { throw IllegalStateException("window gone") }))
+        reader.runDue()
+        scheduler.runDue()
+        assertTrue(log.lines.any { it.contains("could not read what an accessibility event was about") })
+    }
+
+    @Test
     fun fr4_a_slow_tree_read_holds_up_no_resize_and_a_change_during_it_is_read_after() {
         // The reader's thread, which this test runs only when it says so: reading an app's tree
         // waits on the app, which is busy laying itself out right after a resize.

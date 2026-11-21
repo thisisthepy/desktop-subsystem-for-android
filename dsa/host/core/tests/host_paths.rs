@@ -46,3 +46,11 @@ fn fr19_a_user_name_that_is_a_path_is_refused() {
         assert!(paths.user_data(user).is_err(), "{user:?}");
     }
 }
+
+#[test]
+fn fr36_the_sealed_keys_are_kept_in_a_folder_beside_the_settings() {
+    assert_eq!(
+        dsa_host_core::host_paths::keys_dir_beside(std::path::Path::new("/var/lib/dsa/settings")),
+        std::path::PathBuf::from("/var/lib/dsa/keys")
+    );
+}

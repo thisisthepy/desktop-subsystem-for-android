@@ -55,6 +55,15 @@ public class StopReasonTextTests
     }
 
     [Fact]
+    public async Task Fr14_a_start_the_host_refused_reads_as_a_host_problem()
+    {
+        var reason = StopReasonText.HostPrefix + "HcsCreateComputeSystem failed (HRESULT 0x803b0014)";
+        var vm = await General(reason);
+        Assert.Equal(StopReasonText.Host, vm.LastReason);
+        Assert.Equal(reason, vm.LastReasonDetail);
+    }
+
+    [Fact]
     public async Task Fr17_raw_json_never_reaches_the_bars_visible_text()
     {
         var vm = await General($"HcsStartComputeSystem failed, 0x80070057 {HcsDocument}");

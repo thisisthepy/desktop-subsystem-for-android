@@ -58,7 +58,7 @@ fn file_access(folders: UserFolders, folder: std::path::PathBuf) -> FileAccess {
 /// The folder the service keeps the sealed keys of the user with `uid` in, beside its
 /// settings folder `settings_dir`.
 pub fn keys_dir(settings_dir: &Path, uid: u32) -> PathBuf {
-    settings_dir.with_file_name("keys").join(uid.to_string())
+    dsa_host_core::host_paths::keys_dir_beside(settings_dir).join(uid.to_string())
 }
 
 /// What a person reads of the user's keyring as a sealer.

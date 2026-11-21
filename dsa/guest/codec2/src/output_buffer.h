@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 namespace dsa::codec2 {
@@ -86,6 +87,35 @@ class FailureThrottle {
    private:
     uint32_t mEvery;
     uint32_t mCount = 0;
+};
+
+// Whether a decoder session has starved: pictures keep coming from the host, yet no buffer of
+// the surface has come back for any of them for `limit`. The surface's consumer then holds
+// every buffer and gives none back (a texture its app no longer updates, or buffers the
+// allocator still counts as the component's), and waiting longer only drops every picture
+// while the screen keeps one frame for minutes. It says so once per run; a picture that is
+// shown, a flush or a stop ends the run.
+class StarvationWatch {
+   public:
+    using Clock = std::chrono::steady_clock;
+    explicit StarvationWatch(std::chrono::milliseconds limit = std::chrono::seconds(10), uint32_t pictures = 10)
+        : mLimit(limit), mPictures(pictures) {}
+    // A picture was dropped for want of a buffer at `now`. True once, when the run has lasted
+    // the limit and at least `pictures` pictures.
+    bool noBuffer(Clock::time_point now);
+    void reset() {
+        mStarving = false;
+        mReported = false;
+        mDrops = 0;
+    }
+
+   private:
+    std::chrono::milliseconds mLimit;
+    uint32_t mPictures;
+    bool mStarving = false;
+    bool mReported = false;
+    uint32_t mDrops = 0;
+    Clock::time_point mSince;
 };
 
 }  // namespace dsa::codec2

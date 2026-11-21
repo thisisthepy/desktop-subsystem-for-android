@@ -16,13 +16,15 @@ public partial class MemoryPage : Page
         InitializeComponent();
         DataContext = ViewModel;
         LimitSection.DataContext = App.Settings;
-        _timer.Tick += async (_, _) => await ViewModel.RefreshAsync();
+        _timer.Tick += PollingTimers.Once(ViewModel.RefreshAsync);
         PollingTimers.Attach(this, _timer);
         Loaded += async (_, _) =>
         {
             await ViewModel.RefreshAsync();
             await App.Settings.LoadAsync();
         };
+        // The report and its rows go when the page is left; a new one is asked for when shown.
+        Unloaded += (_, _) => ViewModel.Release();
     }
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();

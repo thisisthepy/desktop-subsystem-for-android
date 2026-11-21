@@ -1,22 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Embedded in dsa-devices (its __TEXT,__info_plist section). The device lender runs from a
-     launchd agent, not as an app, so this is where macOS finds its identity and the reasons it
-     shows when it asks the user for the camera, the microphone and the location. -->
+<!-- The Info.plist of DSA.app's helper bundle Contents/Helpers/DSA Devices.app, where
+     dsa-devices runs. With a bundle and an identifier of its own, macOS never takes the device
+     lender for the running DSA.app. Here macOS finds the reasons it shows when it asks the user
+     for the camera, the microphone and the location. LSUIElement keeps it out of the Dock and
+     the menu bar. build-app.sh puts the version in. The same file is embedded in dsa-devices
+     (its __TEXT,__info_plist section), so a development build run outside the bundle can ask
+     for them too. -->
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>dsa-devices</string>
+	<key>CFBundleIconFile</key>
+	<string>DSA</string>
 	<key>CFBundleIdentifier</key>
 	<string>org.thisisthepy.dsa.devices</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>DSA Devices</string>
 	<key>CFBundleDisplayName</key>
-	<string>Desktop Subsystem for Android</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
+	<string>DSA Devices</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Apache License 2.0. Android is a trademark of Google LLC.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Apps in Desktop Subsystem for Android use the camera when you allow them to.</string>
 	<key>NSMicrophoneUsageDescription</key>

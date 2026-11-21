@@ -183,7 +183,7 @@ fn portal_open(handoff: &Handoff) -> Result<ShareOutcome, String> {
 /// Opens `handoff` with `xdg-open`, in the program the desktop names for it.
 fn xdg_open(handoff: &Handoff) -> ShareOutcome {
     let target = match handoff {
-        Handoff::Link(url) => match super::links::openable(url) {
+        Handoff::Link(url) => match dsa_host_core::links::web_url(url) {
             Ok(url) => url.to_string(),
             Err(why) => return ShareOutcome::Failed(why),
         },

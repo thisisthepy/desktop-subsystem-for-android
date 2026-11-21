@@ -19,11 +19,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use dsa_host_core::boot_signs::{
+    explain_unfinished_boot, explain_unreachable_agent, BootSigns, BootWords,
+};
 use dsa_host_core::bootconfig;
 use dsa_host_core::device_identity::{append_overlay, ramdisk_overlay};
 use dsa_host_core::direct_mapped_disk::DirectMappedImages;
 use dsa_host_core::host_api::NetworkStatus;
+use dsa_host_core::memory::growth_failed_line;
 use dsa_host_core::session::{GuestLauncher, GuestStall};
+use dsa_host_core::start_failure::FailureSide;
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
 use crate::console::{boot_header, capture, Tail};
@@ -31,8 +36,14 @@ use crate::crosvm::{virtio_mem_bytes, GuestArch, NetworkBackend, VmConfig, SHUTD
 use crate::crosvm_control::{Control, Request};
 use crate::image::ImageFiles;
 use crate::network::{place_tap, VmNetwork};
-use crate::signs::{explain_unfinished_boot, explain_unreachable_agent, BootSigns};
 use crate::users::{Account, BeforeExec};
+
+/// What this host tells the user about a late boot that no other host would.
+const BOOT_WORDS: BootWords<'static> = BootWords {
+    renderer_note: "The renderer (dsa-gfx) is started by DSA's window manager, which must run in \
+                    your desktop session.",
+    start_over: "run `dsa reset`, or `dsa stop` and move",
+};
 
 /// How long crosvm may take to open its control socket and start the guest kernel.
 const START_WAIT: Duration = Duration::from_secs(30);
@@ -163,8 +174,11 @@ pub struct LinuxVmLauncher {
     boot_properties: Option<BootProperties>,
     prerequisite: Option<Prerequisite>,
     networking: Option<Networking>,
-    /// Whether the VM may grow; turned off for good when growing did not work.
+    /// Whether the VM may grow.
     grow: bool,
+    /// Whether this start gives the VM room to grow: `grow`, until a start fails for it. The
+    /// next start tries again.
+    grow_this_start: bool,
     vm: Option<RunningVm>,
     /// The guest's console.
     tail: Tail,
@@ -220,6 +234,7 @@ impl LinuxVmLauncher {
             prerequisite: None,
             networking: None,
             grow: setup.grow_memory,
+            grow_this_start: setup.grow_memory,
             vm: None,
             tail: Tail::default(),
             vmm_tail: Tail::default(),
@@ -257,7 +272,7 @@ impl LinuxVmLauncher {
                 self.name
             )
         };
-        if files.system_image.is_none() {
+        if files.system_disk.is_none() {
             why("the image has no separate system disk to map");
             return None;
         }
@@ -414,13 +429,16 @@ impl LinuxVmLauncher {
     }
 
     fn start_vm(&mut self, secret: &BootSecret) -> Result<(), String> {
+        // A start that fails before crosvm runs has no console of its own; the last boot's
+        // must not make it look as if the guest ran.
+        self.tail = Tail::default();
         let plan = (self.plan)()?;
         self.account.make_dir(&self.run_dir)?;
         if let Some(logs) = self.console_log.parent() {
             self.account.make_dir(logs)?;
         }
         if let Some(pstore) = &self.pstore_disk {
-            crate::pstore::ensure(pstore)?;
+            dsa_host_core::disk::pstore::ensure_raw(pstore)?;
             self.account.own(pstore)?;
         }
         // The add-on disk this start attaches: a change the user made while Android ran takes
@@ -472,7 +490,11 @@ impl LinuxVmLauncher {
         } else {
             None
         };
-        let memory_max_mb = if self.grow { plan.memory_max_mb } else { None };
+        let memory_max_mb = if self.grow_this_start {
+            plan.memory_max_mb
+        } else {
+            None
+        };
         let config = VmConfig {
             name: self.name.clone(),
             arch: self.arch,
@@ -482,7 +504,7 @@ impl LinuxVmLauncher {
             memory_mb: plan.memory_mb,
             memory_max_mb,
             processors: self.processors,
-            system_image: plan.files.system_image.clone(),
+            system_image: plan.files.system_disk.clone(),
             data_disk: self.data_disk.clone(),
             pstore_disk: self.pstore_disk.clone(),
             addon_disk,
@@ -521,10 +543,7 @@ impl LinuxVmLauncher {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(self.guest_cid, child.id());
-        let started = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
+        let started = SystemTime::now();
         let header = boot_header(
             started,
             plan.image_version.as_deref(),
@@ -609,8 +628,9 @@ impl GuestLauncher for LinuxVmLauncher {
             let _ = vm.child.kill();
             self.finish(vm);
         }
+        self.grow_this_start = self.grow;
         let mut started = self.start_vm(secret);
-        if started.is_err() && self.grow && self.vmm_tail.contains("guest memory") {
+        if started.is_err() && self.grow_this_start && self.vmm_tail.contains("guest memory") {
             // A host that cannot map the VM's virtio-mem region: it keeps its starting size.
             self.memory_growth_failed("crosvm could not make the VM's hot-pluggable memory");
             started = self.start_vm(secret);
@@ -658,9 +678,14 @@ impl GuestLauncher for LinuxVmLauncher {
     fn exited(&mut self) -> Option<String> {
         let vm = self.vm.as_mut()?;
         let status = vm.child.try_wait().ok().flatten()?;
-        Some(format!(
-            "the Android VM exited during boot (crosvm {status})"
-        ))
+        Some(format!("the Android VM exited by itself (crosvm {status})"))
+    }
+
+    /// The guest ran once its kernel printed on the console. A start that failed before that
+    /// (crosvm could not be spawned, or exited or hung before the kernel printed) and a VM
+    /// that ended during boot without a line from the guest failed on the host.
+    fn failure_side(&mut self) -> FailureSide {
+        FailureSide::from_guest_output(!self.tail.text().is_empty())
     }
 
     fn diagnostics(&mut self) -> Option<String> {
@@ -695,10 +720,15 @@ impl GuestLauncher for LinuxVmLauncher {
     fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
         let signs = self.signs.lock().unwrap_or_else(|e| e.into_inner()).clone();
         Some(match stall {
-            GuestStall::BootUnfinished => explain_unfinished_boot(&signs, &self.console_log),
-            GuestStall::AgentUnreachable => {
-                explain_unreachable_agent(&signs, &self.console_log, &self.data_disk)
+            GuestStall::BootUnfinished => {
+                explain_unfinished_boot(&signs, &self.console_log, &BOOT_WORDS)
             }
+            GuestStall::AgentUnreachable => explain_unreachable_agent(
+                &signs,
+                &self.console_log,
+                Some(&self.data_disk),
+                &BOOT_WORDS,
+            ),
         })
     }
 
@@ -748,12 +778,19 @@ impl GuestLauncher for LinuxVmLauncher {
     }
 
     fn memory_growth_failed(&mut self, why: &str) {
-        // The guest keeps the memory it has, and later VMs are made at their starting size.
-        self.grow = false;
+        // The guest keeps the memory it has, and this start retries without growth if it has
+        // not come up. The next start tries to grow again.
+        self.grow_this_start = false;
         eprintln!(
-            "uid:{}: memory: the Android VM cannot grow on this computer ({why}); it keeps the \
-             memory it started with",
-            self.account.uid
+            "uid:{}: {}",
+            self.account.uid,
+            growth_failed_line(
+                why,
+                self.vm
+                    .as_ref()
+                    .and_then(|vm| vm.memory)
+                    .map(|(start, _)| start)
+            )
         );
     }
 }

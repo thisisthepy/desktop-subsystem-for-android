@@ -28,6 +28,7 @@
 //! A change to any of these keys wakes the watcher (`RegNotifyChangeKeyValue` on the key, or on
 //! its nearest existing parent while it does not exist yet).
 
+use dsa_host_core::hex::encode as hex;
 use std::time::Duration;
 
 use dsa_host_core::host_certificates::{self, source, FoundCertificate, HostRootStore};
@@ -197,10 +198,6 @@ impl HostRootStore for WindowsRootStore {
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// An open registry key, closed when dropped.

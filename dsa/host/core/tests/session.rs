@@ -48,6 +48,9 @@ struct Guest {
     exited: Option<String>,
     /// What the launcher tells about the boot when a start fails.
     diagnostics: Option<String>,
+    /// The console around a kernel crash the launcher saw, as a launcher that watches the
+    /// console keeps it.
+    crash_console: Option<String>,
     /// How many times the session asked for the diagnostics, and whether the guest was
     /// already stopped each time.
     diagnostics_asked: Vec<bool>,
@@ -135,6 +138,10 @@ impl GuestLauncher for FakeLauncher {
 
     fn exited(&mut self) -> Option<String> {
         self.0.lock().unwrap().exited.clone()
+    }
+
+    fn crash_console(&mut self) -> Option<String> {
+        self.0.lock().unwrap().crash_console.clone()
     }
 
     fn diagnostics(&mut self) -> Option<String> {
@@ -972,6 +979,177 @@ fn nfr5_a_guest_that_dies_leaves_the_host_alive_and_can_start_again() {
     let _second_agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
     assert_eq!(launcher.processes(), 3);
+}
+
+/// A VM can end while the host's end of its control channel stays open (the Virtualization
+/// framework does not close it), so the channel alone never says the guest is gone.
+#[test]
+fn nfr5_a_guest_that_ends_while_its_channel_stays_open_is_reported_stopped() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("Android's VM ended (the VM stopped with an error)".into());
+        guest.diagnostics = Some("last line: Out of memory".into());
+    }
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(
+        session.last_reason(),
+        Some(StopReason::GuestExited {
+            why: "Android's VM ended (the VM stopped with an error)".into(),
+            diagnostics: Some("last line: Out of memory".into()),
+        })
+    );
+    assert_eq!(launcher.processes(), 0);
+
+    // The host stays up and Android starts again.
+    launcher.0.lock().unwrap().exited = None;
+    session.start();
+    let _second_agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+/// The end of a console whose kernel panicked in binder, after a bad rss-counter 17 s before,
+/// as the macOS guest printed it.
+const PANIC_CONSOLE: &str = "\
+[  212.768219] BUG: Bad rss-counter state mm:00000000b1d4cef6 type:MM_ANONPAGES val:19 Comm:kworker/0:4 Pid:3265
+[  229.330312] Internal error: Oops: 0000000096000006 [#1]  SMP
+[  229.332915] lr : binder_inc_ref_for_node+0x1f0/0x528
+[  229.333755] Call trace:
+[  229.333767]  rb_insert_color+0x10/0x140 (P)
+[  229.333800]  binder_transaction+0x11a8/0x2b70
+[  229.333828]  binder_thread_write+0xd60/0x1c18
+[  229.334569] ---[ end trace 0000000000000000 ]---
+[  229.334583] Kernel panic - not syncing: Oops: Fatal exception
+[  229.334615] SMP: stopping secondary CPUs";
+
+#[test]
+fn nfr5_a_guest_whose_kernel_panics_while_active_is_reported_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // The kernel panics; the VM resets in place, which takes the channel with it, and the
+    // launcher sees the panic on the console.
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("Android's VM restarted by itself while it ran".into());
+        guest.crash_console = Some(PANIC_CONSOLE.into());
+        guest.diagnostics = Some("the guest's console ended with: ...".into());
+    }
+    drop(agent);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    let Some(StopReason::GuestCrashed { why, diagnostics }) = session.last_reason() else {
+        panic!("not reported as a crash: {:?}", session.last_reason());
+    };
+    assert!(
+        why.starts_with("kernel panic in binder_transaction"),
+        "{why}"
+    );
+    assert!(why.contains("BUG: Bad rss-counter state"), "{why}");
+    let diagnostics = diagnostics.unwrap();
+    assert!(
+        diagnostics.contains("Kernel panic - not syncing"),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("the guest's console ended with"),
+        "{diagnostics}"
+    );
+    let reason = session.last_reason().unwrap().to_string();
+    assert!(
+        reason.starts_with("Android crashed (kernel panic in binder_transaction"),
+        "{reason}"
+    );
+    assert_eq!(
+        dsa_host_core::guest_crash::crash_reason(&reason),
+        Some(why.as_str())
+    );
+    // The orphaned boot is stopped, the host stays up, and Android starts again.
+    assert_eq!(launcher.processes(), 0);
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = None;
+        guest.crash_console = None;
+    }
+    session.start();
+    let _second_agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+/// A launcher that sees the reset only a moment after the channel closed still gets the
+/// crash reported, read from its diagnostics when it kept no console of the crash.
+#[test]
+fn nfr5_a_crash_seen_just_after_the_channel_closed_is_reported_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    launcher.0.lock().unwrap().diagnostics = Some(PANIC_CONSOLE.into());
+    drop(agent);
+    thread::sleep(Duration::from_millis(300));
+    launcher.0.lock().unwrap().exited = Some("the Android VM exited by itself".into());
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(
+        matches!(
+            session.last_reason(),
+            Some(StopReason::GuestCrashed { ref why, .. })
+                if why.starts_with("kernel panic in binder_transaction")
+        ),
+        "{:?}",
+        session.last_reason()
+    );
+}
+
+/// A VM that ends with a panic on its console while its channel stays open is a crash too.
+#[test]
+fn nfr5_a_guest_that_ends_with_a_panic_while_its_channel_stays_open_is_reported_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.crash_console = Some(PANIC_CONSOLE.into());
+        guest.exited = Some("Android's VM ended by itself".into());
+    }
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(
+        matches!(session.last_reason(), Some(StopReason::GuestCrashed { .. })),
+        "{:?}",
+        session.last_reason()
+    );
+    assert_eq!(launcher.processes(), 0);
+}
+
+/// A guest that ends with nothing on its console about a crash is not called one.
+#[test]
+fn nfr5_a_guest_that_ends_without_a_crash_on_its_console_is_not_called_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("Android's VM ended by itself".into());
+        guest.diagnostics = Some("the guest's console ended with:\nreboot: Power down".into());
+    }
+    drop(agent);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(
+        matches!(session.last_reason(), Some(StopReason::GuestExited { .. })),
+        "{:?}",
+        session.last_reason()
+    );
 }
 
 #[test]
@@ -2557,6 +2735,52 @@ fn nfr2_a_host_short_of_memory_tells_the_guest_when_it_changes_and_when_the_agen
     assert_eq!(next_body(&mut agent), host_memory(true));
 }
 
+/// The host-memory words the guest is sent within `within`, skipping everything else.
+fn host_memory_words(agent: &mut Box<dyn Connection>, within: Duration) -> Vec<Body> {
+    let deadline = std::time::Instant::now() + within;
+    let mut words = Vec::new();
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return words;
+        }
+        let Ok(frame) = agent.recv(Some(left)) else {
+            return words;
+        };
+        if let Some(body @ Body::HostMemory(_)) = dsa_protocol::decode(&frame).unwrap().body {
+            words.push(body);
+        }
+    }
+}
+
+#[test]
+fn nfr2_a_host_short_of_memory_asks_nothing_while_the_agent_is_gone_and_tells_it_when_it_comes_back(
+) {
+    let hub = PowerHub::new();
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    hub.attach(&session);
+    session.start();
+    let mut daemon = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    // The agent goes, as when Android's framework restarts or the guest is dying.
+    report_boot(&mut daemon, true, false);
+    thread::sleep(Duration::from_millis(200));
+    hub.update_memory(true);
+    assert_eq!(
+        host_memory_words(&mut daemon, Duration::from_millis(500)),
+        Vec::<Body>::new(),
+        "nobody is asked to give memory back"
+    );
+    // The agent that comes back hears the host is still short.
+    report_boot(&mut daemon, true, true);
+    assert_eq!(
+        host_memory_words(&mut daemon, Duration::from_secs(1)),
+        [host_memory(true)]
+    );
+}
+
 fn tasks_shown(task_ids: &[i32]) -> Body {
     Body::TasksShown(dsa_protocol::control::TasksShown {
         task_ids: task_ids.to_vec(),
@@ -3476,6 +3700,184 @@ fn fr13_text_longer_than_the_limit_does_not_cross_either_way() {
     let most = "y".repeat(MAX_CLIPBOARD_BYTES);
     session.host_clipboard(most.clone());
     assert_eq!(next_body(&mut agent), clipboard_text(&most));
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+/// An image as PNG that takes several pieces on the control channel: noise does not compress.
+fn large_png() -> Vec<u8> {
+    let (width, height) = (400u32, 400u32);
+    let mut dib = vec![0u8; 40];
+    dib[0..4].copy_from_slice(&40u32.to_le_bytes());
+    dib[4..8].copy_from_slice(&width.to_le_bytes());
+    dib[8..12].copy_from_slice(&height.to_le_bytes());
+    dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+    dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+    let mut seed = 0x1234_5678u32;
+    for _ in 0..width * height * 4 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        dib.push(seed as u8);
+    }
+    let png = dsa_host_core::clipboard::dib_to_png(&dib).expect("a PNG");
+    assert!(png.len() > 2 * dsa_host_core::clipboard::IMAGE_PIECE_BYTES);
+    png
+}
+
+/// A small image as PNG.
+fn small_png(red: u8) -> Vec<u8> {
+    let mut dib = vec![0u8; 40];
+    dib[0] = 40;
+    dib[4] = 1;
+    dib[8] = 1;
+    dib[12] = 1;
+    dib[14] = 24;
+    dib.extend_from_slice(&[0, 0, red, 0]);
+    dsa_host_core::clipboard::dib_to_png(&dib).expect("a PNG")
+}
+
+/// Reads the pieces of one image the guest is sent, checking each one's length, and puts
+/// them together.
+fn image_for_the_guest(agent: &mut Box<dyn Connection>) -> (Vec<u8>, usize) {
+    let mut assembler = dsa_host_core::clipboard::ImageAssembler::default();
+    let mut pieces = 0;
+    loop {
+        match next_body(agent) {
+            Body::ClipboardImage(piece) => {
+                assert!(piece.data.len() <= dsa_host_core::clipboard::IMAGE_PIECE_BYTES);
+                pieces += 1;
+                if let Some(png) = assembler.take(piece).expect("pieces in order") {
+                    return (png, pieces);
+                }
+            }
+            other => panic!("expected a piece of an image, got {other:?}"),
+        }
+    }
+}
+
+fn send_image(agent: &mut Box<dyn Connection>, clip_id: u32, png: &[u8]) {
+    for piece in dsa_host_core::clipboard::image_pieces(clip_id, png) {
+        send_body(agent, Body::ClipboardImage(piece));
+    }
+}
+
+fn nothing_for_the_host_clips(watch: &Receiver<dsa_host_core::clipboard::Clip>) {
+    if let Ok(clip) = watch.recv_timeout(Duration::from_millis(300)) {
+        panic!("the host was given {clip:?}");
+    }
+}
+
+#[test]
+fn fr13_an_image_copied_on_the_host_pastes_in_android() {
+    let (session, mut agent, _launcher) = active_session();
+    let png = large_png();
+    session.host_clipboard_image(png.clone());
+    let (given, pieces) = image_for_the_guest(&mut agent);
+    assert_eq!(given, png);
+    assert!(pieces > 1, "a large image goes in pieces");
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr13_an_image_copied_in_android_pastes_on_the_host() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    let texts = session.watch_clipboard();
+    let png = large_png();
+    send_image(&mut agent, 1, &png);
+    assert_eq!(
+        clips.recv_timeout(WAIT).expect("the guest's image"),
+        dsa_host_core::clipboard::Clip::Image(png.into())
+    );
+    // A watcher of text only is not given images.
+    nothing_for_the_host(&texts);
+    // Text still reaches both kinds of watcher.
+    send_body(&mut agent, clipboard_text("then text"));
+    assert_eq!(texts.recv_timeout(WAIT).unwrap(), "then text");
+    assert_eq!(
+        clips.recv_timeout(WAIT).unwrap(),
+        dsa_host_core::clipboard::Clip::Text("then text".into())
+    );
+}
+
+#[test]
+fn fr13_an_image_that_crossed_is_not_sent_back() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+
+    // From the guest: the host puts it on its clipboard, whose listener hears it again.
+    let from_guest = small_png(10);
+    send_image(&mut agent, 1, &from_guest);
+    assert!(clips.recv_timeout(WAIT).is_ok());
+    session.host_clipboard_image(from_guest);
+    nothing_for_the_guest(&mut agent);
+
+    // From the host: the guest sets its primary clip, whose listener hears it again.
+    let from_host = small_png(20);
+    session.host_clipboard_image(from_host.clone());
+    assert_eq!(image_for_the_guest(&mut agent).0, from_host);
+    send_image(&mut agent, 2, &from_host);
+    nothing_for_the_host_clips(&clips);
+}
+
+#[test]
+fn fr13_an_image_larger_than_the_cap_does_not_cross() {
+    use dsa_host_core::clipboard::MAX_IMAGE_BYTES;
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    let mut huge = small_png(30);
+    huge.resize(MAX_IMAGE_BYTES + 1, 0);
+
+    session.host_clipboard_image(huge.clone());
+    nothing_for_the_guest(&mut agent);
+    // The guest says its image is longer than the cap: none of its pieces are kept.
+    send_body(
+        &mut agent,
+        Body::ClipboardImage(dsa_protocol::control::ClipboardImage {
+            clip_id: 9,
+            size: MAX_IMAGE_BYTES as u64 + 1,
+            offset: 0,
+            data: huge[..1024].to_vec(),
+        }),
+    );
+    nothing_for_the_host_clips(&clips);
+    // Something that is not a PNG does not cross either.
+    send_image(&mut agent, 10, b"not an image at all");
+    nothing_for_the_host_clips(&clips);
+
+    // An image under the cap still crosses, and the session is still there.
+    let small = small_png(40);
+    session.host_clipboard_image(small.clone());
+    assert_eq!(image_for_the_guest(&mut agent).0, small);
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr13_with_sharing_off_no_image_crosses() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    session.share_clipboard(false);
+    assert_eq!(next_body(&mut agent), clipboard_sharing(false));
+    session.host_clipboard_image(small_png(50));
+    nothing_for_the_guest(&mut agent);
+    send_image(&mut agent, 1, &small_png(60));
+    nothing_for_the_host_clips(&clips);
+}
+
+#[test]
+fn nfr5_an_image_whose_pieces_do_not_follow_is_dropped() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    let png = large_png();
+    let mut pieces: Vec<_> = dsa_host_core::clipboard::image_pieces(1, &png).collect();
+    pieces.swap(0, 1);
+    for piece in pieces {
+        send_body(&mut agent, Body::ClipboardImage(piece));
+    }
+    nothing_for_the_host_clips(&clips);
+    // The next image is taken.
+    send_image(&mut agent, 2, &png);
+    assert!(clips.recv_timeout(WAIT).is_ok());
     assert_eq!(session.state(), SessionState::Active);
 }
 
@@ -4430,6 +4832,103 @@ fn fr25_a_32_bit_build_that_ends_at_start_is_told_to_get_its_64_bit_build() {
         watch.recv_timeout(WAIT).unwrap(),
         NotificationEvent::Removed { key: notice.key }
     );
+}
+
+/// Puts Chrome's 32-bit build in the host's list, as the agent reports it.
+fn install_chrome_32_bit(session: &Session, agent: &mut Box<dyn Connection>) {
+    let tasks = session.watch_tasks();
+    send_body(
+        agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.android.chrome".into(),
+            label: "Chrome".into(),
+            primary_abi: "x86_64".into(),
+            version_code: 495106126,
+            native_libraries: vec![
+                game_libraries("x86", &["libmonochrome.so"]),
+                game_libraries("x86_64", &["libmonochrome.so"]),
+            ],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.android.chrome".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
+            if apps
+                .iter()
+                .any(|app| app.package_name == "com.android.chrome")
+            {
+                return;
+            }
+        }
+    }
+}
+
+fn chrome_crash() -> Body {
+    Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+        package_name: "com.android.chrome".into(),
+        detail: "Starting in 64-bit mode requires the 64-bit native library.".into(),
+        arm64_supported: true,
+    })
+}
+
+#[test]
+fn fr25_an_app_that_fails_at_every_start_is_reported_once_for_the_burst() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    install_chrome_32_bit(&session, &mut agent);
+    send_body(&mut agent, chrome_crash());
+    assert!(matches!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Posted(_)
+    ));
+    send_body(&mut agent, chrome_crash());
+    send_body(&mut agent, chrome_crash());
+    nothing_for_the_watcher(&watch);
+}
+
+#[test]
+fn fr25_a_notice_left_from_before_is_withdrawn_and_shown_again_so_it_pops_up() {
+    use dsa_host_core::native_abi::Notice;
+    let launcher = FakeLauncher::default();
+    let (listener, mut connector) = memory::pair();
+    let session = Session::new(
+        launcher.clone(),
+        Box::new(listener),
+        ControlHandshake::new("dsa-host test", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            notice_burst: Duration::ZERO,
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let watch = session.watch_notifications();
+    install_chrome_32_bit(&session, &mut agent);
+    send_body(&mut agent, chrome_crash());
+    let key = Notice::Needs64Bit.key("com.android.chrome");
+    assert!(matches!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Posted(ref n) if n.key == key
+    ));
+    // The user left it in the notification centre; the app fails again later.
+    send_body(&mut agent, chrome_crash());
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Removed { key: key.clone() }
+    );
+    assert!(matches!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Posted(ref n) if n.key == key
+    ));
 }
 
 #[test]
@@ -7190,4 +7689,44 @@ fn fr36_a_spelling_request_with_no_host_session_to_serve_it_is_unsupported() {
         }
         other => panic!("expected a spelling result, got {other:?}"),
     }
+}
+
+#[test]
+fn fr10_android_files_under_a_key_do_not_start_a_stopped_android() {
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher.clone(), WAIT);
+    let (connect, _reached) = fake_adbd();
+    session.set_android_files_connect(connect);
+    let why = session.android_files_with_token("feedface").unwrap_err();
+    assert_eq!(why, dsa_host_core::session::ANDROID_STOPPED);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Stopped);
+    assert_eq!(launcher.0.lock().unwrap().starts, 0);
+}
+
+#[test]
+fn fr10_a_stop_the_user_asked_for_holds_against_the_files_door() {
+    let (session, _agent, launcher) = active_session();
+    let (connect, _reached) = fake_adbd();
+    session.set_android_files_connect(connect);
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    for _ in 0..3 {
+        assert!(session.android_files_with_token("feedface").is_err());
+    }
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Stopped);
+    assert_eq!(launcher.0.lock().unwrap().starts, 1, "no second boot");
+}
+
+#[test]
+fn fr10_a_request_for_the_address_of_android_files_starts_a_stopped_android() {
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher.clone(), WAIT);
+    let (connect, _reached) = fake_adbd();
+    session.set_android_files_connect(connect);
+    session.android_files().unwrap();
+    wait_until("the start goes in", || {
+        launcher.0.lock().unwrap().starts == 1
+    });
 }

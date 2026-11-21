@@ -724,7 +724,17 @@ fn fr21_the_local_api_saves_the_diagnostics_as_one_zip() {
     let archive = saving.join().unwrap();
     let files = unzip(&archive);
     let names: Vec<_> = files.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["android/logcat.txt", "summary.txt"]);
+    assert_eq!(
+        names,
+        [
+            "android/logcat.txt",
+            "host/memory.json",
+            "host/memory.txt",
+            "host/memory-lines.txt",
+            "host/channeld-kernel-log.txt",
+            "summary.txt"
+        ]
+    );
     stop.store(true, Ordering::Relaxed);
 }
 
@@ -798,4 +808,71 @@ fn nfr1_the_memory_snapshot_keeps_the_latest_memory_lines_and_channelds_kernel_l
     assert!(!memory.contains("host 900 MiB"), "{memory}");
     let channeld = text("host/channeld-kernel-log.txt");
     assert_eq!(channeld, "[  2.0] dsa-channeld: reclaim: trimmed 120 MiB\n");
+}
+
+/// A session whose guest daemon connected with a protocol definition of another release.
+fn session_stopped_by_an_old_guest() -> (Arc<Session>, MemoryConnector) {
+    let (listener, mut connector) = memory::pair();
+    let (log_listener, log_port) = memory::pair();
+    let launcher = Launcher::default();
+    let session = Arc::new(Session::new(
+        launcher.clone(),
+        Box::new(listener),
+        ControlHandshake::new("dsa-hostd host-build", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            ..SessionConfig::default()
+        },
+    ));
+    session.serve_log_port(Box::new(log_listener), "dsa-hostd host-build");
+    session.start();
+    let secret = launcher.secret();
+    let mut control = connector.connect(WAIT).unwrap();
+    let mut hello = local_hello(Role::Guest, "dsa-channeld guest-build");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(control.as_mut(), &hello, &secret, WAIT);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    (session, log_port)
+}
+
+#[test]
+fn pr2_a_log_reader_is_told_why_android_sends_nothing_when_the_guest_speaks_another_protocol() {
+    use dsa_host_core::host_api::HostApiClient;
+    let (session, _log_port) = session_stopped_by_an_old_guest();
+    let alice = running_guest();
+    let (connector, stop) = service_for(
+        &Guest {
+            session: Arc::clone(&session),
+            ..alice
+        },
+        &running_guest(),
+    );
+    let client = HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
+    let mut reader = client.watch_log(&LogFilter::default(), false).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let why = loop {
+        assert!(Instant::now() < deadline, "the reader was never told why");
+        if let Some(batch) = reader.next(Duration::from_millis(100)).unwrap() {
+            if let Some(why) = batch.error {
+                break why;
+            }
+        }
+    };
+    let expected = dsa_protocol::handshake::local_hello(Role::Host, "x");
+    let ours = expected.schema_hash[..6]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    assert!(why.contains("5a5a5a5a5a5a"), "the guest's hash: {why}");
+    assert!(why.contains(&ours), "this host's hash {ours}: {why}");
+    assert!(
+        why.contains("dsa-channeld guest-build"),
+        "the guest's build: {why}"
+    );
+    assert!(
+        why.contains("dsa-hostd host-build"),
+        "this host's build: {why}"
+    );
+    stop.store(true, Ordering::Relaxed);
 }

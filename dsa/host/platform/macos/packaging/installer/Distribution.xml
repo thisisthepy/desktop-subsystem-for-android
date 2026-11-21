@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The product archive around DSA.app's component package. build-app.sh fills in
+     @VERSION@ and passes the resources folder, which holds the artwork from make-art.swift,
+     a welcome and a conclusion page for each language, and LICENSE, copied in at build time. -->
+<installer-gui-script minSpecVersion="2">
+    <title>DSA</title>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64" rootVolumeOnly="true" />
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="13.0" />
+        </allowed-os-versions>
+    </volume-check>
+    <background file="background.png" alignment="bottomleft" scaling="none" mime-type="image/png" />
+    <background-darkAqua file="background-dark.png" alignment="bottomleft" scaling="none" mime-type="image/png" />
+    <welcome file="welcome.html" mime-type="text/html" />
+    <license file="LICENSE.txt" mime-type="text/plain" />
+    <conclusion file="conclusion.html" mime-type="text/html" />
+    <choices-outline>
+        <line choice="default">
+            <line choice="org.thisisthepy.dsa" />
+        </line>
+    </choices-outline>
+    <choice id="default" />
+    <choice id="org.thisisthepy.dsa" visible="false">
+        <pkg-ref id="org.thisisthepy.dsa" />
+    </choice>
+    <pkg-ref id="org.thisisthepy.dsa" version="@VERSION@" onConclusion="none">DSA-component.pkg</pkg-ref>
+</installer-gui-script>

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use dsa_host_macos::host_config::{memory_range_mb, MacHostConfig};
+use dsa_host_macos::host_config::MacHostConfig;
 use dsa_host_macos::launchd::{
     domain, install_commands, plist, plist_path, service_target, start_command, wm_plist,
     wm_plist_path, wm_service_target, LABEL, WM_LABEL,
@@ -31,23 +31,6 @@ fn pr5_the_users_files_and_socket_are_in_their_own_folder() {
     assert_eq!(user.disk(), root.join("android.img"));
     assert!(user.console_log().starts_with(root.join("logs")));
     assert_eq!(config.settings_dir(&user), root.join("settings"));
-}
-
-#[test]
-fn nfr2_memory_starts_small_and_grows_to_what_the_mac_can_spare() {
-    // No limit: the default start, growing to half the Mac's memory, with no fixed cap.
-    assert_eq!(memory_range_mb(0, Some(16384)), (2048, 8192));
-    assert_eq!(memory_range_mb(0, Some(65536)), (2048, 32768));
-    assert_eq!(memory_range_mb(0, Some(8192)), (2048, 4096));
-    // A limit is how far it grows; a low one is also where it starts.
-    assert_eq!(memory_range_mb(6144, Some(32768)), (2048, 6144));
-    // A limit above half the Mac is honoured, within what the Mac has.
-    assert_eq!(memory_range_mb(24576, Some(32768)), (2048, 24576));
-    assert_eq!(memory_range_mb(2048, Some(32768)), (2048, 2048));
-    // Unknown memory: the start, fixed.
-    assert_eq!(memory_range_mb(0, None), (2048, 2048));
-    let fixed = MacHostConfig::parse(r#"{"image_dir": "/i", "memory_mb": 4096}"#).unwrap();
-    assert_eq!(fixed.memory_mb(0, Some(65536)), (4096, 4096));
 }
 
 #[test]
@@ -161,4 +144,121 @@ fn fr26_every_device_port_of_the_guest_is_relayed_to_the_users_own_folder() {
         Path::new("/Users/ann/Library/Application Support/DSA/vsock/5572.sock")
     );
     assert_ne!(relay_socket(&ann, camera), relay_socket(&bob, camera));
+}
+
+#[test]
+fn fr2_every_agent_is_shown_as_dsa_in_the_login_items() {
+    use dsa_host_macos::launchd::{devices_plist, APP_BUNDLE_ID};
+    let log = Path::new("/Users/ann/Library/Logs/dsa.log");
+    for text in [
+        plist(
+            Path::new("/Applications/DSA.app/Contents/MacOS/dsa-hostd"),
+            None,
+            log,
+        ),
+        wm_plist(
+            Path::new("/Applications/DSA.app/Contents/MacOS/dsa-wm"),
+            log,
+        ),
+        devices_plist(
+            Path::new("/Applications/DSA.app/Contents/MacOS/dsa-devices"),
+            log,
+        ),
+    ] {
+        assert!(
+            text.contains(&format!(
+                "<key>AssociatedBundleIdentifiers</key>\n\t<array>\n\t\t<string>{APP_BUNDLE_ID}</string>"
+            )),
+            "{text}"
+        );
+    }
+    assert_eq!(APP_BUNDLE_ID, "org.thisisthepy.dsa");
+}
+
+#[test]
+fn fr2_an_agent_reinstalled_while_launchd_still_unloads_the_old_one_is_loaded() {
+    use dsa_host_macos::launchd::retry_bootstrap;
+    // launchd answers "Input/output error" until the booted-out copy is gone.
+    let mut calls = 0;
+    let mut pauses = 0;
+    let result = retry_bootstrap(
+        10,
+        || pauses += 1,
+        || {
+            calls += 1;
+            if calls < 3 {
+                Err("Bootstrap failed: 5: Input/output error".into())
+            } else {
+                Ok(())
+            }
+        },
+    );
+    assert_eq!(result, Ok(()));
+    assert_eq!((calls, pauses), (3, 2));
+
+    let mut calls = 0;
+    let result = retry_bootstrap(
+        4,
+        || {},
+        || {
+            calls += 1;
+            Err("Bootstrap failed: 5: Input/output error".into())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(calls, 4);
+}
+
+#[test]
+fn fr2_the_window_manager_never_stands_for_dsa_itself() {
+    // dsa-wm runs from DSA.app; as a regular app it would be taken for DSA, and opening
+    // DSA would not start the settings app.
+    let plist = include_str!("../packaging/dsa-wm-Info.plist");
+    assert!(plist.contains("<key>LSUIElement</key>\n\t<true/>"));
+    assert!(plist.contains("<string>org.thisisthepy.dsa.wm</string>"));
+    let source = include_str!("../src/bin/dsa-wm.rs");
+    assert!(source.contains("dsa-wm-Info.plist"));
+}
+
+#[test]
+fn fr2_the_window_manager_and_device_lender_have_helper_bundles_of_their_own() {
+    // Each runs from a helper bundle in DSA.app's Contents/Helpers with its own identity, so
+    // macOS never takes DSA.app for running and opening it starts the settings app.
+    for (plist, id, executable) in [
+        (
+            include_str!("../packaging/dsa-wm-Info.plist"),
+            "org.thisisthepy.dsa.wm",
+            "dsa-wm",
+        ),
+        (
+            include_str!("../packaging/dsa-devices-Info.plist"),
+            "org.thisisthepy.dsa.devices",
+            "dsa-devices",
+        ),
+    ] {
+        assert!(plist.contains(&format!(
+            "<key>CFBundleIdentifier</key>\n\t<string>{id}</string>"
+        )));
+        assert!(plist.contains(&format!(
+            "<key>CFBundleExecutable</key>\n\t<string>{executable}</string>"
+        )));
+        assert!(plist.contains("<key>LSUIElement</key>\n\t<true/>"));
+        assert!(plist.contains("<string>@VERSION@</string>"));
+    }
+    let devices = include_str!("../packaging/dsa-devices-Info.plist");
+    for key in [
+        "NSCameraUsageDescription",
+        "NSMicrophoneUsageDescription",
+        "NSLocationWhenInUseUsageDescription",
+    ] {
+        assert!(devices.contains(key), "{key}");
+    }
+    let build = include_str!("../packaging/build-app.sh");
+    assert!(build.contains(r#"make_helper "DSA Window Manager.app" dsa-wm dsa-wm-Info.plist"#));
+    assert!(build.contains(r#"make_helper "DSA Devices.app" dsa-devices dsa-devices-Info.plist"#));
+    assert!(build.contains("for program in dsa dsa-hostd dsa-gfx; do"));
+    // The helpers are signed before the outer app, whose signature seals them.
+    let wm = build.find(r#"sign "$wm_helper""#).unwrap();
+    let app = build.rfind("\nsign \"$app\"").unwrap();
+    assert!(wm < app);
 }

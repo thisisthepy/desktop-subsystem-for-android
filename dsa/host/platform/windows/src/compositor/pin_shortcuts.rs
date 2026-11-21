@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::tasks::PinShortcutRequest;
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::fill;
+use dsa_host_core::ui_text::pin_shortcut::pin_question_text;
 use dsa_transport::Connector;
 
 use crate::compositor::fluent_dialog::{self, Answer, DialogText};
@@ -34,7 +36,7 @@ const BUILD: &str = "dsa-wm pin shortcuts";
 const ANSWER: Duration = Duration::from_secs(5);
 
 /// How long a question waits for the user before it is answered no.
-pub const ANSWER_WITHIN: Duration = Duration::from_secs(180);
+pub const ANSWER_WITHIN: Duration = dsa_host_core::pin_questions::ASK_FOR;
 
 /// The words of the question.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,125 +59,35 @@ impl Texts {
         Texts::of(crate::ui_language::user_language())
     }
 
-    /// The question's words as written: its heading (`{shortcut}` is the shortcut's name),
-    /// what it says below (`{app}` is the app's name), and its two buttons.
-    pub fn templates(&self) -> [&'static str; 4] {
-        match self.language {
-            UiLanguage::English => [
-                "Add \u{201c}{shortcut}\u{201d} to the desktop?",
-                "{app} wants to put this shortcut on your desktop. It goes when the app is \
-                 uninstalled.",
-                "Add to desktop",
-                "Cancel",
-            ],
-            UiLanguage::Korean => [
-                "바탕 화면에 \u{201c}{shortcut}\u{201d} 바로 가기를 추가할까요?",
-                "{app}에서 이 바로 가기를 바탕 화면에 두려고 합니다. \
-                 앱을 지우면 바로 가기도 사라집니다.",
-                "바탕 화면에 추가",
-                "취소",
-            ],
-            UiLanguage::Japanese => [
-                "デスクトップに「{shortcut}」を追加しますか?",
-                "{app} がこのショートカットをデスクトップに置こうとしています。アプリを\
-                 アンインストールすると、ショートカットも削除されます。",
-                "デスクトップに追加",
-                "キャンセル",
-            ],
-            UiLanguage::ChineseSimplified => [
-                "要将\u{201c}{shortcut}\u{201d}添加到桌面吗?",
-                "{app} 想将此快捷方式放到你的桌面上。卸载该应用后，快捷方式也会被删除。",
-                "添加到桌面",
-                "取消",
-            ],
-            UiLanguage::ChineseTraditional => [
-                "要將「{shortcut}」新增到桌面嗎?",
-                "{app} 想要將這個捷徑放到您的桌面上。解除安裝該應用程式後，捷徑也會一併移除。",
-                "新增到桌面",
-                "取消",
-            ],
-            UiLanguage::Spanish => [
-                "¿Agregar \u{201c}{shortcut}\u{201d} al escritorio?",
-                "{app} quiere poner este acceso directo en el escritorio. Se quitará cuando se \
-                 desinstale la aplicación.",
-                "Agregar al escritorio",
-                "Cancelar",
-            ],
-            UiLanguage::French => [
-                "Ajouter \u{ab}\u{a0}{shortcut}\u{a0}\u{bb} au Bureau\u{a0}?",
-                "{app} veut placer ce raccourci sur votre Bureau. Il sera supprimé lors de la \
-                 désinstallation de l'application.",
-                "Ajouter au Bureau",
-                "Annuler",
-            ],
-            UiLanguage::German => [
-                "\u{201e}{shortcut}\u{201c} zum Desktop hinzufügen?",
-                "{app} möchte diese Verknüpfung auf Ihrem Desktop ablegen. Sie wird entfernt, \
-                 wenn die App deinstalliert wird.",
-                "Zum Desktop hinzufügen",
-                "Abbrechen",
-            ],
-            UiLanguage::PortugueseBrazil => [
-                "Adicionar \u{201c}{shortcut}\u{201d} à área de trabalho?",
-                "{app} quer colocar este atalho na sua área de trabalho. Ele será removido quando \
-                 o app for desinstalado.",
-                "Adicionar à área de trabalho",
-                "Cancelar",
-            ],
-            UiLanguage::Russian => [
-                "Добавить \u{ab}{shortcut}\u{bb} на рабочий стол?",
-                "{app} хочет поместить этот ярлык на рабочий стол. Он будет удален при удалении \
-                 приложения.",
-                "Добавить на рабочий стол",
-                "Отмена",
-            ],
-            UiLanguage::Italian => [
-                "Aggiungere \u{201c}{shortcut}\u{201d} al desktop?",
-                "{app} vuole aggiungere questo collegamento al desktop. Verrà rimosso quando \
-                 l'app viene disinstallata.",
-                "Aggiungi al desktop",
-                "Annulla",
-            ],
-            UiLanguage::Vietnamese => [
-                "Thêm \u{201c}{shortcut}\u{201d} vào màn hình nền?",
-                "{app} muốn đặt lối tắt này trên màn hình nền của bạn. Lối tắt sẽ bị xóa khi ứng \
-                 dụng được gỡ cài đặt.",
-                "Thêm vào màn hình nền",
-                "Hủy",
-            ],
-            UiLanguage::Indonesian => [
-                "Tambahkan \u{201c}{shortcut}\u{201d} ke desktop?",
-                "{app} ingin menaruh pintasan ini di desktop Anda. Pintasan akan hilang saat \
-                 aplikasi dihapus instalannya.",
-                "Tambahkan ke desktop",
-                "Batal",
-            ],
-            UiLanguage::Turkish => [
-                "\u{201c}{shortcut}\u{201d} masaüstüne eklensin mi?",
-                "{app}, bu kısayolu masaüstünüze koymak istiyor. Uygulama kaldırıldığında kısayol \
-                 da kaldırılır.",
-                "Masaüstüne ekle",
-                "İptal",
-            ],
-        }
+    /// The question's words as written: its heading (`{name}` is the shortcut's name), what it
+    /// says below (`{app}` is the app's name, then that the shortcut goes with the app), and
+    /// its two buttons.
+    pub fn templates(&self) -> [String; 4] {
+        let text = pin_question_text(self.language);
+        [
+            text.heading.to_string(),
+            format!("{}{}", text.body, text.removed_with_app),
+            text.add.to_string(),
+            text.cancel.to_string(),
+        ]
     }
 
     /// The question's heading, about the shortcut named `shortcut`.
     pub fn instruction(&self, shortcut: &str) -> String {
-        self.templates()[0].replace("{shortcut}", shortcut)
+        fill(&self.templates()[0], &[("name", shortcut)])
     }
 
     /// What the question says below its heading, for the app named `app`.
     pub fn content(&self, app: &str) -> String {
-        self.templates()[1].replace("{app}", app)
+        fill(&self.templates()[1], &[("app", app)])
     }
 
     pub fn add(&self) -> &'static str {
-        self.templates()[2]
+        pin_question_text(self.language).add
     }
 
     pub fn cancel(&self) -> &'static str {
-        self.templates()[3]
+        pin_question_text(self.language).cancel
     }
 }
 
@@ -192,11 +104,7 @@ pub struct Question {
 
 /// The question about `request`.
 pub fn question(request: &PinShortcutRequest, texts: &Texts) -> Question {
-    let app = if request.app_label.trim().is_empty() {
-        request.package_name.clone()
-    } else {
-        request.app_label.trim().to_string()
-    };
+    let app = request.app_name().to_string();
     Question {
         instruction: texts.instruction(request.shortcut.label()),
         content: texts.content(&app),

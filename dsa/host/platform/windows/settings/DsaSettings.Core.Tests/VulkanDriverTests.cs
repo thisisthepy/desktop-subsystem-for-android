@@ -34,7 +34,7 @@ public class VulkanDriverTests
         Assert.Equal(0, vm.VulkanDriverIndex);
         Assert.Equal(3, vm.VulkanDriverChoices.Count);
         Assert.Equal(GraphicsState.Native, vm.Graphics);
-        Assert.Equal("Graphics_Native (Intel(R) Arc(TM) Graphics)", vm.GraphicsStatusText);
+        Assert.Equal("Graphics_Native (rendering on Intel(R) Arc(TM) Graphics)", vm.GraphicsStatusText);
         Assert.False(vm.OffersCompatibilityPack);
 
         await vm.SetVulkanDriverAsync(2);

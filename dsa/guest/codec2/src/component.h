@@ -114,7 +114,9 @@ class Component : public c2aidl::BnComponent {
     void endOfStream(const Frame& frame);
     void decodeError(const std::string& error);
     // Finishes `work` with `output` (an empty output when null), then tells the framework.
-    void finish(c2aidl::Work work, AHardwareBuffer* output, uint32_t width, uint32_t height, bool eos);
+    // False when the framework did not take it: an output it never got is still counted as
+    // the component's by the surface's allocator, and must be given back (discard()).
+    bool finish(c2aidl::Work work, AHardwareBuffer* output, uint32_t width, uint32_t height, bool eos);
     // A buffer for a picture that arrived with `ticket`, once its consumer has stopped reading
     // it; null when none came in time or the gate closed. `from` is the surface's allocator
     // it came from, when it did.
@@ -151,6 +153,9 @@ class Component : public c2aidl::BnComponent {
     // Used on the component's own thread only.
     FailureThrottle mAllocateFailures;
     FailureThrottle mWriteFailures;
+    // Pictures dropped in a row for want of a surface buffer; past its limit the session is
+    // reported broken, so the app makes a new one. Used on the component's own thread only.
+    StarvationWatch mStarvation;
     // The host's messages waiting for the component's own thread (arrival_queue.h), shared
     // with that thread, which may outlive the component by the message it is on. Each start
     // makes a new one, since the thread of a stop that did not wait for it may still hold the

@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Mulai</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Mulai ulang</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android berhenti lalu dimulai lagi.
+
+Jendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Hentikan</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Android tidak dapat dimulai. Coba lagi, dan periksa detailnya jika terus gagal.</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Komputer ini tidak dapat menjalankan Android. Ini masalah komputer, bukan Android; versi Android yang digunakan tetap dipertahankan. Lihat alasannya di detail.</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Detail</value>
@@ -262,6 +273,9 @@ DSA mengunduh image lain jika ada. Versi DSA berikutnya mencoba image ini lagi.<
   <data name="Memory_Shared" xml:space="preserve">
     <value>Memori bersama</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Memori yang dipakai bersama oleh beberapa proses, seperti gambar jendela dan buffer grafis. Dilepas saat aplikasi yang memakainya ditutup.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Memori terkompresi</value>
   </data>
@@ -270,6 +284,9 @@ DSA mengunduh image lain jika ada. Versi DSA berikutnya mencoba image ini lagi.<
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Kosong</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Memori yang saat ini tidak dipakai apa pun. Android mengembalikannya ke PC, jadi tidak memakan RAM PC.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Proses {0}</value>
@@ -747,7 +764,10 @@ Instal Google Play lagi.</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android ID muncul di sini setelah Google Play diinstal dan Android dimulai dengannya.</value>
+    <value>Android ID belum tersedia. Layanan Google Play membuatnya saat perangkat ini pertama kali check-in ke Google.
+Untuk itu Google Play harus terpasang, Android dimulai bersamanya, dan ada koneksi jaringan.
+Jika tetap kosong beberapa menit kemudian, mulai ulang Android.
+ID ini berupa angka desimal, format yang diterima halaman pendaftaran Google.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Pengembang</value>
@@ -850,14 +870,26 @@ Otomatis: hingga memori PC ini dikurangi bagian yang disimpan Windows. Berlaku s
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Stack thread</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Ruang kerja yang disimpan kernel untuk setiap thread yang berjalan. Mengecil saat aplikasi ditutup.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Tabel halaman</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Peta yang memberi tahu prosesor letak memori setiap aplikasi di RAM. Mengecil saat aplikasi ditutup.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Pemetaan kernel (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Buffer besar yang disisihkan kernel dan drivernya, antara lain untuk grafis. Dilepas saat tidak diperlukan lagi.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Data per CPU</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Data yang disimpan kernel satu untuk setiap inti prosesor. Ukurannya ditetapkan saat Android mulai.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Driver</value>
@@ -2303,7 +2335,7 @@ Aktifkan di Aplikasi ARM, mulai ulang Android, lalu instal aplikasi lagi.</value
     <value>Versi terbaru yang didukung (saat ini Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} dan pembaruan keamanannya</value>
+    <value>Tetap di Android {0}: hanya pembaruan keamanan dan image-nya, tidak pernah pindah sendiri ke Android yang lebih baru</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Pembaruan Android</value>
@@ -2604,5 +2636,32 @@ Dapatkan build x86_64 atau arm64-v8a dari aplikasi tersebut.</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Semua file</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Toko alternatif</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Tidak terpasang</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Terpasang</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Terpasang, versi {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Mengunduh dan memasang…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Tidak terpasang: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Pasang</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Buka</value>
   </data>
 </root>

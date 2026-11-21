@@ -103,6 +103,14 @@ data class TaskSnapshot(
      * [transparentCaption] is set.
      */
     val captionInteractive: List<TaskBounds> = emptyList(),
+    /**
+     * Every package the framework names for the task: its root activity's, the one of the
+     * intent that started it and its top activity's. An app is still open while any of its
+     * activities is in a task: under a permission dialog it opened (which the framework counts
+     * as the task's root once the app's own activities are finishing), or on top of another
+     * app's task. The host is not told it.
+     */
+    val activityPackages: Set<String> = emptySet(),
 ) {
     /** Whether the task's app asks to fill the screen, in either way. */
     val fullscreen: Boolean get() = fullscreenRequest != FullScreenRequest.NONE

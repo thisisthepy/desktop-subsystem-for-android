@@ -53,11 +53,16 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
 - Apps a desktop has no use for are removed too (`UNNEEDED_APPS` in `make-image.py`, each
   with its reason): telephony apps without a modem, screen savers and wallpaper pickers, the
   launcher's search widget, Bluetooth MIDI, the old AOSP Calendar, Gallery and Music apps
-  (no longer maintained upstream; the user installs their own), and developer and demo apps.
-  Each is a leaf that
+  (no longer maintained upstream), and developer and demo apps. No calendar is shipped; the
+  user installs their own. Each is a leaf that
   nothing else needs; WebView, the providers, PackageInstaller, PermissionController,
   DocumentsUI and the other apps that apps call stay. `make-image.py` prints each file it
   removes.
+- With `--default-apps`, the image carries DSA's default apps (`dsa/apps`): a clock, a
+  gallery, a camera, a music player, a calculator, a recorder and the file manager, each built
+  from a pinned LineageOS or AOSP source with DSA's design and under the package name of the
+  AOSP app it replaces. The AOSP clock, camera and calculator leave the image, and DocumentsUI
+  is replaced in place. `check-image.py` refuses an image without them.
 - The guest keeps its memory small, so the host gets back what it does not use. It swaps to
   zram of half its memory (`fstab.dsa`, `dsa-memory.rc`), and lmkd watches the swap as well
   as memory pressure. When no app task has been in use for a minute (none open, or all
@@ -300,16 +305,21 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   permission its privileged apps ask for (`dsa-gapps-privapp-permissions.xml` in each
   partition's `etc/permissions`), so the log should stay empty. `sepolicy/gapps.cil` lets init
   lay the image over.
-- Google Play sees the computer's memory as the device's memory. Play gives a device under
-  8 GB a Chrome whose browser is 32-bit, which this 64-bit only guest cannot start, and the VM
-  starts small and grows. The host passes the computer's physical memory in the bootconfig
-  (`kernel.dsa_host_memory.total_kb`). `dsa-channeld` names the Play Store's and Play services'
-  uids in `vendor.dsa.host_memory.uids`, and `dsa-memory.rc` hands them to the kernel
-  (`/sys/module/dsa_host_memory/parameters/uids`), which shows those apps the computer's memory
-  as `MemTotal` in `/proc/meminfo` and in `sysinfo()`. The framework build's
-  `libandroid_runtime` answers their `ActivityManager.getMemoryInfo` (`totalMem`) with it.
-  Every other app and Android itself see the VM's memory. Only init may write the list and only
-  the daemon may set the property (`sepolicy/memory.cil`), which `check-image.py` checks.
+- Apps see the memory the VM may grow to as the device's memory. The VM starts small and
+  grows, and apps decide by its size: a game refuses to start under its requirement, and Google
+  Play gives a device under 8 GB a Chrome whose browser is 32-bit, which this 64-bit only guest
+  cannot start. The host passes the most the VM may grow to and the computer's physical memory
+  in the bootconfig (`kernel.dsa_host_memory.total_kb` and `store_total_kb`). The kernel shows
+  every app process (an app ID of 10000 or more) the first as `MemTotal` in `/proc/meminfo` and
+  in `sysinfo()`, with what the VM may still grow added to free and available memory, and the
+  framework build's `libandroid_runtime` answers apps' `ActivityManager.getMemoryInfo`
+  (`totalMem`, `availMem`, `freeMem`) the same way. `dsa-channeld` names the Play Store's and
+  Play services' uids in `vendor.dsa.host_memory.uids`, which see the computer's memory as their
+  total, and DSA's agent's in `vendor.dsa.host_memory.real_uids`, which sees the VM's own memory
+  because it reports the guest's memory to the host; `dsa-memory.rc` hands both lists to the
+  kernel (`/sys/module/dsa_host_memory/parameters/`). Android's system processes see the VM's
+  memory, so lmkd is unchanged. Only init may write the lists and only the daemon may set the
+  properties (`sepolicy/memory.cil`), which `check-image.py` checks.
 - Google Play sees a display of at least 480 dpi (xxhdpi). Play delivers the density splits of
   an app that match the density the Play Store reads from the default display's metrics, and a
   monitor is far less dense than a phone (130 dpi at 100%, 262 at 200%), so Play delivered
@@ -462,6 +472,19 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   version and tags under `identity`, and its `arch`, so the host can compose a fingerprint.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
+- With `--dxg-drivers <folder>` (an experiment; no release passes it), the image also carries
+  Mesa's Dozen Vulkan driver and its d3d12 OpenGL ES driver as `vulkan.dxg.so` and
+  `libEGL_dxg.so`, `libGLESv1_CM_dxg.so`, `libGLESv2_dxg.so`, with any library they need from
+  the folder's `lib/`. They reach the host GPU through the kernel's `/dev/dxg`, which the host
+  gives the VM only when its `gpu_paravirtualization` setting is on. The product `build.prop`
+  imports `vulkan-${ro.boot.dsa.vulkan:-ranchu}.prop` and `egl-${ro.boot.dsa.egl:-angle}.prop`,
+  so a boot without `androidboot.dsa.vulkan=dxg` keeps the host renderer's drivers. `/dev/dxg`
+  is labelled `gpu_device` and opened to graphics clients (`ueventd.rc`). The image refuses a
+  folder holding a library built against glibc, which Android's linker cannot load, or one of
+  the closed binaries Mesa would load on a Linux desktop: Microsoft's Direct3D 12 runtime and
+  DXCore, and the GPU vendors' user-mode drivers. That leaves Mesa without the Direct3D 12
+  runtime it needs, so the path does not render yet; `image.json` says `"dxg"` for such an
+  image.
 
 ## Tracing a click
 

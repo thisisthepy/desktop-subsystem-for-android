@@ -82,7 +82,31 @@ public sealed partial class GeneralViewModel : ObservableObject
     public string UpdateNotice => HasUpdateNotice ? UpdateNoticeText.Localize(_text, _status!.UpdateNotice!) : "";
     public bool HasUpdateNotice => !string.IsNullOrEmpty(_status?.UpdateNotice);
     public bool IsBusy => _busy;
-    public bool CanStart => !_busy && State == SessionState.Stopped;
+    public bool CanStart => StartButton == StartButtonKind.Start;
+
+    /// <summary>The status card's first button. The service decides it from the state; while
+    /// this app starts or restarts Android, the button stays locked with the label of what it
+    /// does, as the state passes through stopping and starting.</summary>
+    public StartButtonKind StartButton => _action switch
+    {
+        StartButtonKind.Start => StartButtonKind.Starting,
+        StartButtonKind.Restart => StartButtonKind.Restarting,
+        _ when _busy => StartButtonKind.None,
+        _ => _status?.StartButton ?? StartButtonKind.None,
+    };
+    /// <summary>Whether the first button reads [Restart] rather than [Start].</summary>
+    public bool IsRestart => StartButton is StartButtonKind.Restart or StartButtonKind.Restarting;
+    public string StartButtonText => _text.Get(IsRestart ? "RestartButton.Content" : "StartButton.Content");
+    /// <summary>Whether pressing the first button does something now.</summary>
+    public bool CanPressStart => StartButton is StartButtonKind.Start or StartButtonKind.Restart;
+    /// <summary>Whether the first button is locked while a start, a restart or a stop runs, and
+    /// progress shows.</summary>
+    public bool StartInProgress => StartButton is StartButtonKind.Starting or StartButtonKind.Restarting
+        or StartButtonKind.Stopping;
+    /// <summary>Whether progress shows beside the state.</summary>
+    public bool ShowsProgress => _busy || StartInProgress;
+    /// <summary>Whether pressing it first asks, since a restart closes every app window.</summary>
+    public bool StartConfirms => StartButton == StartButtonKind.Restart;
     public bool CanStop => !_busy && State is SessionState.Starting or SessionState.Stalled or SessionState.Active
         or SessionState.Dozing or SessionState.Frozen;
     public string Error => _error ?? "";
@@ -142,8 +166,37 @@ public sealed partial class GeneralViewModel : ObservableObject
         ChangedAll();
     }
 
-    public Task StartAsync() => RunAsync(_service.StartAsync);
+    public Task StartAsync() => PressAsync(StartButtonKind.Start, _service.StartAsync);
     public Task StopAsync() => RunAsync(_service.StopAsync);
+
+    /// <summary>Restarts Android, as <c>dsa android restart</c> does. The page asks the user
+    /// first, since its app windows close.</summary>
+    public Task RestartAsync() => PressAsync(StartButtonKind.Restart, _service.RestartAsync);
+
+    /// <summary>What the first button does when pressed: start a stopped Android or restart a
+    /// running one. Nothing while it is locked.</summary>
+    public Task PressStartAsync() => StartButton switch
+    {
+        StartButtonKind.Start => StartAsync(),
+        StartButtonKind.Restart => RestartAsync(),
+        _ => Task.CompletedTask,
+    };
+
+    private StartButtonKind _action = StartButtonKind.None;
+
+    private async Task PressAsync(StartButtonKind action, Func<Task<StatusInfo>> run)
+    {
+        _action = action;
+        try
+        {
+            await RunAsync(run).ConfigureAwait(true);
+        }
+        finally
+        {
+            _action = StartButtonKind.None;
+            ChangedAll();
+        }
+    }
 }
 
 /// <summary>One choice of render GPU: what the list shows and the value the setting keeps.</summary>
@@ -436,6 +489,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         await ChangeAsync(_service.SettingsAsync).ConfigureAwait(true);
         await LoadArmTranslationAsync().ConfigureAwait(true);
         await LoadGappsAsync().ConfigureAwait(true);
+        await LoadStoresAsync().ConfigureAwait(true);
         await LoadWidevineAsync().ConfigureAwait(true);
         await LoadBackupAsync().ConfigureAwait(true);
         try
@@ -737,7 +791,7 @@ public sealed partial class MemoryViewModel : ObservableObject
         ? string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ReportAge"), guest.AgeSeconds)
         : "";
 
-    public IReadOnlyList<MemoryRow> HostRows => (_report?.Host ?? Array.Empty<HostProcess>())
+    private IReadOnlyList<MemoryRow> BuildHostRows() => (_report?.Host ?? Array.Empty<HostProcess>())
         .Select(p => new MemoryRow(
             _text.Get($"Role_{p.Role}"),
             string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ProcessDetail"), p.Pid, Format.Size(p.PrivateKb)),
@@ -746,39 +800,36 @@ public sealed partial class MemoryViewModel : ObservableObject
 
     /// <summary>Android's breakdown: the apps and the system, the caches, the kernel's
     /// reclaimable caches, shared memory and compressed swap, then the largest processes.</summary>
-    public IReadOnlyList<MemoryRow> GuestRows
+    private IReadOnlyList<MemoryRow> BuildGuestRows()
     {
-        get
+        if (_report?.Guest is not { } guest)
         {
-            if (_report?.Guest is not { } guest)
-            {
-                return Array.Empty<MemoryRow>();
-            }
-            // What the processes cost: in memory, plus their compressed share of zram. A service
-            // that does not say counts their PSS as in memory.
-            var apps = guest.Apps ?? new MemoryShare(guest.TotalPssKb, 0);
-            var rows = new List<MemoryRow>
-            {
-                new(_text.Get("Memory_Apps"), ShareDetail(apps), Format.Size(apps.TotalKb)),
-                new(_text.Get("Memory_Cache"), _text.Get("Memory_CacheDetail"), Format.Size(guest.CachedKb + guest.BuffersKb)),
-                new(_text.Get("Memory_Kernel"), _text.Get("Memory_KernelDetail"), Format.Size(guest.SlabReclaimableKb)),
-                new(_text.Get("Memory_Shared"), "", Format.Size(guest.ShmemKb)),
-                new(_text.Get("Memory_Zram"),
-                    string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ZramDetail"), Format.Size(guest.ZramOriginalKb)),
-                    Format.Size(guest.ZramUsedKb)),
-                new(_text.Get("Memory_Free"), "", Format.Size(guest.FreeKb)),
-            };
-            // Google Play services, which the user chose to install, on a line of its own, so
-            // what it costs is not taken for what Android and DSA cost.
-            if (guest.GooglePlay is { } play)
-            {
-                rows.Insert(1, new(_text.Get("Memory_GooglePlay"),
-                    string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_GooglePlayDetail"),
-                        play.Processes, ShareDetail(play.Cost)),
-                    Format.Size(play.Cost.TotalKb)));
-            }
-            return rows;
+            return Array.Empty<MemoryRow>();
         }
+        // What the processes cost: in memory, plus their compressed share of zram. A service
+        // that does not say counts their PSS as in memory.
+        var apps = guest.Apps ?? new MemoryShare(guest.TotalPssKb, 0);
+        var rows = new List<MemoryRow>
+        {
+            new(_text.Get("Memory_Apps"), ShareDetail(apps), Format.Size(apps.TotalKb)),
+            new(_text.Get("Memory_Cache"), _text.Get("Memory_CacheDetail"), Format.Size(guest.CachedKb + guest.BuffersKb)),
+            new(_text.Get("Memory_Kernel"), _text.Get("Memory_KernelDetail"), Format.Size(guest.SlabReclaimableKb)),
+            new(_text.Get("Memory_Shared"), _text.Get("Memory_SharedDetail"), Format.Size(guest.ShmemKb)),
+            new(_text.Get("Memory_Zram"),
+                string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ZramDetail"), Format.Size(guest.ZramOriginalKb)),
+                Format.Size(guest.ZramUsedKb)),
+            new(_text.Get("Memory_Free"), _text.Get("Memory_FreeDetail"), Format.Size(guest.FreeKb)),
+        };
+        // Google Play services, which the user chose to install, on a line of its own, so
+        // what it costs is not taken for what Android and DSA cost.
+        if (guest.GooglePlay is { } play)
+        {
+            rows.Insert(1, new(_text.Get("Memory_GooglePlay"),
+                string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_GooglePlayDetail"),
+                    play.Processes, ShareDetail(play.Cost)),
+                Format.Size(play.Cost.TotalKb)));
+        }
+        return rows;
     }
 
     /// <summary>"N in memory, M compressed", with the compressed part unknown when zram could
@@ -788,7 +839,7 @@ public sealed partial class MemoryViewModel : ObservableObject
             Format.Size(share.ResidentKb),
             share.CompressedKb is { } compressed ? Format.Size(compressed) : _text.Get("Memory_Unknown"));
 
-    public IReadOnlyList<MemoryRow> GuestProcessRows => (_report?.Guest?.TopProcesses ?? Array.Empty<GuestProcess>())
+    private IReadOnlyList<MemoryRow> BuildGuestProcessRows() => (_report?.Guest?.TopProcesses ?? Array.Empty<GuestProcess>())
         .Select(p => new MemoryRow(
             p.Name,
             string.Format(CultureInfo.CurrentCulture,
@@ -796,7 +847,45 @@ public sealed partial class MemoryViewModel : ObservableObject
             Format.Size(p.Cost?.TotalKb ?? p.PssKb)))
         .ToList();
 
-    public async Task RefreshAsync()
+    /// <summary>The page's lists. Each stays the same list for the page's life, and a refresh
+    /// changes its rows in place, so the window keeps the rows' controls.</summary>
+    public LiveRows HostRows { get; } = new();
+
+    public LiveRows GuestRows { get; } = new();
+
+    public LiveRows KernelRows { get; } = new();
+
+    public LiveRows GuestProcessRows { get; } = new();
+
+    private readonly SingleFlight _refresh = new();
+
+    /// <summary>Asks for a new report. A refresh asked for while one runs (the page's timer, its
+    /// Refresh button and its first showing can overlap) joins the one that runs.</summary>
+    public Task RefreshAsync() => _refresh.RunAsync(RefreshOnceAsync);
+
+    /// <summary>Lets go of the report and its rows, for a page that is left: the page asks for
+    /// a new report each time it is shown. A refresh in progress keeps what it brings.</summary>
+    public void Release()
+    {
+        if (_refresh.Running)
+        {
+            return;
+        }
+        _report = null;
+        _error = null;
+        UpdateRows();
+        ChangedAll();
+    }
+
+    private void UpdateRows()
+    {
+        HostRows.Update(BuildHostRows());
+        GuestRows.Update(BuildGuestRows());
+        KernelRows.Update(BuildKernelRows());
+        GuestProcessRows.Update(BuildGuestProcessRows());
+    }
+
+    private async Task RefreshOnceAsync()
     {
         try
         {
@@ -807,6 +896,7 @@ public sealed partial class MemoryViewModel : ObservableObject
         {
             _error = Format.Problem(_text, e);
         }
+        UpdateRows();
         ChangedAll();
     }
 }

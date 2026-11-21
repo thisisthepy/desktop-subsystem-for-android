@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Başlat</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Yeniden başlat</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android durur ve yeniden başlar.
+
+Uygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Durdur</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Android başlatılamadı. Yeniden deneyin, sorun sürerse ayrıntılara bakın.</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Bu bilgisayar Android'i çalıştıramadı. Sorun Android'de değil bilgisayardadır; kullanılan Android sürümü korunur. Nedeni ayrıntılarda görebilirsiniz.</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Ayrıntılar</value>
@@ -262,6 +273,9 @@ Varsa DSA başka bir görüntü indirir. Sonraki DSA sürümü bunu yeniden dene
   <data name="Memory_Shared" xml:space="preserve">
     <value>Paylaşılan bellek</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Pencere görüntüleri ve grafik arabellekleri gibi birkaç işlemin birlikte kullandığı bellek. Onu kullanan uygulamalar kapanınca serbest kalır.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Sıkıştırılmış bellek</value>
   </data>
@@ -270,6 +284,9 @@ Varsa DSA başka bir görüntü indirir. Sonraki DSA sürümü bunu yeniden dene
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Boş</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Şu anda hiçbir şeyin kullanmadığı bellek. Android onu bilgisayara geri verir, bu yüzden bilgisayarın RAM'ini kaplamaz.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>İşlem {0}</value>
@@ -747,7 +764,10 @@ Google Play'i yeniden yükleyin.</value>
     <value>Android kimliği: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android kimliği, Google Play yüklendikten ve Android onunla başladıktan sonra burada görünür.</value>
+    <value>Android kimliği henüz kullanılamıyor. Google Play Hizmetleri, bu cihaz Google'a ilk kez giriş yaptığında (check-in) kimliği oluşturur.
+Bunun için Google Play'in yüklü, Android'in onunla başlatılmış ve bir ağ bağlantısının olması gerekir.
+Birkaç dakika sonra hâlâ boşsa Android'i yeniden başlatın.
+Kimlik, Google'ın kayıt sayfasının kabul ettiği biçimde, ondalık bir sayıdır.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Geliştirici</value>
@@ -850,14 +870,26 @@ Otomatik: bu bilgisayarın belleğinden Windows'un payı düşülen miktara kada
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>İş parçacığı yığınları</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Çekirdeğin çalışan her iş parçacığı için tuttuğu çalışma alanı. Uygulamalar kapandıkça küçülür.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Sayfa tabloları</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>İşlemciye her uygulamanın belleğinin RAM'de nerede olduğunu söyleyen tablolar. Uygulamalar kapandıkça küçülür.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Çekirdek eşlemeleri (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Çekirdeğin ve sürücülerinin ayırdığı büyük arabellekler; grafik bunlardan biri. Artık gerekmediğinde serbest kalır.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>CPU başına veriler</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Çekirdeğin her işlemci çekirdeği için birer tane tuttuğu veriler. Boyutu Android başlarken belirlenir.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Sürücüler</value>
@@ -1781,8 +1813,7 @@ Henüz kullanılamıyor: bu derlemede olmayan bir Android çerçeve değişikli�
     <value>Uygulama tam ekranı</value>
   </data>
   <data name="AppFullScreenCard.Description" xml:space="preserve">
-    <value>Uygulamanın tam ekran isteğinin (ör.
-videonun tam ekran düğmesi) nerede görüneceği.
+    <value>Uygulamanın tam ekran isteğinin (ör. videonun tam ekran düğmesi) nerede görüneceği.
 Tüm ekranda başlık çubuğu üst kenarda belirir.
 Uygulamalar sayfasındaki uygulama seçimi önceliklidir.</value>
   </data>
@@ -2304,7 +2335,7 @@ ARM uygulamaları altında açın, Android'i yeniden başlatın ve uygulamayı y
     <value>Desteklenen en yeni sürüm (şu anda Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} ve güvenlik güncellemeleri</value>
+    <value>Android {0} sürümüne sabit: yalnızca güvenlik ve görüntü güncellemeleri alır, kendiliğinden daha yeni bir Android'e geçmez</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android güncellemesi</value>
@@ -2605,5 +2636,32 @@ Uygulamanın x86_64 veya arm64-v8a derlemesini alın.</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Tüm dosyalar</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Alternatif mağazalar</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Bir mağazayı uygulama listesinden kaldırın.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Yüklü değil</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Yüklü</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Yüklü, sürüm {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>İndiriliyor ve yükleniyor…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Yüklenmedi: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Yükle</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Aç</value>
   </data>
 </root>

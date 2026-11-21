@@ -10,6 +10,28 @@ namespace Dsa.Settings;
 /// minimised settings window kept polling every few seconds for nobody.</summary>
 internal static class PollingTimers
 {
+    // One count for the whole app: two pages that poll fill it together.
+    private static readonly PollCompaction Compaction = new();
+
+    /// <summary>A tick handler that runs <paramref name="poll"/>, and skips a tick that comes
+    /// while the last poll still runs, so a slow poll never piles up behind the timer. Every
+    /// <see cref="PollCompaction.Every"/> polls it has the heap compacted.</summary>
+    public static EventHandler Once(Func<Task> poll)
+    {
+        var flight = new SingleFlight();
+        return async (_, _) =>
+        {
+            if (!flight.Running)
+            {
+                await flight.RunAsync(poll);
+                if (Compaction.Polled())
+                {
+                    WorkingSetTrim.Polled(Dispatcher.CurrentDispatcher);
+                }
+            }
+        };
+    }
+
     public static void Attach(Page page, params DispatcherTimer[] timers)
     {
         Window? window = null;

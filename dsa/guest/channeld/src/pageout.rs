@@ -22,6 +22,12 @@
 //! since the last time, and one process at most per look, so the daemon never competes with
 //! the apps for the CPU.
 //!
+//! Never a process that is exiting (state `X` or `Z`, or no address space left): paging out
+//! the memory of a process the kernel is tearing down raced with its exit, and the kernel then
+//! reported a bad rss-counter and later panicked in binder. Never one that used the CPU within
+//! [`QUIET_AFTER_WAKE`] either, checked again right before the pageout, so a process that
+//! woke (or began to exit) after the look is left alone.
+//!
 //! The decision runs and is tested on any platform; [`system`] reads `/proc` and asks the
 //! kernel on Linux and Android.
 
@@ -46,6 +52,13 @@ pub const FIRST_APPLICATION_UID: u32 = 10_000;
 /// Android gives each user's apps a range of this many UIDs: a UID's app ID is its remainder.
 pub const PER_USER_RANGE: u32 = 100_000;
 
+/// How long a process must have used no CPU, after it woke, before it is paged out. A process
+/// that has just run may be in the middle of something (a binder call, an exit, the runtime's
+/// collector) whose pages it is about to touch again; paging them out then only brings them
+/// back at once, and paging out a process that is exiting raced with the kernel tearing its
+/// memory down. Six seconds is three looks: a process quiet that long has gone back to sleep.
+pub const QUIET_AFTER_WAKE: Duration = Duration::from_secs(6);
+
 /// What the daemon reads of one process at a look.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessSample {
@@ -58,6 +71,9 @@ pub struct ProcessSample {
     pub cpu_ticks: u64,
     /// Its anonymous memory resident in RAM, in KiB (`RssAnon`).
     pub rss_anon_kb: u64,
+    /// It is exiting: dead or a zombie (state `X` or `Z` in `/proc/<pid>/stat`), or its address
+    /// space is already gone (no `VmSize` in `/proc/<pid>/status`).
+    pub exiting: bool,
 }
 
 /// A process to page out now.
@@ -70,6 +86,9 @@ pub struct Target {
     /// How much its resident anonymous memory grew since it was last paged out (or since the
     /// daemon first saw it), in KiB.
     pub grown_kb: u64,
+    /// The CPU time it had used at the look, in clock ticks: any more right before the
+    /// pageout means it woke since, and it is left alone.
+    pub cpu_ticks: u64,
 }
 
 /// Whether a process of this name belongs to Google Play services: Google's apps
@@ -97,6 +116,9 @@ pub fn has_window(name: &str, packages: &BTreeSet<String>) -> bool {
 
 /// Whether the process may be paged out at all, whatever its recent activity.
 pub fn eligible(sample: &ProcessSample, windows: &BTreeSet<String>) -> bool {
+    if sample.exiting {
+        return false;
+    }
     if sample.uid % PER_USER_RANGE < FIRST_APPLICATION_UID {
         return false;
     }
@@ -123,7 +145,7 @@ pub struct PageoutPolicy {
 impl Default for PageoutPolicy {
     fn default() -> Self {
         PageoutPolicy {
-            quiet: Duration::from_secs(6),
+            quiet: QUIET_AFTER_WAKE,
             min_interval: Duration::from_secs(30),
             min_growth_kb: 2 * 1024,
             per_look: 1,
@@ -215,6 +237,7 @@ impl Pageout {
                 oom_score_adj: sample.oom_score_adj,
                 google_play: is_google_play(&sample.name),
                 grown_kb,
+                cpu_ticks: sample.cpu_ticks,
             });
         }
         due.sort_by(|a, b| b.grown_kb.cmp(&a.grown_kb).then(a.pid.cmp(&b.pid)));
@@ -237,6 +260,52 @@ impl Pageout {
     }
 }
 
+/// How `target` is right before its pageout, read again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recheck {
+    pub oom_score_adj: i32,
+    pub cpu_ticks: u64,
+    pub exiting: bool,
+}
+
+/// Why `target`, chosen at the last look, is not to be paged out after all as it is `now`:
+/// it began to exit, it used the CPU since the look (it woke again), or it became more
+/// important. `None` when the pageout may go ahead.
+pub fn skip_reason(target: &Target, now: &Recheck) -> Option<String> {
+    if now.exiting {
+        return Some(format!("{} (pid {}) is exiting", target.name, target.pid));
+    }
+    if now.cpu_ticks != target.cpu_ticks {
+        return Some(format!(
+            "{} (pid {}) used the CPU since the look",
+            target.name, target.pid
+        ));
+    }
+    let adj = now.oom_score_adj;
+    if adj < VISIBLE_APP_ADJ || (!target.google_play && adj < PERCEPTIBLE_APP_ADJ) {
+        return Some(format!(
+            "{} became more important (oom_score_adj {adj})",
+            target.name
+        ));
+    }
+    None
+}
+
+/// The process state in `/proc/<pid>/stat` (`R`, `S`, `Z`, `X`, ...), the field after the name.
+pub fn state(stat: &str) -> Option<char> {
+    stat[stat.rfind(')')? + 1..]
+        .split_whitespace()
+        .next()?
+        .chars()
+        .next()
+}
+
+/// Whether a process whose `/proc/<pid>/stat` and `/proc/<pid>/status` read so is exiting: dead
+/// or a zombie, or with no address space left.
+pub fn is_exiting(stat: &str, status: &Status) -> bool {
+    matches!(state(stat), Some('X' | 'Z' | 'x')) || !status.has_mm
+}
+
 /// The user and system CPU time in `/proc/<pid>/stat`, in clock ticks. The name in brackets
 /// may hold spaces and brackets of its own, so the fields are counted from the last `)`.
 pub fn cpu_ticks(stat: &str) -> Option<u64> {
@@ -256,6 +325,9 @@ pub struct Status {
     pub rss_anon_kb: u64,
     /// What it has in swap, at its size before compression.
     pub swap_kb: u64,
+    /// It still has an address space (a `VmSize` line): an exiting process loses it before it
+    /// is gone.
+    pub has_mm: bool,
 }
 
 impl Status {
@@ -271,6 +343,7 @@ impl Status {
                 "Uid" => status.uid = value.parse().unwrap_or(0),
                 "RssAnon" => status.rss_anon_kb = value.parse().unwrap_or(0),
                 "VmSwap" => status.swap_kb = value.parse().unwrap_or(0),
+                "VmSize" => status.has_mm = true,
                 _ => {}
             }
         }
@@ -319,7 +392,8 @@ pub mod system {
     use std::os::unix::fs::MetadataExt;
     use std::time::{Duration, Instant};
 
-    use super::{anonymous_ranges, cpu_ticks, ProcessSample, Status, Target};
+    use super::{anonymous_ranges, cpu_ticks, is_exiting, skip_reason, ProcessSample, Recheck};
+    use super::{Status, Target};
     use super::{FIRST_APPLICATION_UID, PER_USER_RANGE};
 
     /// The system call numbers, the same on every architecture since Linux 5.1.
@@ -370,6 +444,7 @@ pub mod system {
                 oom_score_adj,
                 cpu_ticks: cpu,
                 rss_anon_kb: status.rss_anon_kb,
+                exiting: is_exiting(&stat, &status),
             });
         }
         Ok(samples)
@@ -411,14 +486,17 @@ pub mod system {
             .trim()
             .parse()
             .map_err(|_| gone())?;
-        if adj < super::VISIBLE_APP_ADJ || (!target.google_play && adj < super::PERCEPTIBLE_APP_ADJ)
-        {
-            return Err(Refused::Skipped(format!(
-                "{} became more important (oom_score_adj {adj})",
-                target.name
-            )));
-        }
+        let stat =
+            std::fs::read_to_string(format!("/proc/{}/stat", target.pid)).map_err(|_| gone())?;
         let before = status(target.pid).ok_or_else(gone)?;
+        let now = Recheck {
+            oom_score_adj: adj,
+            cpu_ticks: cpu_ticks(&stat).ok_or_else(gone)?,
+            exiting: is_exiting(&stat, &before),
+        };
+        if let Some(why) = skip_reason(target, &now) {
+            return Err(Refused::Skipped(why));
+        }
         // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor or -1.
         let pidfd = unsafe { libc::syscall(SYS_PIDFD_OPEN, target.pid, 0) };
         if pidfd < 0 {

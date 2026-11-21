@@ -9,6 +9,17 @@ use std::fmt;
 use dsa_protocol::control;
 use dsa_protocol::host_api::types;
 
+/// A short name for a shortcut's ID that any file name or bundle identifier can carry: an
+/// FNV-1a hash of it, in hex. Android takes any text as an ID, which a file name cannot always.
+pub fn shortcut_tag(id: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in id.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 /// How long the service waits for Android to uninstall an app.
 pub const UNINSTALL_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 

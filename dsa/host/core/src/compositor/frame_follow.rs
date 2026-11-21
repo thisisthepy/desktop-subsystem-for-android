@@ -45,10 +45,15 @@ pub enum Arrival {
     Keep,
     /// The window is taking the size of the frame kept before it: wait until it has.
     Wait,
-    /// It is of the size the window had before its monitor's scale changed: keep it out of
-    /// sight and leave the window at the size it took for the new scale.
+    /// It is of the size the window had before its monitor's scale changed, or of a size the
+    /// user dragged past before the size of the frame on the screen: keep it out of sight and
+    /// leave the window at the size it has.
     Stale,
 }
+
+/// How many sizes proposed for a window are remembered, to tell a late frame of a size dragged
+/// past from a new one.
+const PROPOSALS_KEPT: usize = 256;
 
 /// One window's frames and size.
 #[derive(Debug, Clone, Default)]
@@ -66,6 +71,8 @@ pub struct FrameFollow {
     stale: Option<(u32, u32)>,
     /// Whether the window holds the size the desktop gave it ([`FrameFollow::set_held`]).
     held: bool,
+    /// The sizes proposed for the window, oldest first, each once at its latest place.
+    proposals: Vec<(u32, u32)>,
 }
 
 impl FrameFollow {
@@ -116,6 +123,7 @@ impl FrameFollow {
         self.kept = None;
         self.claimed = false;
         self.stale = None;
+        self.proposals.clear();
         if !held {
             self.shown = Some(self.view);
         }
@@ -138,9 +146,39 @@ impl FrameFollow {
             Arrival::Show
         } else if self.stale == Some(size) {
             Arrival::Stale
+        } else if self.dragged_past(size) {
+            // A late frame of a size the user dragged past: the window has a newer size, whose
+            // frame the app drew or is drawing. Following it would shrink or grow the window
+            // back to that older size after the user let go. Only Android refusing the size
+            // the user let go at moves the window there: the window manager then resizes the
+            // window to the task's size, and frames of it are of the window's size.
+            Arrival::Stale
         } else {
             self.kept = Some(size);
             Arrival::Keep
+        }
+    }
+
+    /// Whether a frame of `size` is of a size proposed for the window before the size the
+    /// window has now. A window whose size was never proposed (the guest resized it) has no
+    /// order to go by, and every frame of another size is followed.
+    pub fn dragged_past(&self, size: (u32, u32)) -> bool {
+        let at = |wanted: (u32, u32)| self.proposals.iter().rposition(|p| *p == wanted);
+        match (at(size), at(self.view)) {
+            (Some(frame), Some(view)) => frame < view,
+            _ => false,
+        }
+    }
+
+    /// Remembers `size` as the newest size proposed for the window.
+    fn remember(&mut self, size: (u32, u32)) {
+        if self.proposals.last() == Some(&size) {
+            return;
+        }
+        self.proposals.retain(|p| *p != size);
+        self.proposals.push(size);
+        if self.proposals.len() > PROPOSALS_KEPT {
+            self.proposals.remove(0);
         }
     }
 
@@ -162,6 +200,7 @@ impl FrameFollow {
             self.claimed = true;
             return Some(kept);
         }
+        self.remember(proposed);
         if let Some(stale) = self.stale {
             if proposed == stale {
                 self.stale = None;
@@ -181,9 +220,39 @@ impl FrameFollow {
     pub fn scale_changed(&mut self, proposed: (u32, u32)) -> (u32, u32) {
         self.claimed = false;
         self.kept = None;
+        // Sizes of the old scale say nothing about the order of the new scale's frames.
+        self.proposals.clear();
         // A window that holds its size shows every frame anyway.
         self.stale = self.shown.filter(|shown| !self.held && *shown != proposed);
         proposed
+    }
+
+    /// The scale the window shows its task at changed, and the newest frame, which the app drew
+    /// before, now covers `size` window pixels. Its size changed only because the same frame
+    /// is measured at another scale, not because the app drew a new size: it is shown if it
+    /// fits the window, and never resizes the window. Followed like a new frame, it would
+    /// shrink or grow the window by the ratio of the two scales the moment the task changes
+    /// density at the end of a move to another monitor, and the next frame, drawn for the new
+    /// density at the window's size, would put it back: a snap after the user let go.
+    ///
+    /// Further frames of `size` are of the same old drawing and are not followed either, until
+    /// a frame of another size is shown ([`Arrival::Stale`]).
+    pub fn rescaled(&mut self, size: (u32, u32)) -> Arrival {
+        if self.claimed {
+            return Arrival::Wait;
+        }
+        if self.held || size == self.view {
+            self.shown = Some(size);
+            self.kept = None;
+            if !self.held {
+                self.stale = None;
+            }
+            return Arrival::Show;
+        }
+        // A frame kept at the old scale's measure is let go: its size means another now.
+        self.kept = None;
+        self.stale = Some(size);
+        Arrival::Stale
     }
 
     /// The window's client area is now `view`. Returns whether the kept frame is of that size
@@ -558,6 +627,57 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_frame_measured_at_a_new_scale_never_resizes_the_window_200_100_200() {
+        // An app-way window of 1186x1711 on a 200% monitor is dragged onto a 100% one and,
+        // in a later drag, back. Each time the desktop gives it its new size at once, and the
+        // task's last frame, drawn at the old density, is measured at the window's new scale
+        // until the task takes the new density. Measured: that frame (740x1058 at 1:1) was
+        // followed when the scale went back to 1:1 at the end of the move, and the window shrank
+        // to it after the user let go, then grew back with the next frame.
+        let mut screen = Screen::new((1186, 1711), (1186, 1711));
+        let mut sizes = vec![screen.follow.view()];
+        for (suggested, old_frame_now, new_frame) in [
+            // 200% to 100%: the old frame shows scaled to 593x856, then at 1:1 as 1186x1711.
+            ((595, 857), [(593, 856), (1186, 1711)], (595, 857)),
+            // 100% back to 200%: the old frame shows scaled, then at 1:1 as itself.
+            ((1188, 1712), [(1190, 1714), (595, 857)], (1188, 1712)),
+        ] {
+            let taken = screen.follow.scale_changed(suggested);
+            screen.follow.view_taken(taken);
+            sizes.push(screen.follow.view());
+            // The scale changes under the frame on the screen, twice: to the move's interim
+            // scale, and back to 1:1 once the task has the new density.
+            for measured in old_frame_now {
+                assert_ne!(screen.follow.rescaled(measured), Arrival::Keep);
+                sizes.push(screen.follow.view());
+                // The app still sends frames of that drawing: not followed either.
+                assert_eq!(screen.follow.frame_arrived(measured), Arrival::Stale);
+                sizes.push(screen.follow.view());
+            }
+            // The task's first frame at the new density is of the window's size.
+            screen.frame(new_frame);
+            assert_eq!(screen.on_screen, Some(new_frame));
+            sizes.push(screen.follow.view());
+        }
+        sizes.dedup();
+        assert_eq!(
+            sizes,
+            vec![(1186, 1711), (595, 857), (1188, 1712)],
+            "the window took only the sizes the desktop gave it"
+        );
+    }
+
+    #[test]
+    fn fr4_a_frame_that_fits_the_window_at_its_new_scale_is_shown() {
+        let mut follow = FrameFollow::new((800, 600));
+        follow.frame_arrived((800, 600));
+        follow.scale_changed((1600, 1200));
+        follow.view_taken((1600, 1200));
+        assert_eq!(follow.rescaled((1600, 1200)), Arrival::Show);
+        assert_eq!(follow.shown(), Some((1600, 1200)));
+    }
+
+    #[test]
     fn fr4_a_window_that_goes_back_to_its_old_size_follows_its_frames_again() {
         // The guest did not take the size of the new scale, and the window takes the size the
         // task kept: frames of that size are the task's frames again.
@@ -568,5 +688,68 @@ mod tests {
         assert_eq!(follow.size_for((2637, 1691)), Some((2637, 1691)));
         follow.view_taken((2637, 1691));
         assert_eq!(follow.frame_arrived((2637, 1691)), Arrival::Show);
+    }
+
+    #[test]
+    fn fr4_a_late_frame_of_a_size_dragged_past_does_not_snap_the_window_back() {
+        // FLO, dragged to 677x987: the app draws 670x977, 676x986 and 677x987, and then, after
+        // the user let go, more frames of 670x977, a size the drag passed.
+        let mut screen = Screen::new((644, 949), (644, 949));
+        for size in [(670, 977), (675, 985), (676, 986)] {
+            screen.propose(size);
+        }
+        screen.frame((670, 977));
+        assert_eq!(screen.follow.view(), (670, 977));
+        screen.propose((677, 987));
+        screen.frame((676, 986));
+        screen.propose((677, 987));
+        screen.frame((677, 987));
+        assert_eq!(screen.follow.view(), (677, 987));
+        for _ in 0..4 {
+            assert_eq!(screen.follow.frame_arrived((670, 977)), Arrival::Stale);
+        }
+        assert_eq!(screen.follow.view(), (677, 987));
+        assert_eq!(screen.follow.kept(), None);
+        assert_eq!(screen.on_screen, Some((677, 987)));
+        // A frame of the window's size goes on being shown.
+        assert_eq!(screen.follow.frame_arrived((677, 987)), Arrival::Show);
+    }
+
+    #[test]
+    fn fr4_frames_of_a_size_dragged_past_move_the_window_only_once_android_refused_the_size() {
+        let mut follow = FrameFollow::new((644, 949));
+        follow.frame_arrived((644, 949));
+        follow.size_for((670, 977));
+        follow.size_for((677, 987));
+        assert_eq!(follow.frame_arrived((677, 987)), Arrival::Keep);
+        follow.size_for((677, 987));
+        assert!(follow.view_taken((677, 987)));
+        // However many late frames come, the window keeps the size the user let go at.
+        for _ in 0..200 {
+            assert_eq!(follow.frame_arrived((670, 977)), Arrival::Stale);
+        }
+        assert_eq!(follow.view(), (677, 987));
+        // Android kept the task at 670x977 although asked again: the window manager resizes
+        // the window to it, and its frames are shown.
+        assert!(!follow.view_taken((670, 977)));
+        assert_eq!(follow.frame_arrived((670, 977)), Arrival::Show);
+    }
+
+    #[test]
+    fn fr4_a_frame_of_a_size_proposed_after_the_windows_is_followed() {
+        // A drag that goes on: the app is behind, and its frames of newer sizes are followed.
+        let mut follow = FrameFollow::new((644, 949));
+        follow.frame_arrived((644, 949));
+        follow.size_for((660, 960));
+        follow.size_for((670, 977));
+        assert_eq!(follow.frame_arrived((660, 960)), Arrival::Keep);
+        follow.size_for((670, 977));
+        assert!(follow.view_taken((660, 960)));
+        assert_eq!(follow.frame_arrived((670, 977)), Arrival::Keep);
+        follow.size_for((670, 977));
+        assert!(follow.view_taken((670, 977)));
+        // A size the drag comes back to is newer again.
+        follow.size_for((660, 960));
+        assert_eq!(follow.frame_arrived((660, 960)), Arrival::Keep);
     }
 }

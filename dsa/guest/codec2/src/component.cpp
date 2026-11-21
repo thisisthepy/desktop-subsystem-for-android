@@ -731,18 +731,41 @@ void Component::picture(const Frame& frame, uint64_t ticket, Clock::time_point a
     }
     // Without a buffer that holds the whole picture the work finishes with no output, rather
     // than with a buffer that would show green or an older picture.
-    finish(std::move(*work), buffer, frame.width, frame.height, false);
+    const bool taken = finish(std::move(*work), buffer, frame.width, frame.height, false);
     if (buffer != nullptr) {
-        AHardwareBuffer_release(buffer);
+        if (taken) {
+            AHardwareBuffer_release(buffer);
+        } else {
+            // The framework never got it, so it will never queue or free it: given back here,
+            // or the surface would have one buffer fewer for every work that did not reach it,
+            // until it had none.
+            discard(buffer, from);
+        }
     }
     const Clock::time_point handed = Clock::now();
     if (buffer != nullptr) {
         times.handOff = since(copied, handed);
         mStats.shown(handed, times);
+        mStarvation.reset();
     } else if (!mGate.open(ticket)) {
         mStats.dropped(handed, Drop::Flushed);
+        mStarvation.reset();
     } else {
         mStats.dropped(handed, gotBuffer ? Drop::NotWritten : Drop::NoBuffer);
+        if (!gotBuffer && mStarvation.noBuffer(handed)) {
+            // The surface has given no buffer back for any picture in a long while. The screen
+            // keeps the last picture shown, as no unwritten buffer ever goes out; the session
+            // is reported broken so the app makes a new decoder and surface buffers, as it
+            // does for any codec error, instead of showing that one picture for minutes.
+            CODEC_LOGE("%s: the surface has given no buffer back for 10 s or more; the decoder reports an error "
+                       "so the app starts it again",
+                       mInfo.name);
+            if (mListener && !mPeerGone.load()) {
+                Status starved;
+                starved.status = C2_TIMED_OUT;
+                mListener->onError(starved, C2_TIMED_OUT);
+            }
+        }
     }
     logStats();
 }
@@ -791,7 +814,7 @@ void Component::decodeError(const std::string& error) {
     }
 }
 
-void Component::finish(Work work, AHardwareBuffer* output, uint32_t width, uint32_t height, bool eos) {
+bool Component::finish(Work work, AHardwareBuffer* output, uint32_t width, uint32_t height, bool eos) {
     WorkBundle bundle;
     Worklet worklet;
     worklet.componentId = 0;
@@ -838,17 +861,19 @@ void Component::finish(Work work, AHardwareBuffer* output, uint32_t width, uint3
     work.result.status = Status::OK;
     bundle.works.push_back(std::move(work));
     if (mPeerGone.load() || !mListener) {
-        return;
+        return false;
     }
     const ndk::ScopedAStatus result = mListener->onWorkDone(bundle);
     if (!result.isOk()) {
         if (peerIsGone(result.getExceptionCode(), result.getStatus())) {
             peerGone("a finished work did not reach it");
-            return;
+            return false;
         }
         CODEC_LOGW("%s: the framework did not take a finished work: %s", mInfo.name,
                    result.getDescription().c_str());
+        return false;
     }
+    return true;
 }
 
 ndk::ScopedAStatus Component::flush(WorkBundle* flushed) {

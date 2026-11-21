@@ -43,10 +43,22 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <TieredPGO>false</TieredPGO>
+    <!-- Tiered compilation off: the precompiled ReadyToRun code is kept and never compiled a
+         second time, so there are no call counting stubs, no second copy of each hot method
+         and no background tiering work. What is not precompiled is compiled once, optimised. -->
+    <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
 
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+    <!-- Windows' own national language support for culture data, casing and sorting, as the
+         .NET Framework and Windows' own apps use it, instead of loading ICU and building its
+         collators and culture data in the process's heap. -->
+    <RuntimeHostConfigurationOption Include="System.Globalization.UseNls" Value="true" />
+    <!-- Touch and pen through Windows' pointer messages. WPF's default stylus stack loads the
+         Tablet PC input libraries (wisp, tpcps, PenIMC) and runs two input threads of its own,
+         each with its stack and heaps, in every WPF process, touch screen or not. -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.EnablePointerSupport" Value="true" />
   </ItemGroup>
 
   <ItemGroup>

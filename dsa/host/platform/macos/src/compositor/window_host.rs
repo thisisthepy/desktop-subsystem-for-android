@@ -22,9 +22,10 @@ use dsa_host_core::compositor::window_mode::WindowMode;
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::drag::{DragOffer, DragOut};
 use dsa_host_core::files::{FileAction, FileTransfer};
-use dsa_host_core::host_api::{HostApiClient, InputStream};
+use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::ime::ImeCursor;
 use dsa_host_core::input::InputEvent;
+use dsa_host_core::input_relay::InputRelay;
 use dsa_host_unix::socket::UnixLocalConnector;
 use dsa_protocol::window_host::types::{envelope::Body, Attach, FramePresented};
 use dsa_protocol::window_host::{decode, encode_body};
@@ -67,8 +68,8 @@ pub fn support_folder() -> Option<PathBuf> {
 /// The package this program shows: the `--package` argument, else the `DSAPackage` key of
 /// the bundle it runs from.
 pub fn package_of(args: &[String]) -> Option<String> {
-    if let Some(at) = args.iter().position(|a| a == "--package") {
-        return args.get(at + 1).cloned();
+    if let Some(named) = dsa_host_core::compositor::window_hosts::package_argument(args) {
+        return named;
     }
     unsafe {
         let bundle: *mut AnyObject = msg_send![class(c"NSBundle").ok()?, mainBundle];
@@ -133,36 +134,16 @@ fn report(reports: &Reports, message: FromHost) {
 /// window it was made in, and goes to the task that window shows now, as `tasks` says: another
 /// task once one took the window over after a GPU reset.
 fn serve_input(mut connector: impl Connector, events: Receiver<InputEvent>, tasks: WindowTasks) {
-    let mut stream: Option<InputStream> = None;
-    let mut retry_at: Option<Instant> = None;
+    let mut relay = InputRelay::new(INPUT_RETRY);
     while let Ok(event) = events.recv() {
         let event = tasks.input(event);
-        for _ in 0..2 {
-            if stream.is_none() {
-                if retry_at.is_some_and(|at| Instant::now() < at) {
-                    break;
-                }
-                match HostApiClient::connect(&mut connector, BUILD, CONNECT_TIMEOUT)
-                    .and_then(|client| client.stream_input())
-                {
-                    Ok(connected) => {
-                        stream = Some(connected);
-                        retry_at = None;
-                    }
-                    Err(error) => {
-                        eprintln!("dsa-app-window: input cannot reach Android: {error}");
-                        retry_at = Some(Instant::now() + INPUT_RETRY);
-                        break;
-                    }
-                }
-            }
-            let Some(connected) = stream.as_mut() else {
-                break;
-            };
-            match connected.send_input(&event) {
-                Ok(()) => break,
-                Err(_) => stream = None,
-            }
+        let connect = || {
+            HostApiClient::connect(&mut connector, BUILD, CONNECT_TIMEOUT)
+                .and_then(|client| client.stream_input())
+                .map_err(|error| error.to_string())
+        };
+        if let Some(error) = relay.send(&event, Instant::now(), connect) {
+            eprintln!("dsa-app-window: input cannot reach Android: {error}");
         }
     }
 }
@@ -257,6 +238,24 @@ impl WindowEvents for Events {
                 shown,
             },
         );
+    }
+
+    fn view_changed(&mut self) {
+        // Called from inside a window call the state is busy with (the window resized
+        // itself): that call takes the new size itself.
+        let task_id = self.task_id;
+        STATE.with(|state| {
+            if let Ok(mut state) = state.try_borrow_mut() {
+                window_view_changed(&mut state, task_id);
+            }
+        });
+    }
+
+    fn size_for(&mut self, proposed: (u32, u32)) -> Option<(u32, u32)> {
+        STATE.with(|state| {
+            let mut state = state.try_borrow_mut().ok()?;
+            state.windows.get_mut(&self.task_id)?.size_for(proposed)
+        })
     }
 
     fn dragging(&mut self, dragging: bool) {
@@ -448,6 +447,16 @@ fn show(task_id: i32, title: &str, size: (u32, u32), focused: bool) {
     });
 }
 
+/// Task `task_id`'s window may have a new size: it shows a frame kept for it.
+fn window_view_changed(state: &mut State, task_id: i32) {
+    let State {
+        windows, textures, ..
+    } = state;
+    if let Some(window) = windows.get_mut(&task_id) {
+        window.view_changed(&|texture_id| textures.get(&texture_id).map(|(_, surface)| surface));
+    }
+}
+
 fn handle(message: ToHost) {
     match message {
         ToHost::Show {
@@ -467,9 +476,11 @@ fn handle(message: ToHost) {
             width,
             height,
         } => STATE.with(|state| {
-            if let Some(window) = state.borrow_mut().windows.get_mut(&task_id) {
+            let mut state = state.borrow_mut();
+            if let Some(window) = state.windows.get_mut(&task_id) {
                 window.resize_to((width, height));
             }
+            window_view_changed(&mut state, task_id);
         }),
         ToHost::Close { task_id } => STATE.with(|state| {
             let mut state = state.borrow_mut();
@@ -510,7 +521,11 @@ fn handle(message: ToHost) {
             }
         }),
         // macOS draws the title bar and its buttons in the system's own colors.
-        ToHost::CaptionTone { .. } => {}
+        ToHost::CaptionTone { task_id, tone } => STATE.with(|state| {
+            if let Some(window) = state.borrow().windows.get(&task_id) {
+                window.set_caption_tone(tone);
+            }
+        }),
         ToHost::Mode {
             task_id,
             mode,
@@ -526,6 +541,7 @@ fn handle(message: ToHost) {
                 window.set_resizable(resizable);
                 window.set_picture_in_picture(mode == WindowMode::PictureInPicture);
                 window.set_full_screen(mode == WindowMode::Fullscreen);
+                window.view_changed(&|_| None);
             }
         }),
         ToHost::Overlay {
@@ -540,16 +556,16 @@ fn handle(message: ToHost) {
                 window.place_overlay((left, top), display, touchable);
             }
         }),
-        // An app that starts below the title bar is never app drawn, and a standard window
-        // already has its content under the title bar, so `below` needs nothing more here.
+        // An app that starts below the title bar gets the standard one; every other window
+        // has the unified title bar, whose name is hidden while the app draws its own.
         ToHost::CaptionMode {
             task_id,
             app_drawn,
             interactive,
-            below: _,
+            below,
         } => STATE.with(|state| {
             if let Some(window) = state.borrow_mut().windows.get_mut(&task_id) {
-                window.set_app_drawn(app_drawn, interactive);
+                window.set_title_bar(app_drawn, below, interactive);
             }
         }),
         ToHost::CaptionBack { task_id, back } => STATE.with(|state| {
@@ -775,11 +791,62 @@ pub struct HostSetup {
     pub shortcut: Option<String>,
 }
 
+/// How often a launch looks at how far Android has got while it starts.
+const START_POLL: Duration = Duration::from_millis(250);
+
+/// Before a launch the user made reaches the window manager: Android cannot finish booting
+/// without the window manager's renderer, so the window manager must be listening first; then
+/// a stopped Android is started and waited for, so the launch reaches a running Android and
+/// the app's window opens once it is ready.
+fn prepare_launch(setup: &HostSetup) -> Result<(), String> {
+    std::os::unix::net::UnixStream::connect(&setup.window_manager)
+        .map_err(|e| format!("the window manager is not running: {e}"))?;
+    let mut api = UnixLocalConnector {
+        path: setup.host_api.clone(),
+    };
+    // The wait runs on a thread of its own, so the main thread keeps the starting window
+    // (the DSA logo, breathing) responsive while Android starts.
+    let (waiting_tx, waiting_rx) = channel::<()>();
+    let worker = std::thread::Builder::new()
+        .name("dsa-app-window-starting".into())
+        .spawn(move || {
+            dsa_host_core::host_api::ensure_android_for_app(
+                &mut api,
+                BUILD,
+                dsa_host_core::host_api::APP_START_ANDROID,
+                START_POLL,
+                || {
+                    let _ = waiting_tx.send(());
+                },
+            )
+        })
+        .map_err(|e| format!("could not wait for Android: {e}"))?;
+    let mut shown = false;
+    while !worker.is_finished() {
+        if !shown && waiting_rx.try_recv().is_ok() {
+            shown = true;
+            eprintln!("dsa-app-window: starting Android for {}", setup.package);
+            super::starting_splash::show(&setup.package);
+        }
+        super::starting_splash::pump(0.05);
+    }
+    let outcome = worker
+        .join()
+        .unwrap_or_else(|_| Err("waiting for Android failed".into()));
+    if outcome.is_err() {
+        super::starting_splash::dismiss();
+    }
+    outcome
+}
+
 /// Runs the window host until the window manager lets it go. Must be called on the main
 /// thread; it runs the application's run loop.
 pub fn run(setup: HostSetup) -> Result<(), String> {
     if !crate::objc::is_main_thread() {
         return Err("the window host must run on the main thread".into());
+    }
+    if setup.launch {
+        prepare_launch(&setup)?;
     }
     let mut connection = UnixLocalConnector {
         path: setup.window_manager.clone(),

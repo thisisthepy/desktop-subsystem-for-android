@@ -343,7 +343,8 @@ namespace Dsa.Setup
             }
             else
             {
-                this.AndroidChip.Text = string.Format(Text.AndroidChip, this.app.AndroidMajor);
+                this.AndroidChip.Text = string.Format(
+                    this.app.AndroidPinned ? Text.AndroidChipPinned : Text.AndroidChip, this.app.AndroidMajor);
             }
 
             this.FillLocation();

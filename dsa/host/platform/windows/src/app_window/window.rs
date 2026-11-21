@@ -59,9 +59,9 @@ use dsa_host_core::compositor::window_mode::{
     caption_revealed, picture_in_picture_place, ModeState, WindowMode,
 };
 use dsa_host_core::compositor::window_sizing::{
-    frame_rect, kept_frame_action, maximized_outer, maximized_position, min_client_size,
-    rescaled_rect, size_is_held, to_task_position, to_task_size, to_window_position,
-    FrameRectRequest, KeptFrame, MoveLoop, SizeProposal,
+    frame_rect, is_edge_drag, kept_frame_action, maximized_outer, maximized_position,
+    min_client_size, rescaled_rect, size_is_held, to_task_position, to_task_size,
+    to_window_position, FrameRectRequest, KeptFrame, LoopKind, MoveLoop, SizeProposal,
 };
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::ime::ImeCursor;
@@ -95,9 +95,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowPlacement, SetWindowPlacement, GWL_STYLE, HTBORDER, HTBOTTOMRIGHT,
-    HTLEFT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SC_MAXIMIZE, SC_SIZE, SWP_FRAMECHANGED,
-    SWP_NOOWNERZORDER, SW_RESTORE, WINDOWPLACEMENT, WM_COMMAND, WM_KEYDOWN, WM_KEYUP, WM_NCHITTEST,
-    WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_POPUP,
+    HTLEFT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SC_MAXIMIZE, SC_MOVE, SC_SIZE,
+    SWP_FRAMECHANGED, SWP_NOOWNERZORDER, SW_RESTORE, WINDOWPLACEMENT, WM_COMMAND, WM_KEYDOWN,
+    WM_KEYUP, WM_NCHITTEST, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_POPUP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, HTCAPTION, HTNOWHERE, SC_RESTORE, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCMOUSELEAVE,
@@ -349,6 +349,8 @@ struct WindowData {
     /// Whether the window is in its move or size loop, for the resize trace: plain moves
     /// there are logged a few a second (`win.move_loop`), not each.
     in_move_loop: Cell<bool>,
+    /// How the running move or size loop started (`WM_SYSCOMMAND`).
+    loop_kind: Cell<LoopKind>,
     /// The window size the trace last logged, so a drag logs a change of size.
     traced_size: Cell<(u32, u32)>,
     /// Whether the user is dragging one of the window's edges now.
@@ -682,6 +684,12 @@ unsafe extern "system" fn task_window_proc(
         }
         // The Android items of the system menu; Windows' own commands go on below.
         if message == WM_SYSCOMMAND {
+            // How the move or size loop that may follow starts: an edge drag is the size
+            // command only, whatever WM_SIZING Windows sends inside a title bar move.
+            let command = (wparam & 0xfff0) as u32;
+            if let Some(kind) = LoopKind::started_by(command == SC_SIZE, command == SC_MOVE) {
+                data.loop_kind.set(kind);
+            }
             if let Some(item) = system_menu::chosen(wparam) {
                 menu_chosen(hwnd, data, item);
                 return 0;
@@ -814,6 +822,9 @@ unsafe extern "system" fn task_window_proc(
                 }
                 // WM_SIZING says when the drag is of an edge.
                 data.sizing.set(false);
+                if message == WM_EXITSIZEMOVE {
+                    data.loop_kind.set(LoopKind::None);
+                }
                 // A click on the title bar enters the loop whether or not it moves the window,
                 // as the first click of a double click does: the drag is reported only once
                 // the window moves (WM_MOVING) or an edge is dragged (WM_SIZING).
@@ -841,6 +852,12 @@ unsafe extern "system" fn task_window_proc(
                         dragging,
                     });
                 }
+                // The drop may have snapped the window: it keeps that rectangle (held), and the
+                // guest is asked for its client size, instead of the window taking the size of
+                // the frame it still shows.
+                if !entered {
+                    take_kept_frame(hwnd, data);
+                }
             }
             0
         }
@@ -858,12 +875,17 @@ unsafe extern "system" fn task_window_proc(
             // Which edge the user drags, for when the window later takes the size of a frame.
             if let Some(data) = window_data(hwnd) {
                 let edge = wparam as u32;
-                data.sizing.set(true);
                 report_drag_started(data);
-                data.drag_edges.set((
-                    matches!(edge, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT),
-                    matches!(edge, WMSZ_TOP | WMSZ_TOPLEFT | WMSZ_TOPRIGHT),
-                ));
+                // Inside a title bar move loop Windows sends WM_SIZING when it changes the
+                // size itself (the restore as the drag starts, a snap preview, the drop on a
+                // snap zone): those sizes are taken as they are.
+                if is_edge_drag(data.loop_kind.get(), true) {
+                    data.sizing.set(true);
+                    data.drag_edges.set((
+                        matches!(edge, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT),
+                        matches!(edge, WMSZ_TOP | WMSZ_TOPLEFT | WMSZ_TOPRIGHT),
+                    ));
+                }
             }
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
@@ -1076,8 +1098,15 @@ unsafe extern "system" fn task_window_proc(
             }
             // A maximized window is kept to its monitor by Windows, and one that fills its
             // monitor covers more than the work area.
+            //
+            // While the user drags the window, it keeps the size the desktop suggests up to the
+            // whole monitor, as a native window does: cut to the work area, it would come out
+            // shorter than the desktop's size to the eye (the taskbar's height), take another
+            // shape under the user's hand, and come back a different size when dragged back.
+            // Only a window larger than the monitor is cut, so it cannot reach the next one.
+            let dragged = data.is_some_and(|data| data.in_move_loop.get());
             if !zoomed && data.is_some_and(titled) {
-                if let Some(work) = work_area(suggested) {
+                if let Some(work) = area_near(suggested, !dragged) {
                     limit = (
                         limit.0.min(work.right - work.left),
                         limit.1.min(work.bottom - work.top),
@@ -1104,7 +1133,8 @@ unsafe extern "system" fn task_window_proc(
                     "win.dpi_changed",
                     window_rect(hwnd),
                     &format!(
-                        "dpi={dpi} suggested={sx},{sy},{sw}x{sh} limit={}x{} held={held}",
+                        "dpi={dpi} suggested={sx},{sy},{sw}x{sh} limit={}x{} held={held} \
+                         dragged={dragged}",
                         limit.0.min(99_999),
                         limit.1.min(99_999)
                     ),
@@ -1331,7 +1361,7 @@ unsafe fn keep_to_frame(hwnd: HWND, data: &WindowData, pos: &mut WINDOWPOS) {
     // size is the desktop placing the window (the end of a move loop that snaps, a snap layout,
     // Win+arrow, a maximise or restore): its rectangle is taken as it is, never replaced by
     // the old frame's size or moved to fit it. The guest was asked for the size above, the last
-    // frame is shown stretched until the frame of the new size arrives, and a frame of another
+    // frame is shown 1:1 until the frame of the new size arrives, and a frame of another
     // size does not resize an arranged window (take_kept_frame).
     if !data.sizing.get() {
         return;
@@ -1343,8 +1373,11 @@ unsafe fn keep_to_frame(hwnd: HWND, data: &WindowData, pos: &mut WINDOWPOS) {
         return;
     }
     let (width, height) = window_outer(hwnd, size, dpi);
-    let left_moved = pos.flags & SWP_NOMOVE == 0 && pos.x != current.left;
-    let top_moved = pos.flags & SWP_NOMOVE == 0 && pos.y != current.top;
+    // The edges the user drags, as WM_SIZING reported them. Comparing the proposal with the
+    // current rectangle would miss a left or top edge drag that does not move that edge yet.
+    let movable = pos.flags & SWP_NOMOVE == 0;
+    let (left_edge, top_edge) = data.drag_edges.get();
+    let (left_moved, top_moved) = (movable && left_edge, movable && top_edge);
     let (x, y, width, height) = frame_rect(FrameRectRequest {
         requested: (pos.x, pos.y, pos.cx, pos.cy),
         frame_outer: Some((width, height)),
@@ -1433,6 +1466,11 @@ unsafe fn place_ime_cursor(hwnd: HWND, data: &WindowData) {
 unsafe fn take_kept_frame(hwnd: HWND, data: &WindowData) {
     // A window that holds the size the desktop gave it shows every frame in it instead.
     if IsIconic(hwnd) != 0 || data.held.get() {
+        return;
+    }
+    // The window the user moves by its title bar keeps the size Windows gives it until the
+    // drop; the frame is taken once the loop ends (WM_EXITSIZEMOVE).
+    if data.in_move_loop.get() && data.loop_kind.get() != LoopKind::Size {
         return;
     }
     let Some(presenter) = data.presenter.borrow().clone() else {
@@ -1928,9 +1966,29 @@ unsafe fn set_pos_traced(
     why: &str,
 ) {
     let traced = data.filter(|_| trace_detailed());
-    let before = traced.map(|_| window_rect(hwnd));
+    let before = window_rect(hwnd);
     SetWindowPos(hwnd, after, rect.0, rect.1, rect.2, rect.3, flags);
-    if let (Some(data), Some(((bx, by), (bw, bh)))) = (traced, before) {
+    // Every size DSA gives a window itself is logged with its reason, trace or no trace: a
+    // window that changes size without the user is the first thing a report asks about.
+    if let Some(data) = data {
+        let after_size = window_rect(hwnd).1;
+        if after_size != before.1 {
+            note(
+                data.logger.as_deref(),
+                &format!(
+                    "task {}: the window was resized from {}x{} to {}x{}: {}",
+                    data.task_id,
+                    before.1 .0,
+                    before.1 .1,
+                    after_size.0,
+                    after_size.1,
+                    size_change_reason(why)
+                ),
+            );
+        }
+    }
+    if let Some(data) = traced {
+        let ((bx, by), (bw, bh)) = before;
         let detail = format!(
             "why={why} asked={},{},{}x{} {} before={bx},{by},{bw}x{bh}",
             rect.0,
@@ -1941,6 +1999,25 @@ unsafe fn set_pos_traced(
         );
         trace_window(data, "wm.set_pos", window_rect(hwnd), &detail);
     }
+}
+
+/// Why DSA gave a window a size itself, in words, for the `why` [`set_pos_traced`] is called
+/// with. The tag itself follows, so the line can be matched with the resize trace.
+fn size_change_reason(why: &str) -> String {
+    let words = match why {
+        "dpi_changed" => {
+            "the window moved onto a monitor of another scale and took the size Windows \
+             suggests there, which keeps it the same size to the eye"
+        }
+        "frame_arrived" => "the app drew a frame of another size, and the window took its size",
+        "guest_size" => "Android gave the task another size",
+        "guest_size_fullscreen" => "Android gave the task another size in full screen",
+        "mode_titled" => "the window got its title bar back",
+        "mode_untopmost" => "the window left picture in picture",
+        "mode_pip" => "the window went to picture in picture",
+        _ => "DSA placed the window",
+    };
+    format!("{words} ({why})")
 }
 
 /// Sizes and places `hwnd` for itself, not as the user: a fixed-size window takes it too.
@@ -2129,6 +2206,18 @@ unsafe fn work_area(rect: &RECT) -> Option<RECT> {
     let mut info: MONITORINFO = std::mem::zeroed();
     info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
     (GetMonitorInfoW(monitor, &mut info) != 0).then_some(info.rcWork)
+}
+
+/// The work area (`work`) or the whole of the monitor nearest `rect`.
+unsafe fn area_near(rect: &RECT, work: bool) -> Option<RECT> {
+    let monitor = MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST);
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    (GetMonitorInfoW(monitor, &mut info) != 0).then_some(if work {
+        info.rcWork
+    } else {
+        info.rcMonitor
+    })
 }
 
 /// The largest client area a window can have on its monitor's work area.
@@ -2483,6 +2572,7 @@ impl Ui {
             drag_edges: Cell::new((false, false)),
             move_loop: Cell::new(MoveLoop::default()),
             in_move_loop: Cell::new(false),
+            loop_kind: Cell::new(LoopKind::None),
             traced_size: Cell::new((0, 0)),
             sizing: Cell::new(false),
             held: Cell::new(false),

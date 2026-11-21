@@ -10,7 +10,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use dsa_host_core::geocode::{self, BoundaryGeocoder};
+use dsa_host_core::geocode;
 use dsa_transport::Connector;
 
 use crate::compositor::log::{note, CompositorLogger};
@@ -24,11 +24,6 @@ pub fn serve(
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
-    let mut geocoder = BoundaryGeocoder::for_this_program();
     let log = |line: &str| note(logger.as_deref(), line);
-    log(&format!(
-        "geocoding: answering from {}",
-        geocoder.path().display()
-    ));
-    geocode::serve(&mut *connector, BUILD, &mut geocoder, &stop, &log);
+    geocode::serve_boundaries(&mut *connector, BUILD, &stop, &log);
 }

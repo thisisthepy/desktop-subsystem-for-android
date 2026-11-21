@@ -326,6 +326,56 @@ fn fr17_settings_are_read_as_the_service_reports_them() {
 }
 
 #[test]
+fn fr17_the_start_button_becomes_restart_while_android_runs() {
+    use dsa_host_core::start_button::{StartAction, StartButton};
+    let status = |state: &str| Status::read(&json!({ "state": state }));
+
+    let stopped = view::start_button(Some(&status("Stopped")), None);
+    assert_eq!(stopped, Some(StartButton::Start));
+    assert_eq!(view::start_button_text(stopped), "Start");
+    assert!(view::controls(Some(&status("Stopped"))).can_start);
+    for state in ["Active", "Dozing", "Frozen", "Stalled"] {
+        let button = view::start_button(Some(&status(state)), None);
+        assert_eq!(button, Some(StartButton::Restart), "{state}");
+        assert_eq!(view::start_button_text(button), "Restart", "{state}");
+        assert!(
+            button.unwrap().enabled() && button.unwrap().confirms(),
+            "{state}"
+        );
+        assert!(!view::controls(Some(&status(state))).can_start, "{state}");
+    }
+    // Under way: locked, with progress, and the label of what is under way.
+    let starting = view::start_button(Some(&status("Starting")), None).unwrap();
+    assert!(!starting.enabled() && starting.in_progress());
+    let restarting = view::start_button(Some(&status("Stopping")), Some(StartAction::Restart));
+    assert_eq!(restarting, Some(StartButton::Restarting));
+    assert_eq!(view::start_button_text(restarting), "Restart");
+    assert_eq!(
+        view::start_button(None, Some(StartAction::Restart)),
+        Some(StartButton::Restarting)
+    );
+    // An unknown state leaves the button locked.
+    assert_eq!(view::start_button(None, None), None);
+
+    // Restart runs `dsa android restart` and waits for Android to run again.
+    let fake = Fake::new(json!({ "state": "Active", "restarting": null }));
+    let elevated = Fake::new(json!({}));
+    let restarted = client(&fake, &elevated).restart().unwrap();
+    assert_eq!(restarted.state, State::Active);
+    assert_eq!(
+        fake.calls(),
+        [line(&[
+            "android",
+            "restart",
+            "--wait",
+            "--timeout",
+            "360",
+            "--json"
+        ])]
+    );
+}
+
+#[test]
 fn fr17_the_general_page_offers_what_the_state_allows() {
     let status = |state: &str| Status::read(&json!({ "state": state }));
     let stopped = view::controls(Some(&status("Stopped")));
@@ -445,6 +495,69 @@ fn fr17_the_memory_page_shows_the_vm_and_the_guest_breakdown() {
     assert_eq!(limits[0].1, 0);
     assert!(limits.iter().any(|(_, mb)| *mb == 5000));
     assert!(limits.windows(2).skip(1).all(|w| w[0].1 < w[1].1));
+}
+
+#[test]
+fn fr17_every_memory_row_has_a_description_in_every_language() {
+    let memory = Memory::read(&json!({
+        "host": [
+            { "role": "vm", "pid": 10, "working_set_kb": 1048576, "private_kb": 1000 },
+            { "role": "window manager", "pid": 11, "working_set_kb": 2048, "private_kb": 1024 }
+        ],
+        "host_total_kb": 1050624,
+        "vm_beyond_guest_kb": 262144,
+        "guest": {
+            "mem_total_kb": 2097152, "mem_available_kb": 1310720, "mem_free_kb": 1000000,
+            "total_pss_kb": 409600, "cached_kb": 1024, "buffers_kb": 0, "shmem_kb": 2048,
+            "zram_original_kb": 4096, "zram_used_kb": 1024, "age_seconds": 3,
+            "google_play": { "processes": 2, "pss_kb": 1024, "swap_pss_kb": 0, "resident_kb": 1024,
+                             "compressed_kb": 0, "swapped_out_kb": 0, "total_kb": 1024 },
+            "top_processes": [ { "pid": 400, "name": "system_server", "pss_kb": 102400 } ],
+            "kernel": { "slab_unreclaimable_kb": 51200, "kernel_stack_kb": 10240,
+                        "page_tables_kb": 20480, "vmalloc_used_kb": 30720, "percpu_kb": 1024,
+                        "cma_total_kb": 0, "mem_online_kb": 2228224, "unaccounted_kb": 40960,
+                        "reserved_at_boot_kb": 131072 }
+        }
+    }));
+    let guest = memory.guest.as_ref().unwrap();
+    let kernel = view::kernel_rows(guest);
+    assert_eq!(kernel.len(), 7);
+    let rows: Vec<_> = view::host_rows(&memory)
+        .into_iter()
+        .chain(view::guest_rows(guest))
+        .chain(kernel)
+        .chain(view::process_rows(guest))
+        .collect();
+    // Rows whose description is filled in with sizes or numbers; the others are fixed texts.
+    let formatted = [
+        "Apps and system",
+        "Google Play services",
+        "Compressed memory",
+        "Reserved at boot",
+        "system_server",
+        "Virtual machine (crosvm)",
+        "Window manager",
+    ];
+    let catalogues = catalogues();
+    for row in &rows {
+        assert!(
+            !row.detail.trim().is_empty(),
+            "\"{}\" has no description",
+            row.label
+        );
+        if formatted.contains(&row.label.as_str()) {
+            continue;
+        }
+        for (language, catalogue) in &catalogues {
+            assert!(
+                catalogue
+                    .get(&row.detail)
+                    .is_some_and(|t| !t.trim().is_empty()),
+                "po/{language}.po has no description for \"{}\"",
+                row.label
+            );
+        }
+    }
 }
 
 #[test]

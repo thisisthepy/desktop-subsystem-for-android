@@ -39,6 +39,23 @@ public class BackgroundViewModelTests
     }
 
     [Fact]
+    public async Task Nfr1_the_background_page_lets_go_of_its_list_when_left()
+    {
+        var cli = new FakeCli()
+            .Answer("settings --json", Asking)
+            .Answer("background list --json", "{\"apps\":[" + Music + "],\"media\":[]}");
+        var vm = new BackgroundViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        Assert.Single(vm.Apps);
+        vm.Release();
+        Assert.Empty(vm.Apps);
+        Assert.False(vm.Loaded);
+        // Shown again, it reads the list afresh.
+        await vm.RefreshAsync();
+        Assert.Single(vm.Apps);
+    }
+
+    [Fact]
     public async Task Fr24_stop_ends_the_app_and_the_list_follows()
     {
         var cli = new FakeCli()

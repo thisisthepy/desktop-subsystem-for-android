@@ -17,7 +17,9 @@
 //! ([`crate::ui_language`]).
 
 use dsa_host_core::compositor::window_hosts::MenuAction;
+use dsa_host_core::compositor::window_menu::{android_items, AndroidItem};
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::window_menu::dsa_menu_text;
 
 /// One entry of the Android part of the system menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -36,17 +38,41 @@ pub enum SystemMenuItem {
 /// does not support several windows, since its second task would only bring the first to the
 /// front.
 pub fn items(new_window: bool) -> Vec<SystemMenuItem> {
-    let mut items = vec![SystemMenuItem::Separator, SystemMenuItem::FullScreen];
-    if new_window {
-        items.push(SystemMenuItem::NewWindow);
-    }
-    items.extend([
-        SystemMenuItem::Screenshot,
-        SystemMenuItem::AspectRatio,
-        SystemMenuItem::OpenByDefault,
-        SystemMenuItem::AppInfo,
-    ]);
+    let mut items = vec![SystemMenuItem::Separator];
+    items.extend(
+        android_items(true, new_window)
+            .into_iter()
+            .map(SystemMenuItem::from),
+    );
     items
+}
+
+impl From<AndroidItem> for SystemMenuItem {
+    fn from(item: AndroidItem) -> SystemMenuItem {
+        match item {
+            AndroidItem::FullScreen => SystemMenuItem::FullScreen,
+            AndroidItem::NewWindow => SystemMenuItem::NewWindow,
+            AndroidItem::Screenshot => SystemMenuItem::Screenshot,
+            AndroidItem::AspectRatio => SystemMenuItem::AspectRatio,
+            AndroidItem::OpenByDefault => SystemMenuItem::OpenByDefault,
+            AndroidItem::AppInfo => SystemMenuItem::AppInfo,
+        }
+    }
+}
+
+impl SystemMenuItem {
+    /// The Android item this entry is; `None` for the separator.
+    pub fn android(self) -> Option<AndroidItem> {
+        match self {
+            SystemMenuItem::Separator => None,
+            SystemMenuItem::FullScreen => Some(AndroidItem::FullScreen),
+            SystemMenuItem::NewWindow => Some(AndroidItem::NewWindow),
+            SystemMenuItem::Screenshot => Some(AndroidItem::Screenshot),
+            SystemMenuItem::AspectRatio => Some(AndroidItem::AspectRatio),
+            SystemMenuItem::OpenByDefault => Some(AndroidItem::OpenByDefault),
+            SystemMenuItem::AppInfo => Some(AndroidItem::AppInfo),
+        }
+    }
 }
 
 /// Every entry this menu may have, for removing them all before the menu is made again.
@@ -87,13 +113,7 @@ pub fn chosen(wparam: usize) -> Option<SystemMenuItem> {
 /// What the window manager does for an entry; `None` for the separator, Screenshot and Full
 /// screen, which the window host takes.
 pub fn action(item: SystemMenuItem) -> Option<MenuAction> {
-    match item {
-        SystemMenuItem::NewWindow => Some(MenuAction::NewWindow),
-        SystemMenuItem::AspectRatio => Some(MenuAction::AspectRatio),
-        SystemMenuItem::OpenByDefault => Some(MenuAction::OpenByDefault),
-        SystemMenuItem::AppInfo => Some(MenuAction::AppInfo),
-        SystemMenuItem::Separator | SystemMenuItem::Screenshot | SystemMenuItem::FullScreen => None,
-    }
+    item.android().and_then(AndroidItem::action)
 }
 
 /// The menu's words in one language. Each label marks its access key with `&`; the keys
@@ -110,147 +130,181 @@ pub struct MenuText {
     pub screenshot_file: &'static str,
 }
 
-/// The menu's words in `language`. The access keys differ from those of Windows' own items in
-/// the same language ([`super::window_menu::window_text`]).
-pub fn menu_text(language: UiLanguage) -> MenuText {
-    let [full_screen, new_window, screenshot, aspect_ratio, open_by_default, app_info, screenshot_file] =
-        match language {
-            UiLanguage::English => [
-                "&Full screen",
-                "N&ew window",
-                "Screens&hot",
-                "&Aspect ratio",
-                "&Open by default",
-                "App &info",
-                "Screenshot",
-            ],
-            UiLanguage::Korean => [
-                "전체 화면(&F)",
-                "새 창(&E)",
-                "스크린샷(&H)",
-                "화면 비율(&A)",
-                "링크 열기 설정(&O)",
-                "앱 정보(&I)",
-                "스크린샷",
-            ],
-            UiLanguage::Japanese => [
-                "全画面表示(&F)",
-                "新しいウィンドウ(&E)",
-                "スクリーンショット(&H)",
-                "縦横比(&A)",
-                "デフォルトで開く(&O)",
-                "アプリ情報(&I)",
-                "スクリーンショット",
-            ],
-            UiLanguage::ChineseSimplified => [
-                "全屏(&F)",
-                "新建窗口(&E)",
-                "屏幕截图(&H)",
-                "宽高比(&A)",
-                "默认打开(&O)",
-                "应用信息(&I)",
-                "屏幕截图",
-            ],
-            UiLanguage::ChineseTraditional => [
-                "全螢幕(&F)",
-                "新增視窗(&E)",
-                "螢幕擷取畫面(&H)",
-                "長寬比(&A)",
-                "預設開啟(&O)",
-                "應用程式資訊(&I)",
-                "螢幕擷取畫面",
-            ],
-            UiLanguage::Spanish => [
-                "&Pantalla completa",
-                "Nu&eva ventana",
-                "Capt&ura de pantalla",
-                "Rel&ación de aspecto",
-                "Abrir &de forma predeterminada",
-                "&Información de la aplicación",
-                "Captura de pantalla",
-            ],
-            UiLanguage::French => [
-                "&Plein écran",
-                "&Nouvelle fenêtre",
-                "&Capture d'écran",
-                "R&apport hauteur/largeur",
-                "&Ouvrir par défaut",
-                "&Infos sur l'appli",
-                "Capture d'écran",
-            ],
-            UiLanguage::German => [
-                "Voll&bild",
-                "Neues &Fenster",
-                "Scr&eenshot",
-                "Se&itenverhältnis",
-                "S&tandardmäßig öffnen",
-                "&App-Info",
-                "Screenshot",
-            ],
-            UiLanguage::PortugueseBrazil => [
-                "Tela &inteira",
-                "Nova &janela",
-                "Ca&ptura de tela",
-                "Pr&oporção",
-                "&Abrir por padrão",
-                "Informações &do app",
-                "Captura de tela",
-            ],
-            UiLanguage::Russian => [
-                "Во весь &экран",
-                "&Новое окно",
-                "Сни&мок экрана",
-                "Соо&тношение сторон",
-                "&Открывать по умолчанию",
-                "О при&ложении",
-                "Снимок экрана",
-            ],
-            UiLanguage::Italian => [
-                "Sc&hermo intero",
-                "&Nuova finestra",
-                "Screensh&ot",
-                "&Proporzioni",
-                "&Apri per impostazione predefinita",
-                "In&formazioni app",
-                "Screenshot",
-            ],
-            UiLanguage::Vietnamese => [
-                "Toàn màn &hình",
-                "&Cửa sổ mới",
-                "Ảnh chụp &màn hình",
-                "Tỷ &lệ khung hình",
-                "Mở th&eo mặc định",
-                "Thông t&in ứng dụng",
-                "Ảnh chụp màn hình",
-            ],
-            UiLanguage::Indonesian => [
-                "&Layar penuh",
-                "Jendela &baru",
-                "Tan&gkapan layar",
-                "&Rasio aspek",
-                "Buka se&cara default",
-                "&Info aplikasi",
-                "Tangkapan layar",
-            ],
-            UiLanguage::Turkish => [
-                "Tam ekra&n",
-                "Yeni &pencere",
-                "Ekr&an görüntüsü",
-                "En b&oy oranı",
-                "&Varsayılan olarak aç",
-                "&Uygulama bilgisi",
-                "Ekran görüntüsü",
-            ],
-        };
-    MenuText {
-        full_screen,
-        new_window,
-        screenshot,
-        aspect_ratio,
-        open_by_default,
-        app_info,
-        screenshot_file,
+/// Where an item's access key stands in its label, which is how Windows writes it: inside the
+/// word for Latin and Cyrillic scripts, after the label in parentheses for the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Key {
+    /// `&` goes before the character at this index.
+    Before(usize),
+    /// ` (&K)` style: the label, then `(&K)`.
+    After(char),
+}
+
+impl Key {
+    fn mark(self, word: &str) -> String {
+        match self {
+            Key::Before(at) => {
+                let mut marked = String::with_capacity(word.len() + 1);
+                for (n, c) in word.chars().enumerate() {
+                    if n == at {
+                        marked.push('&');
+                    }
+                    marked.push(c);
+                }
+                marked
+            }
+            Key::After(key) => format!("{word}(&{key})"),
+        }
     }
+}
+
+/// The access keys of the items in each language, in the order of [`UiLanguage::ALL`]: Full
+/// screen, New window, Screenshot, Aspect ratio, Open by default and App info. They differ
+/// from those of Windows' own items in the same language
+/// ([`super::window_menu::window_text`]), so each key picks one item.
+const KEYS: [[Key; 6]; 14] = [
+    [
+        Key::Before(0),
+        Key::Before(1),
+        Key::Before(7),
+        Key::Before(0),
+        Key::Before(0),
+        Key::Before(4),
+    ], // English
+    [
+        Key::After('F'),
+        Key::After('E'),
+        Key::After('H'),
+        Key::After('A'),
+        Key::After('O'),
+        Key::After('I'),
+    ], // Korean
+    [
+        Key::After('F'),
+        Key::After('E'),
+        Key::After('H'),
+        Key::After('A'),
+        Key::After('O'),
+        Key::After('I'),
+    ], // Japanese
+    [
+        Key::After('F'),
+        Key::After('E'),
+        Key::After('H'),
+        Key::After('A'),
+        Key::After('O'),
+        Key::After('I'),
+    ], // ChineseSimplified
+    [
+        Key::After('F'),
+        Key::After('E'),
+        Key::After('H'),
+        Key::After('A'),
+        Key::After('O'),
+        Key::After('I'),
+    ], // ChineseTraditional
+    [
+        Key::Before(0),
+        Key::Before(2),
+        Key::Before(4),
+        Key::Before(3),
+        Key::Before(6),
+        Key::Before(0),
+    ], // Spanish
+    [
+        Key::Before(0),
+        Key::Before(0),
+        Key::Before(0),
+        Key::Before(1),
+        Key::Before(0),
+        Key::Before(0),
+    ], // French
+    [
+        Key::Before(4),
+        Key::Before(6),
+        Key::Before(3),
+        Key::Before(2),
+        Key::Before(1),
+        Key::Before(0),
+    ], // German
+    [
+        Key::Before(5),
+        Key::Before(5),
+        Key::Before(2),
+        Key::Before(2),
+        Key::Before(0),
+        Key::Before(12),
+    ], // PortugueseBrazil
+    [
+        Key::Before(8),
+        Key::Before(0),
+        Key::Before(3),
+        Key::Before(3),
+        Key::Before(0),
+        Key::Before(5),
+    ], // Russian
+    [
+        Key::Before(2),
+        Key::Before(0),
+        Key::Before(8),
+        Key::Before(0),
+        Key::Before(0),
+        Key::Before(2),
+    ], // Italian
+    [
+        Key::Before(9),
+        Key::Before(0),
+        Key::Before(9),
+        Key::Before(3),
+        Key::Before(5),
+        Key::Before(7),
+    ], // Vietnamese
+    [
+        Key::Before(0),
+        Key::Before(8),
+        Key::Before(3),
+        Key::Before(0),
+        Key::Before(7),
+        Key::Before(0),
+    ], // Indonesian
+    [
+        Key::Before(8),
+        Key::Before(5),
+        Key::Before(3),
+        Key::Before(4),
+        Key::Before(0),
+        Key::Before(0),
+    ], // Turkish
+];
+
+/// The menu's words in `language`: the words every host shares
+/// ([`dsa_host_core::ui_text::window_menu::dsa_menu_text`]), each with its access key marked.
+pub fn menu_text(language: UiLanguage) -> MenuText {
+    use std::sync::OnceLock;
+    static TEXTS: OnceLock<Vec<MenuText>> = OnceLock::new();
+    let texts = TEXTS.get_or_init(|| {
+        UiLanguage::ALL
+            .into_iter()
+            .map(|language| {
+                let words = dsa_menu_text(language);
+                let keys = KEYS[language.index()];
+                // A few labels for the whole run: leaked once so the words stay `'static`.
+                let marked = |word: &str, key: Key| -> &'static str {
+                    Box::leak(key.mark(word).into_boxed_str())
+                };
+                MenuText {
+                    full_screen: marked(words.full_screen, keys[0]),
+                    new_window: marked(words.new_window, keys[1]),
+                    screenshot: marked(words.screenshot, keys[2]),
+                    aspect_ratio: marked(words.aspect_ratio, keys[3]),
+                    open_by_default: marked(words.open_by_default, keys[4]),
+                    app_info: marked(words.app_info, keys[5]),
+                    screenshot_file: words.screenshot_file,
+                }
+            })
+            .collect()
+    });
+    texts[language.index()]
 }
 
 /// The label of an entry; `None` for the separator.

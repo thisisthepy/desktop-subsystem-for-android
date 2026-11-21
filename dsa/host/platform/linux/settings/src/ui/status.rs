@@ -10,6 +10,7 @@ use super::common::*;
 use crate::i18n::{tr, trf};
 use crate::model::{AndroidVersion, Settings, Status};
 use crate::view;
+use dsa_host_core::start_button::{StartAction, StartButton};
 
 /// Start and stop, the state and its last error, freezing now, and the log folders.
 pub fn general(ctx: &Shared) -> gtk::Widget {
@@ -23,6 +24,11 @@ pub fn general(ctx: &Shared) -> gtk::Widget {
     let start = button(&tr("Start"));
     start.add_css_class("suggested-action");
     let stop = button(&tr("Stop"));
+    // Turns while a start, a restart or a stop runs, and the first button is locked.
+    let progress = gtk::Spinner::new();
+    progress.set_visible(false);
+    progress.update_property(&[gtk::accessible::Property::Label(&tr("State"))]);
+    state_row.add_suffix(&progress);
     state_row.add_suffix(&start);
     state_row.add_suffix(&stop);
     state.add(&state_row);
@@ -64,14 +70,32 @@ pub fn general(ctx: &Shared) -> gtk::Widget {
     // Whether the page has shown the state once: what it shows when it opens is read with the
     // page, and only what appears or changes later is told to a screen reader.
     let filled = Rc::new(std::cell::Cell::new(false));
+    // What the first button is doing, if anything: core keeps it locked with that label
+    // while the state passes through stopping and starting.
+    let action: Rc<std::cell::Cell<Option<StartAction>>> = Rc::default();
+    // The button core chose for the state last shown, so a press knows whether to ask first.
+    let shown_button: Rc<std::cell::Cell<Option<StartButton>>> = Rc::default();
+    let show_button = {
+        let (start, progress, shown_button) =
+            (start.clone(), progress.clone(), shown_button.clone());
+        Rc::new(move |button: Option<StartButton>| {
+            shown_button.set(button);
+            start.set_label(&view::start_button_text(button));
+            start.set_sensitive(button.is_some_and(|b| b.enabled()));
+            let turning = button.is_some_and(|b| b.in_progress());
+            progress.set_visible(turning);
+            progress.set_spinning(turning);
+        })
+    };
     let show: Rc<dyn Fn(Result<Status, crate::api::Failure>)> = {
         let page = page.clone();
-        let (start, stop, freeze) = (start.clone(), stop.clone(), freeze.clone());
+        let (stop, freeze) = (stop.clone(), freeze.clone());
+        let (action, show_button) = (action.clone(), show_button.clone());
         Rc::new(move |result: Result<Status, crate::api::Failure>| {
             let status = result.as_ref().ok();
             page.show_failure(&tr("Something went wrong"), result.as_ref().err());
             let controls = view::controls(status);
-            start.set_sensitive(controls.can_start);
+            show_button(view::start_button(status, action.get()));
             stop.set_sensitive(controls.can_stop);
             freeze.set_sensitive(controls.can_freeze);
             state_label.set_label(&view::state_text(
@@ -88,7 +112,11 @@ pub fn general(ctx: &Shared) -> gtk::Widget {
                 (
                     &reason_row,
                     &reason_label,
-                    status.and_then(|s| s.last_reason.clone()),
+                    status.and_then(|s| {
+                        s.last_reason
+                            .as_deref()
+                            .map(|reason| view::last_reason_text(reason, view::session_language()))
+                    }),
                 ),
                 (
                     &notice_row,
@@ -133,10 +161,51 @@ pub fn general(ctx: &Shared) -> gtk::Widget {
     };
     {
         let (ctx, show, busy) = (ctx.clone(), show.clone(), busy.clone());
+        let (action, shown_button, show_button) =
+            (action.clone(), shown_button.clone(), show_button.clone());
         start.connect_clicked(move |_| {
-            busy();
-            let show = show.clone();
-            request(&ctx, |c| c.start(), move |r| show(r));
+            let restart = match shown_button.get() {
+                Some(StartButton::Start) => false,
+                Some(StartButton::Restart) => true,
+                _ => return,
+            };
+            let run = {
+                let (ctx, show, busy) = (ctx.clone(), show.clone(), busy.clone());
+                let (action, show_button) = (action.clone(), show_button.clone());
+                move || {
+                    let what = if restart {
+                        StartAction::Restart
+                    } else {
+                        StartAction::Start
+                    };
+                    action.set(Some(what));
+                    busy();
+                    show_button(view::start_button(None, Some(what)));
+                    let (show, action) = (show.clone(), action.clone());
+                    let done = move |r: Result<Status, crate::api::Failure>| {
+                        action.set(None);
+                        show(r)
+                    };
+                    if restart {
+                        request(&ctx, |c| c.restart(), done);
+                    } else {
+                        request(&ctx, |c| c.start(), done);
+                    }
+                }
+            };
+            if restart {
+                // A restart closes every app window, so the user agrees first.
+                confirm(
+                    &ctx,
+                    &tr("Restart Android now?"),
+                    &tr("Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."),
+                    &tr("Restart"),
+                    false,
+                    run,
+                );
+            } else {
+                run();
+            }
         });
     }
     {

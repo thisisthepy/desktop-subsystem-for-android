@@ -22,6 +22,11 @@
 
 ## 무엇인가
 
+<p align="center">
+  <img src="../../.github/assets/dsa-concept.png" alt="DSA 컨셉 이미지: Windows 데스크톱에서 각자의 창으로 열린 Android 앱" width="860"><br>
+  <sub>DSA 컨셉 이미지</sub>
+</p>
+
 DSA는 Android를 전용 경량 VM에서 실행하고, Android 태스크마다 네이티브 데스크톱 창을
 하나씩 보여 줍니다. 앱마다 작업 표시줄 단추, 시작 메뉴 항목, 알림, 설치된 앱 목록의 항목이
 따로 있습니다. Microsoft가 2025년 3월 5일에 지원을 끝낸 Windows Subsystem for Android(WSA)와
@@ -32,6 +37,33 @@ DSA는 Android를 전용 경량 VM에서 실행하고, Android 태스크마다 �
 ([업데이트와 릴리스 채널](#업데이트와-릴리스-채널) 참고). 기능은 CI에서 테스트하고, 실제
 하드웨어에서 손으로 하는 확인은 릴리스마다 이어집니다. 발견한 것이 있으면 알려 주세요.
 Linux와 macOS는 진행 중이며 아직 배포하지 않았습니다([지원 플랫폼](#지원-플랫폼) 참고).
+
+**DSA 1.0이 나왔습니다.** 첫 정식 릴리스로, Android 앱이 다시 Windows 데스크톱에서
+열립니다. [출시 영상 보기](https://www.youtube.com/watch?v=4VgRY6QKiwM).
+
+## 지원 플랫폼
+
+| 호스트 | 상태 |
+|---|---|
+| Windows 11, x64 | `DSA-v<version>-win-x64-setup.exe`로 배포합니다 |
+| Windows 11, ARM64 | `DSA-v<version>-win-arm64-setup.exe`로 배포합니다. Android도 ARM64이므로 ARM 앱이 번역 없이 실행됩니다 |
+| Linux (x64, ARM64) | 진행 중이며 아직 배포하지 않았습니다. KVM 호스트, Wayland 합성기, `.deb`와 `.rpm` 패키지를 CI에서 빌드하고 실행합니다 |
+| macOS (Apple silicon) | 진행 중이며 아직 배포하지 않았습니다. Apple Virtualization 프레임워크 기반 호스트와 그 앱 번들을 CI에서 빌드합니다 |
+
+### Android 버전
+
+DSA는 가장 새로운 Android 메이저 버전 두 개를 지원합니다. 지금은 Android 16과 Android
+17입니다. 한 버전은 두 단계 새로운 메이저가 나오면 지원이 끝나므로, Android 16은 Android 18이
+출시될 때까지 지원합니다. 이미지 업데이터는 사용자를 지원되는 버전으로 옮기며, 더 낮은
+메이저로는 스스로 옮기지 않습니다. 지원되는 두 버전 가운데 하나를 DSA 설정이나
+`dsa android use`로 고를 수 있습니다. 더 오래된 버전으로 옮기면 Android 데이터가 지워집니다.
+Android가 더 새 버전이 쓴 데이터를 읽지 못하기 때문입니다.
+
+<p align="center">
+  <img src="../../.github/assets/android-support.svg" alt="DSA가 지원하는 Android 버전의 타임라인: Android 16과 17은 2026년 10월 DSA 0.1.0부터, Android 18과 19는 2027년과 2028년 예정" width="860">
+</p>
+
+오늘 이후의 날짜는 출시가 아니라 예정일입니다.
 
 ## 기능
 
@@ -80,7 +112,7 @@ Linux와 macOS는 진행 중이며 아직 배포하지 않았습니다([지원 �
 - 백그라운드에서 도는 앱은 알림 영역 아이콘으로, 미디어를 재생하는 앱은 미디어 키와 Windows
   미디어 컨트롤로.
 - 바탕 화면에 놓는 Android 위젯. 위젯마다 자기 창이 있습니다.
-- 양방향 텍스트 클립보드, Windows 브라우저로 여는 웹 링크, Android 앱으로 열고 공유하는
+- 양방향 텍스트와 이미지 클립보드, Windows 브라우저로 여는 웹 링크, Android 앱으로 열고 공유하는
   Windows 파일, Android와 공유하는 Windows 폴더.
 - 파일 탐색기 탐색 창의 **Android** 아래에 있는 Android 파일.
 - 두 번 클릭, 상황에 맞는 메뉴, 창에 파일 끌어 놓기, `dsa install`로 하는 APK 설치. Android가
@@ -137,7 +169,7 @@ DSA에는 Google 소프트웨어가 들어 있지 않습니다. 아래 구성 �
   수 있습니다. 보안 수준 L3에서는 스트리밍 서비스가 표준 화질까지만 보내므로, 고화질은 Windows
   브라우저나 앱으로 보세요.
 - **ARM 번역.** x64 PC에서는 ARM 전용 앱이 번역기를 거쳐 실행됩니다. 오픈 소스 번역기
-  Digitalis가 x64 이미지에 함께 들어 있어 처음 시작할 때부터 쓰입니다. Google의
+  [Digitalis](https://digitalisx64.github.io/)가 x64 이미지에 함께 들어 있어 처음 시작할 때부터 쓰입니다. Google의
   번역기(`dsa arm-translation fetch google`)나 직접 만든 패키지로 바꿀 수 있습니다. 64비트 ARM
   앱(`arm64-v8a`)만 실행됩니다. ARM64 PC에서는 Android가 ARM 앱을 직접 실행합니다.
 
@@ -150,12 +182,14 @@ DSA는 Android 앱 창 안의 사용자 인터페이스를 Windows 앱이 쓰는
 Windows UI Automation(UIA, UI 자동화)에 노출합니다. 화면 읽기 프로그램, 테스트 도구, 그 밖의
 UIA 클라이언트는 Android 앱의 단추, 목록, 텍스트 필드를 그림 한 장이 아니라 창의 요소로 봅니다.
 
-**동작 방식.** UIA 클라이언트가 DSA 앱 창에 처음 트리를 요청하면, 창은 Android 안의 DSA
-에이전트에게 그 태스크를 지켜보라고 요청합니다. 에이전트는 그 태스크의 Android 접근성 노드만
-읽어 호스트로 보냅니다. 처음에는 트리 전체를, 그다음에는 바뀐 부분을 보냅니다. 호스트는
-트리를 창 프로세스에 두므로, 속성을 읽거나 탐색하는 호출은 모두 VM을 오가지 않고 그 자리에서
-답합니다. UIA 클라이언트가 30초 동안 듣지 않으면 지켜보기가 멈추고, Android도 노드 읽기를
-멈춥니다. UIA 클라이언트를 쓰지 않는 사용자에게는 아무 부담이 없습니다.
+**동작 방식.** 화면 읽기 프로그램이 켜져 있거나 UIA 클라이언트가 포커스 변경을 듣는 동안,
+창은 Android 안의 DSA 에이전트에게 그 태스크를 지켜보라고 요청합니다. 에이전트는 그 태스크의
+Android 접근성 노드만 읽어 호스트로 보냅니다. 처음에는 트리 전체를, 그다음에는 바뀐 부분을
+보내고, 포커스 변경은 바로 보냅니다. 호스트는 트리를 창 프로세스에 두므로, 속성을 읽거나
+탐색하는 호출은 모두 VM을 오가지 않고 그 자리에서 답합니다. 다른 UIA 클라이언트에게는 요청할
+때 트리를 한 번 읽어 주되 많아야 5초에 한 번입니다. 계속 지켜보면 앱이 끊기기 때문입니다.
+클라이언트가 남지 않으면 지켜보기가 멈추고, Android도 노드 읽기를 멈춥니다. UIA 클라이언트를
+쓰지 않는 사용자에게는 아무 부담이 없습니다.
 
 **각 요소가 담는 것.**
 
@@ -181,8 +215,14 @@ UIA 클라이언트는 Android 앱의 단추, 목록, 텍스트 필드를 그림
 | Value (`SetValue`) | `ACTION_SET_TEXT`. 필드의 텍스트 전체를 바꿉니다 |
 | Toggle | `ACTION_CLICK` |
 | SelectionItem (`Select`) | `ACTION_SELECT`. 노드에 선택 동작이 없으면 `ACTION_CLICK` |
-| Scroll | 페이지 단위의 `ACTION_SCROLL_FORWARD`와 `ACTION_SCROLL_BACKWARD`. 스크롤 비율은 없습니다 |
+| Scroll | 페이지 단위의 `ACTION_SCROLL_FORWARD`와 `ACTION_SCROLL_BACKWARD`. 스크롤 비율도 있습니다 |
 | `SetFocus` | `ACTION_FOCUS`. 노드가 입력 포커스를 받을 수 없으면 `ACTION_ACCESSIBILITY_FOCUS` |
+| Text(편집 필드) | 글자, 단어, 줄 단위의 범위. `Select`는 커서를 옮깁니다 |
+| RangeValue(슬라이더) | `ACTION_SET_PROGRESS` |
+| ExpandCollapse | `ACTION_EXPAND`와 `ACTION_COLLAPSE` |
+| Grid, Table, GridItem, TableItem | 목록과 격자, 그리고 그 항목 |
+| ScrollItem | `ACTION_SHOW_ON_SCREEN`. 화면 밖의 항목은 `ACTION_SCROLL_TO_POSITION` |
+| 상황에 맞는 메뉴, LegacyIAccessible | 상황에 맞는 메뉴는 `ACTION_LONG_CLICK` |
 
 이 동작은 노드에 바로 전달됩니다. 마우스를 움직이거나 터치를 주입하지 않습니다.
 
@@ -201,11 +241,9 @@ UIA 클라이언트는 Android 앱의 단추, 목록, 텍스트 필드를 그림
 AutomationId, 이름, 컨트롤 유형으로 찾습니다. 요소가 아니라 한 지점을 눌러야 하는 스크립트는
 `dsa tap <package> <x> <y>`로 앱의 태스크 안을 누릅니다.
 
-**아직 없는 것.** Text 패턴, RangeValue나 ExpandCollapse 패턴, UIA를 통한 길게 누르기, 제목
-수준, 알림이나 라이브 영역 이벤트가 없습니다. Android의 접근성 포커스는 내보내지 않고 입력
-포커스만 내보냅니다. 개선은 이슈
-[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744)(열림)에서
-추적합니다.
+제목에는 제목 수준이 있고, 대화 상자와 팝업은 창이 열림 이벤트를 내는 창입니다. 라이브 영역과
+앱의 안내, 토스트는 알림으로 냅니다. 클라이언트가 보는 포커스는 Android의 입력 포커스와 접근성
+포커스 가운데 마지막으로 움직인 쪽입니다.
 
 ## 접근성
 
@@ -214,18 +252,16 @@ AutomationId, 이름, 컨트롤 유형으로 찾습니다. 요소가 아니라 �
 필드를 마우스 없이 쓸 수 있습니다. JAWS도 같은 트리를 씁니다. 프로젝트에서 아직 확인하지
 않았으므로 알려 주시면 반갑겠습니다.
 
-**개선 중인 것.** 아래 항목은 화면 읽기 프로그램 사용자의 보고인 이슈
-[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744)에서 나왔습니다.
-모두 열려 있으며 거기서 추적합니다.
+**화면 읽기 프로그램 사용자의 보고 뒤에 바뀐 것.** 이슈
+[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744)에서 빈 곳 세
+가지가 나왔습니다. 세 가지 모두 코드가 들어갔고, 화면 읽기 프로그램 사용자가 확인할 때까지
+이슈는 열려 있습니다.
 
-- **더 빠른 포커스.** 지금은 포커스 변경이 Android에서 기다렸다가 Windows에 닿아, 키를 누르고
-  약 250~450ms 뒤에 도착합니다. 화살표 키를 누르고 있으면 1초에 약 네 단계씩 움직입니다.
-  포커스 변경을 바로 보내고, 이벤트가 나온 태스크만 읽고, 짧은 시간 간격은 UIA 클라이언트가
-  듣는 동안에만 쓰는 것이 계획입니다.
-- **접근성 포커스.** 지금은 입력 포커스만 내보내므로, Android의 접근성 포커스가 움직여도
-  포커스 이벤트가 나지 않습니다.
-- **Text 패턴.** 편집 필드에는 아직 Text 패턴이 없습니다. NVDA는 이 패턴으로 글자, 단어, 줄
-  단위로 텍스트를 읽고 살펴봅니다. 값은 읽고 정할 수 있습니다.
+- **더 빠른 포커스.** 화면 읽기 프로그램이 듣는 동안 포커스 변경은 Android에서 250~450ms를
+  기다리지 않고 바로 Windows로 가며, Android는 바뀐 노드만 읽습니다.
+- **접근성 포커스.** Android의 접근성 포커스가 움직이면 포커스 이벤트가 납니다.
+- **Text 패턴.** 편집 필드에 Text 패턴이 있습니다. NVDA는 이 패턴으로 글자, 단어, 줄 단위로
+  텍스트를 읽고 살펴봅니다.
 
 **DSA 자체의 창.**
 
@@ -246,30 +282,6 @@ Linux에서는 호스트가 같은 트리를 AT-SPI로 내보내며, Orca를 위
 [이슈](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/new)를 올려 주세요.
 `dsa logs collect -o diag.zip`으로 만든 진단 묶음이 도움이 됩니다. 질문은
 [DSA Discord](https://discord.gg/MtpQnR4eQQ)에서도 받습니다.
-
-## 지원 플랫폼
-
-| 호스트 | 상태 |
-|---|---|
-| Windows 11, x64 | `DSA-v<version>-win-x64-setup.exe`로 배포합니다 |
-| Windows 11, ARM64 | `DSA-v<version>-win-arm64-setup.exe`로 배포합니다. Android도 ARM64이므로 ARM 앱이 번역 없이 실행됩니다 |
-| Linux (x64, ARM64) | 진행 중이며 아직 배포하지 않았습니다. KVM 호스트, Wayland 합성기, `.deb`와 `.rpm` 패키지를 CI에서 빌드하고 실행합니다 |
-| macOS (Apple silicon) | 진행 중이며 아직 배포하지 않았습니다. Apple Virtualization 프레임워크 기반 호스트와 그 앱 번들을 CI에서 빌드합니다 |
-
-### Android 버전
-
-DSA는 가장 새로운 Android 메이저 버전 두 개를 지원합니다. 지금은 Android 16과 Android
-17입니다. 한 버전은 두 단계 새로운 메이저가 나오면 지원이 끝나므로, Android 16은 Android 18이
-출시될 때까지 지원합니다. 이미지 업데이터는 사용자를 지원되는 버전으로 옮기며, 더 낮은
-메이저로는 스스로 옮기지 않습니다. 지원되는 두 버전 가운데 하나를 DSA 설정이나
-`dsa android use`로 고를 수 있습니다. 더 오래된 버전으로 옮기면 Android 데이터가 지워집니다.
-Android가 더 새 버전이 쓴 데이터를 읽지 못하기 때문입니다.
-
-<p align="center">
-  <img src="../../.github/assets/android-support.svg" alt="DSA가 지원하는 Android 버전의 타임라인: Android 16과 17은 2026년 10월 DSA 0.1.0부터, Android 18과 19는 2027년과 2028년 예정" width="860">
-</p>
-
-오늘 이후의 날짜는 출시가 아니라 예정일입니다.
 
 ## 설치
 
@@ -334,14 +346,13 @@ dsa logs collect -o diag.zip        # 문제 보고에 필요한 모든 것을 z
 지금은 다음과 같습니다.
 
 - Windows만 배포합니다. Linux와 macOS는 진행 중입니다.
-- DSA 설정은 영어와 한국어로만 표시됩니다.
 - 64비트 앱만 실행됩니다: `arm64-v8a`, 그리고 x64에서는 `x86_64`. 32비트 앱은 실행되지
   않습니다.
 - Widevine은 L3이므로 보호된 스트림은 표준 화질까지만 재생됩니다.
 - DSA의 Google Play는 Google 인증을 받지 않았습니다. Google이 기기 등록을 요구할 수 있습니다.
-- 클립보드는 텍스트만 공유합니다.
+- 클립보드는 텍스트와 이미지를 공유합니다. PNG로 12 MiB보다 큰 이미지는 공유하지 않으며,
+  복사한 파일 같은 다른 내용은 복사한 쪽에 남습니다.
 - **시스템(강제)** 크기 조정은 아직 쓸 수 없고 **시스템**처럼 동작합니다.
-- UI Automation 내보내기에는 [UI Automation](#ui-automation)에 적은 빈 곳이 있습니다.
 - Google Play 없이 하는 주소 변환은 번지 단위 주소가 아니라 지역(나라에서 시까지, 한국에서는
   구까지)을 알려 줍니다.
 

@@ -26,14 +26,43 @@ public struct StatusInfo: Equatable, Sendable {
     public var problem: String?
     /// Where an update of DSA itself stands, when one is under way or has just ended.
     public var programUpdate: ProgramUpdateProgress?
+    /// The status card's first button, as the service decides it from the state.
+    public var startButton: StartButtonKind
 
     public init(state: SessionState, lastReason: String? = nil, updateNotice: String? = nil, problem: String? = nil,
-                programUpdate: ProgramUpdateProgress? = nil) {
+                programUpdate: ProgramUpdateProgress? = nil, startButton: StartButtonKind = .locked) {
         self.state = state
         self.lastReason = lastReason
         self.updateNotice = updateNotice
         self.problem = problem
         self.programUpdate = programUpdate
+        self.startButton = startButton
+    }
+}
+
+/// The status card's first button: `start_button` in `dsa status --json`, which the service
+/// decides from the state, so every settings app shows the same button. The raw values are
+/// the names it writes.
+public enum StartButtonKind: String, Equatable, Sendable {
+    /// The service did not say: the button is locked.
+    case locked = ""
+    /// Android is stopped: Start.
+    case start
+    /// Android runs: Restart, which asks first, as app windows close.
+    case restart
+    /// A start is under way: Start, locked, with progress.
+    case starting
+    /// A restart is under way: Restart, locked, with progress.
+    case restarting
+    /// Android is stopping: Start, locked, with progress.
+    case stopping
+
+    /// The button a name stands for. A missing or unknown name is locked.
+    public static func parse(_ name: String?) -> StartButtonKind {
+        guard let name, !name.isEmpty else {
+            return .locked
+        }
+        return StartButtonKind(rawValue: name) ?? .locked
     }
 }
 

@@ -130,7 +130,7 @@ fn fr32_the_item_shows_before_install_after_install_and_while_a_restart_is_pendi
     assert_eq!(view::gapps_source(&before), "");
     assert_eq!(
         view::gapps_device_id(&before),
-        "It shows here once Google Play is installed and Android has started."
+        "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
     );
 
     let after = Gapps::read(&installed_json(true, false));

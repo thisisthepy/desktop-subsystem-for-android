@@ -102,12 +102,12 @@ mod system {
     };
     use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice3};
     use windows::Win32::Media::MediaFoundation::{
-        CODECAPI_AVDecVideoDropPicWithMissingRef, ICodecAPI, IMF2DBuffer, IMFActivate,
-        IMFDXGIBuffer, IMFDXGIDeviceManager, IMFMediaType, IMFSample, IMFShutdown, IMFTransform,
-        MFCreateDXGIDeviceManager, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
-        MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx, MFVideoArea, MFVideoFormat_AV1,
-        MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoFormat_P010,
-        MFVideoFormat_VP90, MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER,
+        CODECAPI_AVDecVideoDropPicWithMissingRef, CODECAPI_AVLowLatencyMode, ICodecAPI,
+        IMF2DBuffer, IMFActivate, IMFDXGIBuffer, IMFDXGIDeviceManager, IMFMediaType, IMFSample,
+        IMFShutdown, IMFTransform, MFCreateDXGIDeviceManager, MFCreateMediaType,
+        MFCreateMemoryBuffer, MFCreateSample, MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx,
+        MFVideoArea, MFVideoFormat_AV1, MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12,
+        MFVideoFormat_P010, MFVideoFormat_VP90, MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER,
         MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_COMMAND_DRAIN,
         MFT_MESSAGE_COMMAND_FLUSH, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
         MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
@@ -380,13 +380,42 @@ mod system {
         found.ok_or_else(|| format!("this computer has no {} decoder", codec.name()))
     }
 
-    /// Asks the decoder to drop the pictures it would have to conceal (decoded against a
-    /// reference it lost to a flush or a corrupt packet), which would come out green or
-    /// smeared. The host's own key frame gate keeps such packets from the decoder in the
-    /// first place; this covers what the gate cannot see, such as a reference the decoder
-    /// itself failed to decode. A decoder that does not have the setting (not every one
-    /// does) decodes as before.
-    fn drop_pictures_with_missing_references(decoder: &IMFTransform) {
+    /// The decoder settings every stream turns on.
+    ///
+    /// - Dropping the pictures the decoder would have to conceal (decoded against a
+    ///   reference it lost to a flush or a corrupt packet), which would come out green or
+    ///   smeared. The host's own key frame gate keeps such packets from the decoder in the
+    ///   first place; this covers what the gate cannot see, such as a reference the decoder
+    ///   itself failed to decode.
+    /// - Low latency: a picture comes out as soon as it is decoded and its order allows.
+    ///   Without it, Windows' H.264 decoder holds pictures back until its whole picture
+    ///   buffer is full (up to 16). An Android app sends only as many packets as it has input
+    ///   buffers (Firefox about 15) and waits for pictures before it sends more, so the stream
+    ///   stalled with 15 packets in and 0 or 1 pictures out: black video, and an app that
+    ///   hangs waiting for its decoder.
+    const SETTINGS_ON: [&GUID; 2] = [
+        &CODECAPI_AVDecVideoDropPicWithMissingRef,
+        &CODECAPI_AVLowLatencyMode,
+    ];
+
+    #[cfg(test)]
+    mod settings_tests {
+        use super::*;
+
+        #[test]
+        fn pr4_every_stream_asks_for_its_pictures_without_the_decoders_delay() {
+            assert!(SETTINGS_ON
+                .iter()
+                .any(|setting| **setting == CODECAPI_AVLowLatencyMode));
+            assert!(SETTINGS_ON
+                .iter()
+                .any(|setting| **setting == CODECAPI_AVDecVideoDropPicWithMissingRef));
+        }
+    }
+
+    /// Turns `setting` on. A decoder that does not have the setting (not every one does)
+    /// decodes as before.
+    fn turn_on(decoder: &IMFTransform, setting: &GUID) {
         let Ok(api) = decoder.cast::<ICodecAPI>() else {
             return;
         };
@@ -406,7 +435,7 @@ mod system {
         };
         // SAFETY: a plain call with a VARIANT that lives for it; a VT_BOOL holds nothing to
         // free.
-        let _ = unsafe { api.SetValue(&CODECAPI_AVDecVideoDropPicWithMissingRef, &on) };
+        let _ = unsafe { api.SetValue(setting, &on) };
     }
 
     fn video_type(subtype: &GUID, width: u32, height: u32) -> Result<IMFMediaType, String> {
@@ -639,7 +668,9 @@ mod system {
                 )
             }
             .map_err(|e| format!("the {} decoder did not take the GPU: {e}", codec.name()))?;
-            drop_pictures_with_missing_references(&decoder);
+            for setting in SETTINGS_ON {
+                turn_on(&decoder, setting);
+            }
             let input = video_type(&subtype(codec), width, height)?;
             // SAFETY: plain Media Foundation calls.
             unsafe { decoder.SetInputType(0, &input, 0) }.map_err(|e| {

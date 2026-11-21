@@ -26,6 +26,7 @@
 //! The rules are plain functions over [`SecretBus`], tested with a fake; the bus itself and the
 //! helper process build on Linux only.
 
+use dsa_host_core::hex::encode as hex;
 use std::time::Duration;
 
 use dsa_host_core::host_keys::{KeyError, KeyPurpose, Secret};
@@ -323,20 +324,6 @@ pub enum HelperRequest {
     Remove(KeyPurpose),
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn unhex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
-        .collect()
-}
-
 /// `load <purpose>\n` or `store <purpose> <hex>\n`.
 pub fn encode_request(request: &HelperRequest) -> Vec<u8> {
     match request {
@@ -360,7 +347,8 @@ pub fn decode_request(data: &[u8]) -> Result<HelperRequest, String> {
         ("load", None) => HelperRequest::Load(purpose),
         ("remove", None) => HelperRequest::Remove(purpose),
         ("store", Some(value)) => {
-            let mut bytes = unhex(value).ok_or("the key in the request is not hex")?;
+            let mut bytes =
+                dsa_host_core::hex::decode(value).ok_or("the key in the request is not hex")?;
             let secret = Secret::from_slice(&bytes);
             wipe(&mut bytes);
             HelperRequest::Store(
@@ -398,7 +386,7 @@ pub fn decode_answer(data: &[u8]) -> Result<Option<Secret>, KeyError> {
     match kind {
         "none" if rest.is_empty() => Ok(None),
         "secret" => {
-            let mut bytes = unhex(rest).ok_or_else(unreadable)?;
+            let mut bytes = dsa_host_core::hex::decode(rest).ok_or_else(unreadable)?;
             let secret = Secret::from_slice(&bytes);
             wipe(&mut bytes);
             secret.map(Some).ok_or_else(unreadable)

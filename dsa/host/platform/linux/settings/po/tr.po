@@ -804,8 +804,8 @@ msgstr "Bu ayar bu bilgisayarın tüm kullanıcılarına uygulanır, bu yüzden 
 msgid "The newest supported version (now Android {0})"
 msgstr "Desteklenen en yeni sürüm (şu an Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} ve güvenlik güncellemeleri"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Android {0} sürümüne sabit: yalnızca güvenlik ve görüntü güncellemeleri alır, kendiliğinden daha yeni bir Android'e geçmez"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Bekleyen Android güncellemesi yok. DSA her gün denetler; açık uygulama penceresi kalmayınca Android'i güncellemeyle yeniden başlatır."
@@ -1251,8 +1251,8 @@ msgstr "Google Play indiriliyor ve yükleniyor. Bu işlem birkaç dakika sürebi
 msgid "Enter this number on Google's registration page."
 msgstr "Bu numarayı Google'ın kayıt sayfasına girin."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Google Play yüklenip Android başladığında burada görünür."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android kimliği henüz kullanılamıyor. Google Play Hizmetleri, bu cihaz Google'a ilk kez giriş yaptığında (check-in) kimliği oluşturur.\nBunun için Google Play'in yüklü, Android'in onunla başlatılmış ve bir ağ bağlantısının olması gerekir.\nBirkaç dakika sonra hâlâ boşsa Android'i yeniden başlatın.\nKimlik, Google'ın kayıt sayfasının kabul ettiği biçimde, ondalık bir sayıdır."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android bu değişiklikten önce başladı. Google Play'in buna uyması için Android'i durdurup yeniden başlatın."
@@ -1838,3 +1838,39 @@ msgstr "Varsayılanı izle (tüm ekranda)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Varsayılanı izle (pencerenin içinde)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android durur ve yeniden başlar.\n\nUygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın."
+
+msgid "Alternative stores"
+msgstr "Alternatif mağazalar"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Bir mağazayı uygulama listesinden kaldırın."
+
+msgid "Installed, version {0}"
+msgstr "Yüklü, sürüm {0}"
+
+msgid "Downloading and installing…"
+msgstr "İndiriliyor ve yükleniyor…"
+
+msgid "Not installed: {0}"
+msgstr "Yüklenmedi: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Pencere görüntüleri ve grafik arabellekleri gibi birkaç işlemin birlikte kullandığı bellek. Onu kullanan uygulamalar kapanınca serbest kalır."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Şu anda hiçbir şeyin kullanmadığı bellek. Android onu bilgisayara geri verir, bu yüzden bilgisayarın RAM'ini kaplamaz."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Çekirdeğin çalışan her iş parçacığı için tuttuğu çalışma alanı. Uygulamalar kapandıkça küçülür."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "İşlemciye her uygulamanın belleğinin RAM'de nerede olduğunu söyleyen tablolar. Uygulamalar kapandıkça küçülür."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Çekirdeğin ve sürücülerinin ayırdığı büyük arabellekler; grafik bunlardan biri. Artık gerekmediğinde serbest kalır."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Çekirdeğin her işlemci çekirdeği için birer tane tuttuğu veriler. Boyutu Android başlarken belirlenir."

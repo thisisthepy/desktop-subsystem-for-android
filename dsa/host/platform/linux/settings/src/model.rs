@@ -1193,6 +1193,91 @@ pub const GOOGLE_ARM_TERMS_URL: &str = "https://developer.android.com/studio/ter
 /// Where the emulator image Google's ARM translator comes from is downloaded.
 pub const GOOGLE_ARM_SOURCE: &str = "https://dl.google.com/android/repository/sys-img/google_apis/";
 
+/// One alternative store, as `dsa stores` describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AltStore {
+    /// The name `dsa stores install` takes: `onestore`, `aurora` or `fdroid`.
+    pub id: String,
+    /// The store's plain name, a trademark of its owner.
+    pub name: String,
+    pub package: String,
+    pub homepage: String,
+    pub installed: bool,
+    /// The installed version; empty when it is not installed or Android does not say.
+    pub version: String,
+}
+
+impl AltStore {
+    /// The stores, as a service from before `dsa stores` would have listed them, so the item
+    /// still shows its buttons when the service cannot say where they stand.
+    pub fn defaults() -> Vec<AltStore> {
+        [
+            (
+                "onestore",
+                "ONE store",
+                "com.skt.skaf.A000Z00040",
+                "https://m.onestore.co.kr/",
+            ),
+            (
+                "aurora",
+                "Aurora Store",
+                "com.aurora.store",
+                "https://auroraoss.com/",
+            ),
+            (
+                "fdroid",
+                "F-Droid",
+                "org.fdroid.fdroid",
+                "https://f-droid.org/",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, name, package, homepage)| AltStore {
+            id: id.into(),
+            name: name.into(),
+            package: package.into(),
+            homepage: homepage.into(),
+            installed: false,
+            version: String::new(),
+        })
+        .collect()
+    }
+
+    /// Reads what `dsa stores ... --json` printed.
+    pub fn read_all(json: &Value) -> Vec<AltStore> {
+        let Some(stores) = json.get("stores").and_then(Value::as_array) else {
+            return AltStore::defaults();
+        };
+        let text = |s: &Value, name: &str| {
+            s.get(name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        stores
+            .iter()
+            .map(|s| AltStore {
+                id: text(s, "id"),
+                name: text(s, "name"),
+                package: text(s, "package"),
+                homepage: text(s, "homepage"),
+                installed: s.get("installed").and_then(Value::as_bool).unwrap_or(false),
+                version: text(s, "version"),
+            })
+            .filter(|s| !s.id.is_empty())
+            .collect()
+    }
+
+    /// Install is offered while the store is not installed and nothing is being installed.
+    pub fn can_install(&self, busy: bool) -> bool {
+        !busy && !self.installed
+    }
+
+    pub fn can_open(&self, busy: bool) -> bool {
+        !busy && self.installed
+    }
+}
+
 /// Google's terms, which its apps follow, when the service does not name the page.
 pub const GAPPS_TERMS_URL: &str = "https://policies.google.com/terms";
 /// Google's page that registers a device it has not certified, when the service does not
@@ -1932,6 +2017,19 @@ impl Client {
         ])?))
     }
 
+    /// Restarts Android, as `dsa android restart` does, and waits until it runs again: into a
+    /// downloaded image if one waits, and otherwise by stopping and starting it. Its app
+    /// windows close.
+    pub fn restart(&self) -> Result<Status, Failure> {
+        Ok(Status::read(&self.json(&[
+            "android",
+            "restart",
+            "--wait",
+            "--timeout",
+            "360",
+        ])?))
+    }
+
     /// Stops Android and waits until it has stopped.
     pub fn stop(&self) -> Result<Status, Failure> {
         Ok(Status::read(&self.json(&[
@@ -2064,6 +2162,17 @@ impl Client {
     pub fn fetch_google_arm_translator(&self) -> Result<ArmTranslation, Failure> {
         let args = ["arm-translation", "fetch", "google", "--yes"];
         Ok(ArmTranslation::read(&self.json(&args)?))
+    }
+
+    /// Whether each alternative store is installed.
+    pub fn stores(&self) -> Result<Vec<AltStore>, Failure> {
+        Ok(AltStore::read_all(&self.json(&["stores", "status"])?))
+    }
+
+    /// Downloads the store's newest APK from its official site, checks its package and
+    /// signer, and installs it, starting Android first when it is not running.
+    pub fn install_store(&self, id: &str) -> Result<Vec<AltStore>, Failure> {
+        Ok(AltStore::read_all(&self.json(&["stores", "install", id])?))
     }
 
     /// Where Google Play stands.

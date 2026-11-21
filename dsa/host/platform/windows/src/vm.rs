@@ -144,6 +144,9 @@ pub struct AndroidVmConfig {
     /// close to what the guest uses. Only for builds where
     /// [`fine_grained_memory_supported`] says so.
     pub fine_grained_memory: bool,
+    /// Let a sparse disk file be attached (`AlwaysAllowSparseFiles`). Only for builds where
+    /// [`sparse_files_setting_supported`] says so: an older build does not know the setting.
+    pub always_allow_sparse_files: bool,
     /// The synthetic network adapter, connected to the HCN endpoint the host made for this
     /// VM (see `network`). `None` gives the VM no network.
     pub network_adapter: Option<NetworkAdapter>,
@@ -160,6 +163,46 @@ pub struct AndroidVmConfig {
     /// shared memory regions (see `crate::graphics_region`). `None` attaches neither, and every
     /// host-visible byte goes through the graphics stream.
     pub graphics_region: Option<crate::graphics_region::GraphicsRegion>,
+    /// Give the guest Hyper-V's paravirtualized GPU (GPU-PV, the guest kernel's `/dev/dxg`),
+    /// as WSL does: room in the high MMIO window for the host GPU memory the guest maps, the
+    /// boot arguments that tell the image to pick its dxg drivers, and, once the VM runs,
+    /// [`gpu_assignment_request`]. Off, the VM is exactly what it is without the field, and
+    /// the guest renders only through the host renderer. An experiment: see
+    /// [`GPU_PARAVIRTUALIZATION_CMDLINE`] for what the guest does with it.
+    pub gpu_paravirtualization: bool,
+}
+
+/// The high MMIO window a VM with a paravirtualized GPU gets, in MiB: 16 GiB, WSL's default
+/// for its own VM. The guest's dxgkrnl maps the host GPU memory it locks for the CPU into this
+/// window (its "I/O space"), so a window too small fails those locks.
+pub const GPU_HIGH_MMIO_GAP_MB: u64 = 16 * 1024;
+
+/// What a guest with a paravirtualized GPU is told on its kernel command line:
+/// `androidboot.dsa.gpu=dxg` says the GPU is there, and `androidboot.dsa.vulkan=dxg` asks an
+/// image built with the dxg drivers to load its Vulkan driver over `/dev/dxg` instead of the
+/// host renderer's. An image without those drivers sets its Vulkan driver in `build.prop`,
+/// which init reads first, so it ignores both and keeps rendering on the host.
+pub const GPU_PARAVIRTUALIZATION_CMDLINE: &str =
+    "androidboot.dsa.gpu=dxg androidboot.dsa.vulkan=dxg";
+
+/// The resource path HCS assigns a VM's GPUs at.
+pub const GPU_RESOURCE_PATH: &str = "VirtualMachine/ComputeTopology/Gpu";
+
+/// The HCS modify request that gives a running VM every GPU of the host, now and later
+/// (`Mirror`), with the vendor's extensions allowed, as WSL sends it after its VM starts.
+/// The host's WDDM driver must support GPU paravirtualization (WDDM 2.9 or later); HCS
+/// refuses the request otherwise. The optional settings that turn off GDI acceleration and
+/// presentation are left out: hosts before build 22545 refuse a request that has them.
+pub fn gpu_assignment_request() -> String {
+    json!({
+        "ResourcePath": GPU_RESOURCE_PATH,
+        "RequestType": "Update",
+        "Settings": {
+            "AssignmentMode": "Mirror",
+            "AllowVendorExtension": true,
+        },
+    })
+    .to_string()
 }
 
 /// How a direct-mapped boot attaches the read-only disks (see
@@ -245,6 +288,27 @@ pub fn fine_grained_memory_supported(build: u32, update_revision: u32) -> bool {
         || (build >= COBALT && update_revision >= 2360)
         || (build >= IRON && update_revision >= 1970)
         || (build >= VIBRANIUM_22H2 && update_revision >= 3393)
+}
+
+/// Windows 11 21H2 (Cobalt): the first build whose HCS knows schema 2.6.
+const COBALT_BUILD: u32 = 22000;
+
+/// Windows Server 2022 (Iron): the first build whose HCS knows schemas 2.4 and 2.5.
+const IRON_BUILD: u32 = 20348;
+
+/// Whether HCS on this Windows build knows a disk attachment's `AlwaysAllowSparseFiles`. The
+/// setting is new in schema 2.6, which came with Windows 11 21H2 (22000); Windows 10 builds
+/// (19041 to 19045) know schema 2.3 only.
+pub fn sparse_files_setting_supported(build: u32) -> bool {
+    build >= COBALT_BUILD
+}
+
+/// Whether the VM may be given shared memory regions (`Devices.SharedMemory`) on this Windows
+/// build. On Windows 10 (19044, 21H2) the VM worker process ends as the VM starts with them
+/// ("The process terminated unexpectedly"), so builds before Windows Server 2022 (20348) start
+/// without them, and what they would carry goes through the sockets.
+pub fn shared_memory_regions_supported(build: u32) -> bool {
+    build >= IRON_BUILD
 }
 
 /// The suffix DSA gives its memory process, which Task Manager then shows as `VmmemDSA`.
@@ -419,7 +483,13 @@ impl AndroidVmConfig {
         cmdline.push_str(BOOT_MEMORY_CMDLINE);
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
-            cmdline.push_str(crate::pstore_disk::KERNEL_CMDLINE);
+            cmdline.push_str(dsa_host_core::disk::pstore::KERNEL_CMDLINE);
+        }
+        // Before the configured command line, so a developer's own `androidboot.dsa.vulkan`
+        // there wins: Android takes the last value of a repeated `androidboot` key.
+        if self.gpu_paravirtualization {
+            cmdline.push(' ');
+            cmdline.push_str(GPU_PARAVIRTUALIZATION_CMDLINE);
         }
         let image = match &self.direct_mapped {
             Some(mapped) => dsa_host_core::direct_mapped::kernel_cmdline(
@@ -469,6 +539,25 @@ impl AndroidVmConfig {
     /// The HCS compute system document (schema 2.3) that creates the VM on this host.
     /// Checks what does not depend on where the boot's files are placed (paths absolute,
     /// processors, memory), so a bad configuration is refused before any file is copied.
+    /// Leaves out of the document what HCS on Windows `build` (update revision
+    /// `update_revision`) does not know, or what ends the VM's worker process there, so the
+    /// first attempt to start the VM is one the host accepts. Returns whether shared memory
+    /// regions were dropped.
+    pub fn fit_to_build(&mut self, build: u32, update_revision: u32) -> bool {
+        self.fine_grained_memory = fine_grained_memory_supported(build, update_revision);
+        self.hosting_process_name_suffix =
+            hosting_process_name_suffix_supported(build, update_revision)
+                .then(|| HOSTING_PROCESS_NAME_SUFFIX.to_string());
+        self.always_allow_sparse_files = sparse_files_setting_supported(build);
+        let had_regions = self.graphics_region.is_some() || self.picture_region.is_some();
+        if shared_memory_regions_supported(build) {
+            return false;
+        }
+        self.graphics_region = None;
+        self.picture_region = None;
+        had_regions
+    }
+
     pub fn check_settings(&self) -> Result<(), ConfigError> {
         // x86_64 places no rule on the folders, which only the prepared boot can meet.
         self.validate(GuestArch::X86_64).map(|_| ())
@@ -523,8 +612,11 @@ impl AndroidVmConfig {
             "Type": "VirtualDisk",
             "Path": path_string(&self.data_disk),
             "ReadOnly": false,
-            "AlwaysAllowSparseFiles": true,
         });
+        let mut data = data;
+        if self.always_allow_sparse_files {
+            data["AlwaysAllowSparseFiles"] = Value::Bool(true);
+        }
         let mut devices = json!({
             "Scsi": {
                 "0": {
@@ -604,6 +696,11 @@ impl AndroidVmConfig {
         }
         if let Some(suffix) = &self.hosting_process_name_suffix {
             memory["HostingProcessNameSuffix"] = Value::String(suffix.clone());
+        }
+        if self.gpu_paravirtualization {
+            // Only the window's size: HCS places it. WSL also pins its base below a 36-bit
+            // guest address space, which would cap a VM that grows its memory to the host's.
+            memory["HighMmioGapInMB"] = json!(GPU_HIGH_MMIO_GAP_MB);
         }
         let mut chipset = json!({ "UseUtc": true });
         chipset[boot_key] = boot;

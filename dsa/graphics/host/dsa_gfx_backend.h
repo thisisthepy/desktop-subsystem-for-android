@@ -19,6 +19,10 @@
 extern "C" {
 #endif
 
+/* Reads up to `count` bytes of a guest stream into `buf`. Returns how many were read, 0 when
+ * nothing has arrived yet (the caller asks again at once, so a callback returning 0 should
+ * have waited a little first), or -1 once the stream has ended or failed. The end of a socket
+ * (a read of 0 bytes) is -1, never 0: a 0 there makes the caller ask again forever. */
 typedef int (*dsa_stream_read_fn)(void* user_data, void* buf, size_t count);
 typedef int (*dsa_stream_write_fn)(void* user_data, const void* buf, size_t count);
 

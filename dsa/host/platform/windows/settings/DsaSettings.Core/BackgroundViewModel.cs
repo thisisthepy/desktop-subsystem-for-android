@@ -35,6 +35,20 @@ public sealed class BackgroundViewModel : ObservableObject
     public bool Loaded => _list is not null;
     public bool HasNone => _list is { Apps.Count: 0 };
 
+    /// <summary>Lets go of the list and its app icons, for a page that is left: the page asks
+    /// for the list afresh each time it is shown, so the old one is never seen again. A run in
+    /// progress keeps what it brings.</summary>
+    public void Release()
+    {
+        if (_busy)
+        {
+            return;
+        }
+        _list = null;
+        _message = null;
+        ChangedAll();
+    }
+
     /// <summary>Whether stopping an app from the notification area asks first.</summary>
     public bool AskBeforeStop => _askBeforeStop;
 

@@ -804,8 +804,8 @@ msgstr "Этот параметр действует для всех польз�
 msgid "The newest supported version (now Android {0})"
 msgstr "Самая новая поддерживаемая версия (сейчас Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} и его обновления безопасности"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Закреплено на Android {0}: только его обновления безопасности и образа, без самостоятельного перехода на более новый Android"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Обновлений Android нет. DSA проверяет их ежедневно и перезапускает Android с обновлением, когда окна приложений закрыты."
@@ -1251,8 +1251,8 @@ msgstr "Загрузка и установка Google Play. Это может з
 msgid "Enter this number on Google's registration page."
 msgstr "Введите этот номер на странице регистрации Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Появится здесь после установки Google Play и запуска Android."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID пока недоступен. Сервисы Google Play создают его, когда это устройство впервые регистрируется в Google.\nДля этого нужны установленный Google Play, Android, запущенный вместе с ним, и подключение к сети.\nЕсли через несколько минут ID всё ещё пуст, перезапустите Android.\nID это десятичное число, формат, который принимает страница регистрации Google."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android запущен до этого изменения. Остановите и снова запустите Android, чтобы Google Play его учёл."
@@ -1838,3 +1838,39 @@ msgstr "Как по умолчанию (на весь экран)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Как по умолчанию (внутри окна)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android остановится и запустится снова.\n\nОкна его приложений закроются. Откройте приложения снова, когда он запустится."
+
+msgid "Alternative stores"
+msgstr "Альтернативные магазины"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Удалить магазин можно в списке приложений."
+
+msgid "Installed, version {0}"
+msgstr "Установлен, версия {0}"
+
+msgid "Downloading and installing…"
+msgstr "Загрузка и установка…"
+
+msgid "Not installed: {0}"
+msgstr "Не установлен: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Память, которую используют сразу несколько процессов, например изображения окон и графические буферы. Освобождается, когда использующие её приложения закрываются."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Память, которую сейчас ничто не использует. Android возвращает её компьютеру, поэтому она не занимает его оперативную память."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Рабочее место, которое ядро держит для каждого работающего потока. Уменьшается, когда приложения закрываются."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Таблицы, по которым процессор находит память каждого приложения в ОЗУ. Уменьшаются, когда приложения закрываются."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Большие буферы, которые выделяют ядро и его драйверы, в том числе для графики. Освобождаются, когда больше не нужны."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Данные, которые ядро держит по одной копии на каждое ядро процессора. Их размер задаётся при запуске Android."

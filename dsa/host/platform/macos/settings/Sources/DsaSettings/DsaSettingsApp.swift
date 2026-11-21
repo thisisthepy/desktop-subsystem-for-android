@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     let programUpdate: ProgramUpdateViewModel
     let settings: SettingsViewModel
     let gapps: GappsViewModel
+    let stores: StoresViewModel
     let widevine: WidevineViewModel
     let backup: BackupViewModel
     let memory: MemoryViewModel
@@ -33,6 +34,7 @@ final class AppModel: ObservableObject {
         settings = SettingsViewModel(service: service, text: appText)
         settings.isAdministrator = Shell.isAdministrator
         gapps = GappsViewModel(service: service, text: appText)
+        stores = StoresViewModel(service: service, text: appText)
         widevine = WidevineViewModel(service: service, text: appText)
         backup = BackupViewModel(service: service, text: appText)
         memory = MemoryViewModel(service: service, text: appText)
@@ -116,8 +118,8 @@ struct MenuBarContent: View {
     var body: some View {
         Text(Format.fill(T("MenuBar_State"), [general.stateText]))
         Divider()
-        Button(T("StartButton.Content")) { Task { await general.start() } }
-            .disabled(!general.canStart)
+        Button(general.startButtonText) { pressStart(general) }
+            .disabled(!general.canPressStart)
         Button(T("StopButton.Content")) { Task { await general.stop() } }
             .disabled(!general.canStop)
         Divider()

@@ -8,31 +8,25 @@
 //! job Android withdraws before its panel opens is not printed. Nothing about a job ends the
 //! follower.
 
-use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
-use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::print::{PrintEvent, PrintJob, PrintOutcome};
+use dsa_host_core::print::{PrintJob, PrintOutcome};
+use dsa_host_core::print_follower::{follow_print_jobs, PrintFollowing, PrintRun};
 use dsa_transport::Connector;
 
 use super::Log;
 
-/// What the follower calls itself to the service.
-const BUILD: &str = "dsa-devices print";
-
-/// How long a request to the service is waited for.
-const ANSWER: Duration = Duration::from_secs(5);
-
-/// How long to wait before connecting again after the service could not be reached.
-const RETRY: Duration = Duration::from_secs(1);
-
-/// How long the watch waits for the service before it looks for finished jobs again.
-const POLL: Duration = Duration::from_millis(100);
+/// How the follower talks to the service.
+const FOLLOWING: PrintFollowing = PrintFollowing {
+    build: "dsa-devices print",
+    answer: Duration::from_secs(5),
+    retry: Duration::from_secs(1),
+    poll: Duration::from_millis(100),
+    thread_name: "dsa-print-job",
+};
 
 /// Prints one job and says what became of it. It may block until the user answers.
 pub type Print = Arc<dyn Fn(PrintJob) -> PrintOutcome + Send + Sync>;
@@ -53,110 +47,15 @@ pub fn print_one(job: PrintJob, print: &Print, withdrawn: &AtomicBool) -> PrintO
 /// Prints the documents of the user's Android until `stop`, reconnecting to the service
 /// whenever the connection ends. Each job prints on a thread of its own.
 pub fn serve(mut connector: Box<dyn Connector>, print: Print, stop: Arc<AtomicBool>, log: Log) {
-    let (done_tx, done) = mpsc::channel();
-    let mut printing: HashMap<u32, Arc<AtomicBool>> = HashMap::new();
-    let mut last_error = String::new();
-    while !stop.load(Ordering::Relaxed) {
-        let stream = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_print_jobs());
-        let mut stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    log(&format!("printing cannot reach the service: {error}"));
-                    last_error = error;
-                }
-                report(&mut *connector, &done, &mut printing, &log);
-                super::wait(&stop, RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        while !stop.load(Ordering::Relaxed) {
-            report(&mut *connector, &done, &mut printing, &log);
-            match stream.next(POLL) {
-                Ok(Some(PrintEvent::Job(job))) => {
-                    let withdrawn = Arc::new(AtomicBool::new(false));
-                    printing.insert(job.job_id, Arc::clone(&withdrawn));
-                    start_job(
-                        job,
-                        Arc::clone(&print),
-                        withdrawn,
-                        done_tx.clone(),
-                        Arc::clone(&log),
-                    );
-                }
-                Ok(Some(PrintEvent::Withdrawn { job_id })) => {
-                    if let Some(withdrawn) = printing.get(&job_id) {
-                        withdrawn.store(true, Ordering::Relaxed);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    log(&format!(
-                        "the print jobs' connection to the service ended: {error}"
-                    ));
-                    break;
-                }
-            }
-        }
-    }
-    for withdrawn in printing.values() {
-        withdrawn.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Passes what became of each finished job to the service.
-fn report(
-    connector: &mut dyn Connector,
-    done: &Receiver<(u32, PrintOutcome)>,
-    printing: &mut HashMap<u32, Arc<AtomicBool>>,
-    log: &Log,
-) {
-    while let Ok((job_id, outcome)) = done.try_recv() {
-        let withdrawn = printing
-            .remove(&job_id)
-            .is_some_and(|withdrawn| withdrawn.load(Ordering::Relaxed));
-        // A withdrawn job's outcome is not wanted.
-        if withdrawn {
-            continue;
-        }
-        let result = HostApiClient::connect(connector, BUILD, ANSWER)
-            .and_then(|mut client| client.report_print_job(job_id, &outcome));
-        if let Err(error) = result {
-            log(&format!(
-                "what became of print job {job_id} did not reach Android: {error}"
-            ));
-        }
-    }
-}
-
-fn start_job(
-    job: PrintJob,
-    print: Print,
-    withdrawn: Arc<AtomicBool>,
-    done: Sender<(u32, PrintOutcome)>,
-    log: Log,
-) {
-    let job_id = job.job_id;
-    let failed = done.clone();
-    let spawned = thread::Builder::new()
-        .name("dsa-print-job".into())
-        .spawn(move || {
-            let title = job.title();
-            let outcome = print_one(job, &print, &withdrawn);
-            match &outcome {
-                PrintOutcome::Failed(why) => log(&format!("{title} was not printed: {why}")),
-                PrintOutcome::Canceled => log(&format!("printing {title} was canceled")),
-                PrintOutcome::Printed => {}
-            }
-            let _ = done.send((job_id, outcome));
-        });
-    if let Err(error) = spawned {
-        let why = format!("printing could not start: {error}");
-        let _ = failed.send((job_id, PrintOutcome::Failed(why)));
-    }
+    let run: PrintRun = Arc::new(move |job, withdrawn| print_one(job, &print, withdrawn));
+    follow_print_jobs(
+        &mut *connector,
+        &FOLLOWING,
+        &run,
+        &stop,
+        &|time| super::wait(&stop, time),
+        &log,
+    );
 }
 
 #[cfg(test)]

@@ -153,6 +153,37 @@
                 <Setter Property="TextWrapping" Value="Wrap" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             </Style>
+
+            <!-- The library's tool tip draws a DropShadowEffect. The app renders in software,
+                 where an effect runs through WPF's software shader path: the first tool tip
+                 loads the WARP shader JIT into the process and keeps an effect surface for
+                 every tool tip shown. This template is the library's, without the effect, as
+                 in the settings app. Pop-ups do not inherit the window's font. -->
+            <Style TargetType="ToolTip" BasedOn="{StaticResource DefaultToolTipStyle}">
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="Effect" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToolTip">
+                            <Border
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                SnapsToDevicePixels="True">
+                                <Border.Resources>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextAlignment" Value="Justify" />
+                                        <Setter Property="TextWrapping" Value="WrapWithOverflow" />
+                                    </Style>
+                                </Border.Resources>
+                                <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Top" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

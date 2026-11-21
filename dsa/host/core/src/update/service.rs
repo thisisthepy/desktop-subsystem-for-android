@@ -1,6 +1,7 @@
 //! Updates as the service runs them: the periodic check, and a user's Android that boots a
 //! new image on trial.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
@@ -14,7 +15,7 @@ use super::manifest::{self, ImageEntry};
 use super::policy::{decide_for, decide_on_channel, Decision, InstalledImage};
 use super::program::ReleaseChannel;
 use super::restart::ImageRestart;
-use super::store::{Fetch, ImageStore};
+use super::store::{Fetch, ImageStore, Recovery};
 use super::trial::{self, Boot, Outcome};
 use super::versions::{
     prerelease_image_list_url, AndroidVersions, Channel, ChooseError, VersionReport,
@@ -26,6 +27,7 @@ use crate::apps::UninstallOutcome;
 use crate::background::{BackgroundApp, BackgroundWatch, MediaSession};
 use crate::host_api::InstallError;
 use crate::host_api::UserAndroid;
+use crate::host_config::UpdateSettings;
 use crate::ime::ImeEvent;
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
@@ -33,6 +35,7 @@ use crate::memory::GuestMemoryReport;
 use crate::print::{PrintEvent, PrintOutcome};
 use crate::session::BackgroundRequest;
 use crate::session::{BootProblem, Session, SessionState, StopReason};
+use crate::settings::SettingsStore;
 use crate::tasks::{AppSettingsPage, TaskRequest, TaskRequestError, TaskWatch};
 use crate::widgets::{WidgetError, WidgetProvider, WidgetSize};
 use std::sync::mpsc::Receiver;
@@ -236,6 +239,11 @@ fn apply_list(
     if state.on_trial {
         return Ok(moved_up);
     }
+    if let Some(pinned) = state.pinned_major() {
+        if !manifest.supported_majors.contains(&pinned) {
+            return Ok(Some(super::store::pinned_unsupported(pinned)));
+        }
+    }
     let decision = match release {
         Some(release) => decide_on_channel(
             &state.current,
@@ -327,12 +335,13 @@ pub fn next_image_check(
 pub struct SessionBoot(pub Arc<Session>);
 
 impl Boot for SessionBoot {
-    /// A disk made under other signing keys stops the agent whichever image runs on it.
+    /// A disk made under other signing keys stops the agent whichever image runs on it, and a
+    /// start the host refused never ran the image at all.
     fn image_to_blame(&self) -> bool {
         !matches!(
             self.0.problem(),
             Some(BootProblem::DiskFromOtherKeys { .. })
-        )
+        ) && !matches!(self.0.last_reason(), Some(StopReason::HostFailed { .. }))
     }
 
     fn boot(
@@ -927,6 +936,9 @@ impl UserAndroid for UpdatingAndroid {
     fn watch_log(&self, filter: crate::guest_log::LogFilter) -> Option<crate::guest_log::LogWatch> {
         UserAndroid::watch_log(&*self.session, filter)
     }
+    fn log_problem(&self) -> Option<String> {
+        UserAndroid::log_problem(&*self.session)
+    }
     fn dump_log(
         &self,
         filter: crate::guest_log::LogFilter,
@@ -1039,6 +1051,12 @@ impl UserAndroid for UpdatingAndroid {
     fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         UserAndroid::watch_clipboard(&*self.session)
     }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        UserAndroid::host_clipboard_image(&*self.session, png)
+    }
+    fn watch_clips(&self) -> Option<std::sync::mpsc::Receiver<crate::clipboard::Clip>> {
+        UserAndroid::watch_clips(&*self.session)
+    }
     fn watch_notifications(
         &self,
     ) -> Option<std::sync::mpsc::Receiver<crate::notifications::NotificationEvent>> {
@@ -1066,6 +1084,11 @@ impl UserAndroid for UpdatingAndroid {
         action: crate::notifications::NotificationAction,
     ) -> Result<(), TaskRequestError> {
         UserAndroid::notification_action(&*self.session, action)
+    }
+
+    fn start_because(&self, reason: &str) {
+        eprintln!("start of Android asked by: {reason}");
+        self.start();
     }
 
     fn start(&self) {
@@ -1364,5 +1387,306 @@ impl UserAndroid for UpdatingAndroid {
         action: &ActionRequest,
     ) -> Result<(), TaskRequestError> {
         UserAndroid::widget_accessibility_action(&*self.session, widget_id, action)
+    }
+}
+
+/// What the service shares between users when it updates the image.
+#[derive(Clone)]
+pub struct Updates {
+    pub store: Arc<ImageStore>,
+    pub notices: Arc<UpdateNotices>,
+    pub boot_timeout: Duration,
+    pub trial_running: Arc<AtomicBool>,
+    /// Set when a user chose another Android version, so the image is checked for at once.
+    pub check_now: Arc<CheckNow>,
+}
+
+/// What a host's configuration says about the update store.
+#[derive(Clone, Copy)]
+pub struct UpdatesConfig<'a> {
+    /// The store's folder. Without it, or without `first_image`, there is no store.
+    pub images_dir: Option<&'a Path>,
+    /// The image the installer put in the store.
+    pub first_image: Option<&'a InstalledImage>,
+    /// The image the package installed last bundled, which may be newer than the one the
+    /// store has recorded. `None` for a host whose package bundles none.
+    pub bundled_image: Option<&'a InstalledImage>,
+    /// How long a new image may take to finish its first boot; 300 when `None`.
+    pub boot_timeout_secs: Option<u64>,
+    /// The folder where a preset installer (such as `a16`) leaves its preset file, which fixes
+    /// the computer to one Android major once. `None`, or a folder without the file, for a
+    /// default installation.
+    pub preset_dir: Option<&'a Path>,
+}
+
+/// Why image updates are off although the configuration asked for them: the store could not
+/// be opened. The service keeps running and boots the image it has; this tells the user why
+/// no image is updated, where the Android version is shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdatesDisabled {
+    pub reason: String,
+}
+
+impl UpdatesDisabled {
+    fn text(&self) -> String {
+        format!("image updates are off: {}", self.reason)
+    }
+}
+
+impl AndroidVersions for UpdatesDisabled {
+    fn needs_administrator(&self) -> bool {
+        false
+    }
+
+    fn report(&self) -> Result<VersionReport, String> {
+        Err(self.text())
+    }
+
+    fn choose(&self, _: Channel, _: bool) -> Result<VersionReport, ChooseError> {
+        Err(ChooseError::Store(self.text()))
+    }
+}
+
+/// Opens the update store when the configuration names one.
+/// An image that the package installed last bundled, newer than the store's current one,
+/// becomes current on trial first: the configuration kept from an earlier installation still
+/// names that installation's image, and nothing else would boot the new one.
+pub fn open_updates(config: UpdatesConfig<'_>, build: &str) -> Result<Option<Updates>, String> {
+    let (Some(root), Some(configured)) = (config.images_dir, config.first_image) else {
+        return Ok(None);
+    };
+    let first = config.bundled_image.unwrap_or(configured);
+    let store = ImageStore::open_as(root, first, build).map_err(|e| e.to_string())?;
+    if let Some(bundled) = config.bundled_image {
+        let before = store.state().map(|state| state.current.version).ok();
+        match store.adopt_bundled(bundled) {
+            Ok(true) => eprintln!(
+                "{build}: this installation brought the image {}; booting it in place of {} \
+                 (which is kept until the new one has booted)",
+                bundled.version,
+                before.as_deref().unwrap_or("the previous image")
+            ),
+            Ok(false) => {}
+            Err(why) => eprintln!(
+                "{build}: switching to the bundled image {}: {why}",
+                bundled.version
+            ),
+        }
+    }
+    if let Some(line) = config
+        .preset_dir
+        .and_then(|dir| crate::host_config::InstallerPreset::apply_from(dir, &store))
+    {
+        eprintln!("{build}: {line}");
+    }
+    // An installation can find a state that names an image it cannot boot, such as a test
+    // package's stand-in, and Android would then never start.
+    match store.recover(first) {
+        Ok(Recovery::Usable) => {}
+        Ok(Recovery::Moved { broken, current }) => eprintln!(
+            "{build}: the image {} has missing or broken files; using {} instead",
+            broken.version, current.version
+        ),
+        Ok(Recovery::NothingBetter { broken }) => {
+            // An installation that bundled no image has none yet, which is not broken.
+            if store.has_image(&broken.version) {
+                eprintln!(
+                    "{build}: the image {} has missing or broken files and no other image \
+                     is installed",
+                    broken.version
+                );
+            }
+        }
+        Err(why) => eprintln!("{build}: checking the current image: {why}"),
+    }
+    Ok(Some(Updates {
+        store: Arc::new(store),
+        notices: Arc::new(UpdateNotices::default()),
+        boot_timeout: Duration::from_secs(config.boot_timeout_secs.unwrap_or(300)),
+        trial_running: Arc::new(AtomicBool::new(false)),
+        check_now: Arc::new(CheckNow::default()),
+    }))
+}
+
+/// [`open_updates`] for a service that keeps running without updates when the store cannot
+/// be opened: the reason is logged and handed back, for the host to show where the Android
+/// version is (`HostApiService::with_android_versions`).
+pub fn open_updates_or_disable(
+    config: UpdatesConfig<'_>,
+    build: &str,
+) -> Result<Option<Updates>, UpdatesDisabled> {
+    open_updates(config, build).map_err(|reason| {
+        eprintln!("{build}: image updates disabled: {reason}");
+        UpdatesDisabled { reason }
+    })
+}
+
+/// How soon the service tries again while it has no image to boot.
+pub const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
+
+/// How soon an update check that the settings turned off looks at them again.
+pub const SETTINGS_RECHECK: Duration = Duration::from_secs(60);
+
+/// How long after the service starts the first check runs, when there is an image to boot.
+pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(60);
+
+/// What the update checks need.
+pub struct UpdateCheck {
+    pub settings: UpdateSettings,
+    pub updates: Updates,
+    pub store: Arc<dyn SettingsStore>,
+    pub build: String,
+    /// Called after a new image was downloaded and checked, such as to make the image's
+    /// direct-mapped system disk before the next start of Android needs it.
+    pub on_new_image: Option<Box<dyn Fn() + Send>>,
+}
+
+/// Tells the user how a download goes: the notice changes with every whole percent, and the
+/// log gets the start only.
+#[derive(Default)]
+pub struct DownloadAnnouncer {
+    shown: Option<u128>,
+}
+
+impl DownloadAnnouncer {
+    pub fn announce(&mut self, download: &Download, build: &str, notices: &UpdateNotices) {
+        let percent = (download.done as u128 * 100)
+            .checked_div(download.total as u128)
+            .unwrap_or(100);
+        if self.shown == Some(percent) {
+            return;
+        }
+        self.shown = Some(percent);
+        let notice = download.notice();
+        if download.done == 0 {
+            eprintln!("{build}: {notice}");
+        }
+        notices.set(notice);
+    }
+}
+
+/// The schedule of the update checks, one turn at a time.
+pub struct UpdateChecker {
+    check: UpdateCheck,
+    keys: Vec<VerifyingKey>,
+    interval: Duration,
+    next: Instant,
+}
+
+impl UpdateChecker {
+    /// Starts the schedule at `now`: a check at once while there is no image to boot, else
+    /// after [`FIRST_CHECK_DELAY`], then every `check_interval_hours`.
+    pub fn new(check: UpdateCheck, now: Instant) -> Result<UpdateChecker, String> {
+        let keys = check.settings.keys().map_err(|e| e.to_string())?;
+        let interval = Duration::from_secs(check.settings.check_interval_hours.max(1) * 3600);
+        let mut checker = UpdateChecker {
+            check,
+            keys,
+            interval,
+            next: now,
+        };
+        if !checker.no_image() {
+            checker.next = now + FIRST_CHECK_DELAY;
+        }
+        Ok(checker)
+    }
+
+    /// When the next check is due.
+    pub fn next_check(&self) -> Instant {
+        self.next
+    }
+
+    fn no_image(&self) -> bool {
+        let store = &self.check.updates.store;
+        store
+            .state()
+            .map(|state| !store.has_image(&state.current.version))
+            .unwrap_or(false)
+    }
+
+    /// Does what is due at `now`. Returns false when nothing was, so the caller waits a
+    /// moment before asking again.
+    pub fn tick(&mut self, now: Instant, fetch: &dyn Fetch) -> bool {
+        let updates = &self.check.updates;
+        let build = &self.check.build;
+        self.next = next_image_check(self.next, now, !self.no_image(), FIRST_IMAGE_RETRY);
+        // A user who chose another Android version waits for it now, not at the next turn.
+        if updates.check_now.take() {
+            self.next = now;
+        }
+        if now < self.next {
+            return false;
+        }
+        let waiting_for_first = self.no_image();
+        // Turned off in the settings, the list is not read, except for the first image,
+        // without which no Android can start. A minute later it looks again, so turning
+        // updates back on takes effect soon.
+        if !waiting_for_first
+            && !updates.store.switch_pending()
+            && !self.check.store.machine().image_updates
+        {
+            self.next = now + SETTINGS_RECHECK;
+            return true;
+        }
+        let mut announcer = DownloadAnnouncer::default();
+        let mut announce =
+            |download: &Download| announcer.announce(download, build, &updates.notices);
+        // The computer's release channel picks the image list (on the pre-release channel
+        // the pre-release list beside the stable one) and the images it may take: a computer
+        // on the stable channel never moves to a pre-release image.
+        match check_alerting(
+            &updates.store,
+            fetch,
+            &self.check.settings.list_url,
+            &self.keys,
+            self.check.store.machine().release_channel(),
+            &updates.notices,
+            &mut announce,
+        ) {
+            Ok(Some(notice)) => {
+                eprintln!("{build}: {notice}");
+                updates.notices.set(notice);
+                if let Some(made) = &self.check.on_new_image {
+                    made();
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("{build}: checking for updates: {error}");
+                if waiting_for_first {
+                    updates.notices.set(format!(
+                        "the Android image could not be downloaded yet ({error}); the service \
+                         tries again in {} minutes",
+                        FIRST_IMAGE_RETRY.as_secs() / 60
+                    ));
+                }
+            }
+        }
+        // A download takes minutes: the next check counts from its end.
+        let after = now.max(Instant::now());
+        self.next = after
+            + if self.no_image() {
+                FIRST_IMAGE_RETRY
+            } else {
+                self.interval
+            };
+        true
+    }
+}
+
+/// Checks the release list a minute after the service starts and then every
+/// `check_interval_hours`, until `stop` is set. Without an image to boot (an installation
+/// that bundled none), it checks at once and again every few minutes until one is in place,
+/// and tells the user what it is downloading.
+pub fn run_update_checks(check: UpdateCheck, fetch: &dyn Fetch, stop: Arc<AtomicBool>) {
+    let build = check.build.clone();
+    let mut checker = match UpdateChecker::new(check, Instant::now()) {
+        Ok(checker) => checker,
+        Err(error) => return eprintln!("{build}: not checking for updates: {error}"),
+    };
+    while !stop.load(Ordering::Relaxed) {
+        if !checker.tick(Instant::now(), fetch) {
+            thread::sleep(Duration::from_secs(1));
+        }
     }
 }

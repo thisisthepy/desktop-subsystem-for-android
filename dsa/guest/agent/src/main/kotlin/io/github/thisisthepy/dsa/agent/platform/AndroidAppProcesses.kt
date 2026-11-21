@@ -35,6 +35,20 @@ class AndroidAppProcesses(context: Context) : AppProcesses {
         activities.getRunningServices(Int.MAX_VALUE).orEmpty()
             .any { it.foreground && it.service.packageName == packageName }
 
+    /**
+     * A process of the package whose importance is foreground or visible: the activity
+     * manager ranks a process so while one of its activities is resumed or seen, in any task.
+     * A foreground service alone ranks it lower and is not counted here.
+     */
+    override fun showsActivity(packageName: String): Boolean =
+        activities.runningAppProcesses.orEmpty().any { info ->
+            (info.processName == packageName || info.processName.startsWith("$packageName:")) &&
+                (
+                    info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+                        info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+                    )
+        }
+
     override fun stop(packageName: String) {
         ActivityManager::class.java
             .getMethod("forceStopPackage", String::class.java)

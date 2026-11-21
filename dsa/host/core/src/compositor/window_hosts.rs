@@ -29,6 +29,25 @@ use super::window_mode::WindowMode;
 use crate::background::{MediaCommand, MediaSession, Playback};
 use crate::tasks::{AppInfo, AppSettingsPage, Bounds, TaskRequest};
 
+/// The argument that names the package a window host shows, for a program started by hand or by
+/// a test; the host's own launch passes it too.
+pub const PACKAGE_ARGUMENT: &str = "--package";
+
+/// The value that follows `flag` in `args`, if any.
+pub fn argument(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|arg| arg == flag)
+        .and_then(|at| args.get(at + 1))
+        .cloned()
+}
+
+/// The package `--package` names in `args`: `None` when the argument is not there, and
+/// `Some(None)` when it is and its value is no package name ([`is_valid_package`]), so a
+/// bad name is refused rather than replaced by another way of finding the package.
+pub fn package_argument(args: &[String]) -> Option<Option<String>> {
+    argument(args, PACKAGE_ARGUMENT).map(|named| is_valid_package(&named).then_some(named))
+}
+
 /// Whether `name` is an Android package name: two or more dot-separated parts, each an ASCII
 /// letter followed by letters, digits and underscores. Only such a name becomes a file name
 /// for an app's window host, so a name whose first part Windows reserves for a device
@@ -1550,6 +1569,21 @@ pub fn connect_window_host(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr7_the_package_argument_is_checked_and_a_bad_name_is_not_replaced() {
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(package_argument(&args(&[])), None);
+        assert_eq!(
+            package_argument(&args(&["--package", "org.example.notes"])),
+            Some(Some("org.example.notes".into()))
+        );
+        assert_eq!(
+            package_argument(&args(&["--package", "..\\evil"])),
+            Some(None)
+        );
+        assert_eq!(package_argument(&args(&["--package"])), None);
+    }
 
     fn open(task_id: i32, package: &str) -> WindowChange {
         WindowChange::Open {

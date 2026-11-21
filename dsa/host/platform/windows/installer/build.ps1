@@ -9,8 +9,14 @@
 # which WiX does not find under the package's name.) setup.exe needs it for the variables
 # that the command line may set.
 #
-# -AndroidMajor is the newest Android major the release supports; the first screen of
-# setup.exe shows it. Without it that screen leaves it out.
+# -AndroidMajor is the Android major the default setup.exe installs: the newest image's in the
+# release's image list. The first screen of setup.exe shows it. Without it that screen leaves
+# it out.
+#
+# -PresetMajors builds, beside the default setup.exe, one preset setup.exe per Android major
+# (setup-a<major>-<version>.exe, with dsa-a<major>-<version>.msi inside): the same programs,
+# with installer-preset.json added, which fixes the computer to that major. Its first screen
+# names that major as fixed. Only the packages are built again, not the programs.
 #
 # -ImageDir names an image folder made by dsa/guest/image/make-image.py; its version comes
 # from its image.json. (-ImageVersion, -ImageMajor and -ImageBuild describe an older folder
@@ -63,6 +69,7 @@ param(
     [string]$Channel = "",
     [string]$PipeSddl,
     [int]$AndroidMajor,
+    [int[]]$PresetMajors = @(),
     [string]$GfxstreamBackend,
     [string]$ReleaseTag,
     [string]$GeodataDir,
@@ -322,5 +329,24 @@ try {
     if ($ImageDir) { $bundleDefines += @("-d", "BundledImage=1") }
     wix build -arch $Arch -ext $balDll @bundleDefines bundle.wxs -o $setup
     if ($LASTEXITCODE -ne 0) { throw "building setup.exe failed" }
+    Write-Host "built $msi and $setup"
+
+    # The preset packages: the same stage with installer-preset.json added.
+    $presetFile = Join-Path $stage "installer-preset.json"
+    try {
+        foreach ($major in $PresetMajors) {
+            if ($major -le 0) { throw "-PresetMajors names $major, which is no Android major" }
+            ([ordered]@{ android_major = $major } | ConvertTo-Json) | Set-Content -Encoding utf8NoBOM $presetFile
+            $presetMsi = Join-Path $out "dsa-${fileTag}a$major-$Version.msi"
+            $presetSetup = Join-Path $out "setup-${fileTag}a$major-$Version.exe"
+            wix build -arch $Arch @msiExt @defines -d "PresetMajor=$major" @loc dsa.wxs -o $presetMsi
+            if ($LASTEXITCODE -ne 0) { throw "building the Android $major package failed" }
+            $presetDefines = @("-d", "Arch=$Arch", "-d", "Version=$packageVersion", "-d", "ProductName=$productName", "-d", "MsiPath=$presetMsi",
+                "-d", "SetupUiDir=$setupUi", "-d", "AndroidMajor=$major", "-d", "AndroidPinned=1")
+            if ($ImageDir) { $presetDefines += @("-d", "BundledImage=1") }
+            wix build -arch $Arch -ext $balDll @presetDefines bundle.wxs -o $presetSetup
+            if ($LASTEXITCODE -ne 0) { throw "building the Android $major setup.exe failed" }
+            Write-Host "built $presetMsi and $presetSetup"
+        }
+    } finally { Remove-Item -Force $presetFile -ErrorAction SilentlyContinue }
 } finally { Pop-Location }
-Write-Host "built $msi and $setup"

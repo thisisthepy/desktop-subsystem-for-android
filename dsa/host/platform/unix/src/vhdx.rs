@@ -19,17 +19,11 @@ pub use dsa_host_core::vhdx::{
 };
 
 const MIB: u64 = 1024 * 1024;
-const FILE_SIGNATURE: &[u8; 8] = b"vhdxfile";
 
 /// How much of a block is written at a time; a run of zeroes this long stays a hole.
 const CHUNK: usize = MIB as usize;
 
-/// Whether the file at `path` is a VHDX: it starts with the file identifier.
-pub fn is_vhdx(path: &Path) -> io::Result<bool> {
-    let mut signature = [0u8; 8];
-    let mut file = File::open(path)?;
-    Ok(file.read_exact(&mut signature).is_ok() && &signature == FILE_SIGNATURE)
-}
+pub use dsa_host_core::vhdx::is_vhdx;
 
 /// Writes the disk the VHDX at `from` holds to `to` as a raw image of its virtual size,
 /// writing only the data that is not zero.

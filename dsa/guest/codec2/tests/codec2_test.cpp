@@ -234,6 +234,30 @@ TEST(fr26_a_surface_with_every_buffer_in_use_is_waited_for) {
     EXPECT_TRUE(classifyAllocateError(-9930) == AllocateFailure::Failed);
 }
 
+TEST(fr26_a_session_whose_surface_gives_no_buffer_back_is_reported_once_to_recover) {
+    // The log of a stuck Spotify Canvas session: 3 pictures every 6 s, none with a buffer.
+    using std::chrono::milliseconds;
+    StarvationWatch watch(std::chrono::seconds(10), 10);
+    const auto start = StarvationWatch::Clock::now();
+    int reported = 0;
+    for (int i = 0; i < 9; ++i) {
+        // Ten seconds pass, but fewer than ten pictures: a stream that just paused is not stuck.
+        reported += watch.noBuffer(start + milliseconds(2000 * i)) ? 1 : 0;
+    }
+    EXPECT_EQ(reported, 0);
+    for (int i = 9; i < 60; ++i) {
+        reported += watch.noBuffer(start + milliseconds(2000 * i)) ? 1 : 0;
+    }
+    EXPECT_EQ(reported, 1);  // once, not once a picture
+    // A picture shown ends the run; a new run waits its full limit again.
+    watch.reset();
+    for (int i = 0; i < 20; ++i) {
+        reported += watch.noBuffer(start + milliseconds(200 * i)) ? 1 : 0;
+    }
+    EXPECT_EQ(reported, 1);
+    EXPECT_TRUE(watch.noBuffer(start + std::chrono::seconds(11)));
+}
+
 TEST(fr26_a_failure_on_every_picture_is_logged_once_in_a_while) {
     FailureThrottle throttle(100);
     uint32_t count = 0;

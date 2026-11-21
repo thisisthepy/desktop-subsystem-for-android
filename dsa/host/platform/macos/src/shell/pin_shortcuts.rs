@@ -4,11 +4,13 @@
 //! link on the Desktop ([`super::app_stubs::place_pinned_in`]); a question nobody answers is
 //! declined after [`ASK_FOR`], so the app is not left waiting.
 
-use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use dsa_host_core::pin_questions::OpenQuestions;
 use dsa_host_core::tasks::PinShortcutRequest;
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::fill;
+use dsa_host_core::ui_text::pin_shortcut::pin_question_text;
 
 /// The category of the question, whose actions are [`ADD`] and [`CANCEL`].
 pub const PIN_CATEGORY: &str = "org.thisisthepy.dsa.pin-shortcut";
@@ -22,27 +24,12 @@ pub const CANCEL: &str = "org.thisisthepy.dsa.pin-shortcut.cancel";
 /// What every question's request identifier starts with, before the request's number.
 const PREFIX: &str = "org.thisisthepy.dsa.pin-shortcut.request.";
 
-/// How long a question waits for the user before it is declined.
-pub const ASK_FOR: Duration = Duration::from_secs(180);
+pub use dsa_host_core::pin_questions::ASK_FOR;
 
 /// The labels of [Add to desktop] and [Cancel], in `lang`.
 pub fn buttons(lang: UiLanguage) -> (&'static str, &'static str) {
-    match lang {
-        UiLanguage::English => ("Add to desktop", "Cancel"),
-        UiLanguage::Korean => ("바탕 화면에 추가", "취소"),
-        UiLanguage::Japanese => ("デスクトップに追加", "キャンセル"),
-        UiLanguage::ChineseSimplified => ("添加到桌面", "取消"),
-        UiLanguage::ChineseTraditional => ("加入桌面", "取消"),
-        UiLanguage::Spanish => ("Añadir al escritorio", "Cancelar"),
-        UiLanguage::French => ("Ajouter au bureau", "Annuler"),
-        UiLanguage::German => ("Zum Schreibtisch hinzufügen", "Abbrechen"),
-        UiLanguage::PortugueseBrazil => ("Adicionar à mesa", "Cancelar"),
-        UiLanguage::Russian => ("Добавить на рабочий стол", "Отменить"),
-        UiLanguage::Italian => ("Aggiungi alla scrivania", "Annulla"),
-        UiLanguage::Vietnamese => ("Thêm vào màn hình nền", "Hủy"),
-        UiLanguage::Indonesian => ("Tambahkan ke desktop", "Batalkan"),
-        UiLanguage::Turkish => ("Masaüstüne ekle", "Vazgeç"),
-    }
+    let text = pin_question_text(lang);
+    (text.add, text.cancel)
 }
 
 /// The identifier of the question about request `request_id`.
@@ -57,87 +44,23 @@ pub fn request_of(identifier: &str) -> Option<u32> {
 
 /// The question's title and body, in `lang`.
 pub fn texts(request: &PinShortcutRequest, lang: UiLanguage) -> (String, String) {
-    let app = if request.app_label.trim().is_empty() {
-        request.package_name.as_str()
-    } else {
-        request.app_label.as_str()
-    };
-    let name = request.shortcut.label();
-    match lang {
-        UiLanguage::English => (
-            format!("Add \u{201c}{name}\u{201d} to the desktop?"),
-            format!("{app} wants to put this shortcut on your desktop."),
-        ),
-        UiLanguage::Korean => (
-            format!("\u{201c}{name}\u{201d}을(를) 바탕 화면에 추가할까요?"),
-            format!("{app}에서 이 바로 가기를 바탕 화면에 두려고 합니다."),
-        ),
-        UiLanguage::Japanese => (
-            format!("\u{300c}{name}\u{300d}をデスクトップに追加しますか?"),
-            format!("{app}がこのショートカットをデスクトップに置こうとしています。"),
-        ),
-        UiLanguage::ChineseSimplified => (
-            format!("要将\u{201c}{name}\u{201d}添加到桌面吗？"),
-            format!("{app}想要将此快捷方式放到你的桌面上。"),
-        ),
-        UiLanguage::ChineseTraditional => (
-            format!("要將\u{300c}{name}\u{300d}加入桌面嗎？"),
-            format!("{app}想要將此捷徑放到你的桌面上。"),
-        ),
-        UiLanguage::Spanish => (
-            format!("¿Añadir \u{ab}{name}\u{bb} al escritorio?"),
-            format!("{app} quiere poner este acceso directo en su escritorio."),
-        ),
-        UiLanguage::French => (
-            format!("Ajouter \u{ab}\u{a0}{name}\u{a0}\u{bb} au bureau\u{a0}?"),
-            format!("{app} souhaite placer ce raccourci sur votre bureau."),
-        ),
-        UiLanguage::German => (
-            format!("\u{201e}{name}\u{201c} zum Schreibtisch hinzufügen?"),
-            format!("{app} möchte diese Verknüpfung auf Ihrem Schreibtisch ablegen."),
-        ),
-        UiLanguage::PortugueseBrazil => (
-            format!("Adicionar \u{201c}{name}\u{201d} à mesa?"),
-            format!("{app} quer colocar este atalho na sua mesa."),
-        ),
-        UiLanguage::Russian => (
-            format!("Добавить \u{ab}{name}\u{bb} на рабочий стол?"),
-            format!("{app} хочет поместить этот ярлык на ваш рабочий стол."),
-        ),
-        UiLanguage::Italian => (
-            format!("Aggiungere \u{201c}{name}\u{201d} alla scrivania?"),
-            format!("{app} vuole mettere questa scorciatoia sulla scrivania."),
-        ),
-        UiLanguage::Vietnamese => (
-            format!("Thêm \u{201c}{name}\u{201d} vào màn hình nền?"),
-            format!("{app} muốn đặt lối tắt này trên màn hình nền của bạn."),
-        ),
-        UiLanguage::Indonesian => (
-            format!("Tambahkan \u{201c}{name}\u{201d} ke desktop?"),
-            format!("{app} ingin menaruh pintasan ini di desktop Anda."),
-        ),
-        UiLanguage::Turkish => (
-            format!("\u{201c}{name}\u{201d} masaüstüne eklensin mi?"),
-            format!("{app} bu kısayolu masaüstünüze yerleştirmek istiyor."),
-        ),
-    }
+    let text = pin_question_text(lang);
+    (
+        fill(text.heading, &[("name", request.shortcut.label())]),
+        fill(text.body, &[("app", request.app_name())]),
+    )
 }
 
 /// The user's answer to a question: the action's identifier, [`ADD`] for yes; [`CANCEL`]
 /// and a dismissal are no. A click on the banner itself is no answer.
 pub fn answer(action: &str, dismissed: bool) -> Option<bool> {
-    match action {
-        ADD => Some(true),
-        CANCEL => Some(false),
-        _ if dismissed => Some(false),
-        _ => None,
-    }
+    dsa_host_core::pin_questions::answer(action, ADD, CANCEL, dismissed)
 }
 
 /// The questions on screen, by request.
 #[derive(Debug, Default)]
 pub struct Pending {
-    asked: BTreeMap<u32, (PinShortcutRequest, Instant)>,
+    open: OpenQuestions<u32>,
 }
 
 impl Pending {
@@ -146,23 +69,21 @@ impl Pending {
     }
 
     pub fn asked(&mut self, request: PinShortcutRequest, now: Instant) {
-        self.asked.insert(request.request_id, (request, now));
+        self.open.asked(request.request_id, request, now);
     }
 
     /// The request answered: taken, so it is answered once.
     pub fn take(&mut self, request_id: u32) -> Option<PinShortcutRequest> {
-        self.asked.remove(&request_id).map(|(request, _)| request)
+        self.open.take(request_id)
     }
 
     /// The questions older than [`ASK_FOR`] at `now`, which are declined.
     pub fn expired(&mut self, now: Instant) -> Vec<PinShortcutRequest> {
-        let old: Vec<u32> = self
-            .asked
-            .iter()
-            .filter(|(_, (_, at))| now.duration_since(*at) >= ASK_FOR)
-            .map(|(id, _)| *id)
-            .collect();
-        old.into_iter().filter_map(|id| self.take(id)).collect()
+        self.open
+            .expired(now)
+            .into_iter()
+            .map(|(_, request)| request)
+            .collect()
     }
 }
 

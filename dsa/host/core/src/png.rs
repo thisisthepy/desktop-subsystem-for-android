@@ -27,6 +27,17 @@ pub struct Rgba {
     pub pixels: Vec<u8>,
 }
 
+/// The width and height a PNG says it has, from its header chunk, without decoding it. `None`
+/// when `png` is no PNG or says a side is zero.
+pub fn size(png: &[u8]) -> Option<(u32, u32)> {
+    if png.len() < 24 || png[..8] != SIGNATURE || &png[12..16] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes(png[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(png[20..24].try_into().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
 /// The pixels of the PNG `png`.
 pub fn decode(png: &[u8]) -> Result<Rgba, String> {
     if png.len() < 8 || png[..8] != SIGNATURE {
@@ -432,6 +443,19 @@ mod tests {
             height,
             pixels,
         }
+    }
+
+    #[test]
+    fn fr22_a_png_says_its_size_without_being_decoded() {
+        let image = Rgba {
+            width: 3,
+            height: 2,
+            pixels: vec![255; 3 * 2 * 4],
+        };
+        let png = encode(&image, true);
+        assert_eq!(size(&png), Some((3, 2)));
+        assert_eq!(size(&png[..20]), None);
+        assert_eq!(size(b"not a png at all, but long enough"), None);
     }
 
     #[test]

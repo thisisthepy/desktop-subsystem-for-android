@@ -282,6 +282,26 @@ fn pr5_a_wrong_command_line_is_a_usage_error() {
 }
 
 #[test]
+fn fr14_dsa_status_says_a_start_the_host_refused_is_a_host_problem() {
+    use dsa_host_core::host_api::Status;
+    let reason = dsa_host_core::start_failure::host_problem(
+        "HcsCreateComputeSystem failed (HRESULT 0x803b0014)",
+    );
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Stopped,
+        last_reason: Some(reason.clone()),
+        update_notice: None,
+        problem: None,
+        program_update: None,
+    });
+    assert!(
+        line.contains("This computer could not run Android. This is a problem with the computer"),
+        "{line}"
+    );
+    assert!(line.ends_with(&format!("details: {reason}")), "{line}");
+}
+
+#[test]
 fn fr14_dsa_shows_news_about_an_update_on_its_own_line() {
     use dsa_host_core::host_api::Status;
     let line = dsa_cli::describe(&Status {
@@ -313,6 +333,28 @@ fn fr2_dsa_shows_the_guest_console_of_a_failed_start_below_the_status_line() {
         line,
         "Android: Stopped (last stopped: the Android VM exited during boot)\n\
          last console lines:\n  Kernel panic"
+    );
+}
+
+#[test]
+fn nfr5_dsa_status_says_android_crashed_with_its_reason() {
+    use dsa_host_core::host_api::Status;
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Stopped,
+        last_reason: Some(
+            "Android crashed (kernel panic in binder_transaction)\nthe guest's console at the crash:\n  Kernel panic"
+                .into(),
+        ),
+        update_notice: None,
+        problem: None,
+        program_update: None,
+    });
+    assert_eq!(
+        line,
+        "Android: Stopped (last stopped: Android stopped unexpectedly. Open an app to start \
+         Android again. Reason: kernel panic in binder_transaction)\n\
+         details: Android crashed (kernel panic in binder_transaction)\n\
+         the guest's console at the crash:\n  Kernel panic"
     );
 }
 
@@ -1693,6 +1735,24 @@ fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
         status["program_update"].is_null(),
         "no update of DSA is reported by a service that does not update DSA"
     );
+}
+
+#[test]
+fn fr17_the_start_button_becomes_restart_while_android_runs() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let stopped = json_of(&dsa(&endpoint, "status --json"));
+    assert_eq!(stopped["start_button"], "start");
+    let started = json_of(&dsa(&endpoint, "start --wait --timeout 10 --json"));
+    assert_eq!(started["start_button"], "restart");
+    // With no image waiting, the Restart button's command stops Android and starts it again.
+    let restarted = json_of(&dsa(
+        &endpoint,
+        "android restart --wait --timeout 20 --json",
+    ));
+    assert_eq!(restarted["state"], "Active");
+    assert_eq!(restarted["start_button"], "restart");
+    assert!(restarted["restarting"].is_null());
 }
 
 #[test]
@@ -4211,6 +4271,47 @@ fn fr32_dsa_gapps_commands_are_parsed() {
         Cmd::GappsRemove
     );
     assert!(parse(&args("gapps enable")).is_err());
+}
+
+#[test]
+fn fr43_dsa_stores_install_names_one_of_three_stores() {
+    assert_eq!(parse(&args("stores")).unwrap().command, Cmd::StoresStatus);
+    assert_eq!(
+        parse(&args("stores --json")).unwrap().command,
+        Cmd::StoresStatus
+    );
+    for (name, code) in [
+        ("onestore", "onestore"),
+        ("Aurora", "aurora"),
+        ("fdroid", "fdroid"),
+    ] {
+        let install = parse(&args(&format!("stores install {name} --progress --json"))).unwrap();
+        assert_eq!(install.command, Cmd::StoresInstall);
+        assert_eq!(install.package.as_deref(), Some(code));
+        assert!(install.progress);
+        assert!(install.json);
+    }
+    assert!(parse(&args("stores install")).is_err());
+    assert!(parse(&args("stores install playstore")).is_err());
+    assert!(parse(&args("stores remove aurora")).is_err());
+}
+
+#[test]
+fn fr43_dsa_stores_json_lists_every_store_with_its_state() {
+    use dsa_host_core::alt_stores;
+    let app = dsa_host_core::tasks::AppInfo {
+        package_name: "com.aurora.store".into(),
+        version_name: "4.8.4".into(),
+        ..Default::default()
+    };
+    let json = dsa_cli::stores_json(&alt_stores::states(&[app]));
+    let stores = json["stores"].as_array().unwrap();
+    let ids: Vec<&str> = stores.iter().map(|s| s["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["onestore", "aurora", "fdroid"]);
+    assert_eq!(stores[0]["installed"], false);
+    assert_eq!(stores[1]["installed"], true);
+    assert_eq!(stores[1]["version"], "4.8.4");
+    assert_eq!(stores[2]["package"], "org.fdroid.fdroid");
 }
 
 /// LiteGapps' file host, from memory: one x86_64 build for API level 36.

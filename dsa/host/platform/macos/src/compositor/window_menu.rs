@@ -16,7 +16,9 @@
 //! else English ([`crate::ui_language`]).
 
 use dsa_host_core::compositor::window_hosts::MenuAction;
+use dsa_host_core::compositor::window_menu::{android_items as shared_items, AndroidItem};
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::window_menu::dsa_menu_text;
 
 /// One entry of the Window menu, before the window list AppKit adds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,17 +50,37 @@ pub fn window_menu(new_window: bool) -> Vec<WindowMenuItem> {
 /// The Android desktop window's items alone, as the band's secondary click shows them after
 /// Minimize and Zoom.
 pub fn android_items(new_window: bool) -> Vec<WindowMenuItem> {
-    let mut items = Vec::new();
-    if new_window {
-        items.push(WindowMenuItem::NewWindow);
+    shared_items(false, new_window)
+        .into_iter()
+        .filter_map(WindowMenuItem::of_android)
+        .collect()
+}
+
+impl WindowMenuItem {
+    /// The entry of an Android item; `None` for Full screen, which macOS has of its own (the
+    /// green button and the View menu).
+    fn of_android(item: AndroidItem) -> Option<WindowMenuItem> {
+        match item {
+            AndroidItem::FullScreen => None,
+            AndroidItem::NewWindow => Some(WindowMenuItem::NewWindow),
+            AndroidItem::Screenshot => Some(WindowMenuItem::Screenshot),
+            AndroidItem::AspectRatio => Some(WindowMenuItem::AspectRatio),
+            AndroidItem::OpenByDefault => Some(WindowMenuItem::OpenByDefault),
+            AndroidItem::AppInfo => Some(WindowMenuItem::AppInfo),
+        }
     }
-    items.extend([
-        WindowMenuItem::Screenshot,
-        WindowMenuItem::AspectRatio,
-        WindowMenuItem::OpenByDefault,
-        WindowMenuItem::AppInfo,
-    ]);
-    items
+
+    /// The Android item this entry is; `None` for macOS's own entries and the separator.
+    pub fn android(self) -> Option<AndroidItem> {
+        match self {
+            WindowMenuItem::NewWindow => Some(AndroidItem::NewWindow),
+            WindowMenuItem::Screenshot => Some(AndroidItem::Screenshot),
+            WindowMenuItem::AspectRatio => Some(AndroidItem::AspectRatio),
+            WindowMenuItem::OpenByDefault => Some(AndroidItem::OpenByDefault),
+            WindowMenuItem::AppInfo => Some(AndroidItem::AppInfo),
+            _ => None,
+        }
+    }
 }
 
 /// The menu item tag that names an Android entry when it is chosen; 0 for macOS's own entries
@@ -90,13 +112,7 @@ pub fn from_tag(tag: isize) -> Option<WindowMenuItem> {
 /// What the window manager does for an entry; `None` for Screenshot, which the window host
 /// takes, and for macOS's own entries.
 pub fn action(item: WindowMenuItem) -> Option<MenuAction> {
-    match item {
-        WindowMenuItem::NewWindow => Some(MenuAction::NewWindow),
-        WindowMenuItem::AspectRatio => Some(MenuAction::AspectRatio),
-        WindowMenuItem::OpenByDefault => Some(MenuAction::OpenByDefault),
-        WindowMenuItem::AppInfo => Some(MenuAction::AppInfo),
-        _ => None,
-    }
+    item.android().and_then(AndroidItem::action)
 }
 
 /// The AppKit action macOS's own entries send down the responder chain; `None` for the
@@ -136,213 +152,255 @@ pub struct MenuText {
     pub quit_app: &'static str,
 }
 
-/// The menu bar's words in `lang`, as macOS's own menus say them.
+/// The words macOS says itself: the Window menu, its own items and the app menu.
+struct OsWords {
+    window: &'static str,
+    minimize: &'static str,
+    zoom: &'static str,
+    bring_all_to_front: &'static str,
+    hide_app: &'static str,
+    hide_others: &'static str,
+    show_all: &'static str,
+    quit_app: &'static str,
+}
+
+/// The items where a Mac says DSA's word another way than the words every host shares
+/// ([`dsa_menu_text`]): the capitals its menus use for each word, and the words macOS itself
+/// picked for the same thing. In the order of [`UiLanguage::ALL`]: New window, Screenshot,
+/// Aspect ratio, Open by default and App info. `None` takes the shared word.
+const OWN_WORDS: [[Option<&str>; 5]; 14] = [
+    [
+        Some("New Window"),
+        None,
+        Some("Aspect Ratio"),
+        Some("Open by Default"),
+        Some("App Info"),
+    ], // English
+    [None, None, None, None, None],                          // Korean
+    [Some("新規ウインドウ"), None, None, None, None],        // Japanese
+    [None, Some("截屏"), None, None, None],                  // ChineseSimplified
+    [None, Some("截圖"), None, None, Some("App 資訊")],      // ChineseTraditional
+    [None, None, None, None, Some("Información de la app")], // Spanish
+    [
+        None,
+        Some("Capture d\u{2019}écran"),
+        Some("Format d\u{2019}image"),
+        None,
+        Some("Infos sur l\u{2019}app"),
+    ], // French
+    [None, Some("Bildschirmfoto"), None, None, None],        // German
+    [
+        Some("Nova Janela"),
+        Some("Captura de Tela"),
+        None,
+        Some("Abrir por Padrão"),
+        Some("Informações do App"),
+    ], // PortugueseBrazil
+    [None, None, None, None, None],                          // Russian
+    [
+        None,
+        Some("Istantanea schermo"),
+        None,
+        None,
+        Some("Info app"),
+    ], // Italian
+    [None, None, None, None, None],                          // Vietnamese
+    [
+        Some("Jendela Baru"),
+        Some("Jepretan Layar"),
+        Some("Rasio Aspek"),
+        Some("Buka secara Default"),
+        Some("Info App"),
+    ], // Indonesian
+    [
+        Some("Yeni Pencere"),
+        Some("Ekran Görüntüsü"),
+        Some("En Boy Oranı"),
+        Some("Varsayılan Olarak Aç"),
+        Some("Uygulama Bilgileri"),
+    ], // Turkish
+];
+
+/// The menu bar's words in `lang`, as macOS's own menus say them: its own words, DSA's shared
+/// words in the Mac's usual form, and an ellipsis after the items that ask for more, as on
+/// every Mac.
 pub fn menu_text(lang: UiLanguage) -> MenuText {
+    use std::sync::OnceLock;
+    static TEXTS: OnceLock<Vec<MenuText>> = OnceLock::new();
+    let texts = TEXTS.get_or_init(|| {
+        UiLanguage::ALL
+            .into_iter()
+            .map(|lang| {
+                let os = os_words(lang);
+                let shared = dsa_menu_text(lang);
+                let own = OWN_WORDS[lang.index()];
+                // Leaked once for the whole run, so the words stay `'static`.
+                let word =
+                    |own: Option<&'static str>, shared: &str, ellipsis: bool| -> &'static str {
+                        let mut word = own.unwrap_or(shared).to_string();
+                        if ellipsis {
+                            word.push('\u{2026}');
+                        }
+                        Box::leak(word.into_boxed_str())
+                    };
+                MenuText {
+                    window: os.window,
+                    minimize: os.minimize,
+                    zoom: os.zoom,
+                    new_window: word(own[0], shared.new_window, false),
+                    screenshot: word(own[1], shared.screenshot, false),
+                    aspect_ratio: word(own[2], shared.aspect_ratio, true),
+                    open_by_default: word(own[3], shared.open_by_default, true),
+                    app_info: word(own[4], shared.app_info, false),
+                    bring_all_to_front: os.bring_all_to_front,
+                    hide_app: os.hide_app,
+                    hide_others: os.hide_others,
+                    show_all: os.show_all,
+                    quit_app: os.quit_app,
+                }
+            })
+            .collect()
+    });
+    texts[lang.index()]
+}
+
+/// macOS's own words in `lang`.
+fn os_words(lang: UiLanguage) -> OsWords {
     match lang {
-        UiLanguage::English => MenuText {
+        UiLanguage::English => OsWords {
             window: "Window",
             minimize: "Minimize",
             zoom: "Zoom",
-            new_window: "New Window",
-            screenshot: "Screenshot",
-            aspect_ratio: "Aspect Ratio\u{2026}",
-            open_by_default: "Open by Default\u{2026}",
-            app_info: "App Info",
             bring_all_to_front: "Bring All to Front",
             hide_app: "Hide {app}",
             hide_others: "Hide Others",
             show_all: "Show All",
             quit_app: "Quit {app}",
         },
-        UiLanguage::Korean => MenuText {
+        UiLanguage::Korean => OsWords {
             window: "윈도우",
             minimize: "최소화",
             zoom: "확대/축소",
-            new_window: "새 창",
-            screenshot: "스크린샷",
-            aspect_ratio: "화면 비율\u{2026}",
-            open_by_default: "링크 열기 설정\u{2026}",
-            app_info: "앱 정보",
             bring_all_to_front: "모두 앞으로 가져오기",
             hide_app: "{app} 가리기",
             hide_others: "기타 가리기",
             show_all: "모두 보기",
             quit_app: "{app} 종료",
         },
-        UiLanguage::Japanese => MenuText {
+        UiLanguage::Japanese => OsWords {
             window: "ウインドウ",
             minimize: "しまう",
             zoom: "拡大/縮小",
-            new_window: "新規ウインドウ",
-            screenshot: "スクリーンショット",
-            aspect_ratio: "縦横比\u{2026}",
-            open_by_default: "デフォルトで開く\u{2026}",
-            app_info: "アプリ情報",
             bring_all_to_front: "すべてを手前に移動",
             hide_app: "{app}を非表示",
             hide_others: "ほかを非表示",
             show_all: "すべてを表示",
             quit_app: "{app}を終了",
         },
-        UiLanguage::ChineseSimplified => MenuText {
+        UiLanguage::ChineseSimplified => OsWords {
             window: "窗口",
             minimize: "最小化",
             zoom: "缩放",
-            new_window: "新建窗口",
-            screenshot: "截屏",
-            aspect_ratio: "宽高比\u{2026}",
-            open_by_default: "默认打开\u{2026}",
-            app_info: "应用信息",
             bring_all_to_front: "前置全部窗口",
             hide_app: "隐藏\u{201c}{app}\u{201d}",
             hide_others: "隐藏其他",
             show_all: "全部显示",
             quit_app: "退出\u{201c}{app}\u{201d}",
         },
-        UiLanguage::ChineseTraditional => MenuText {
+        UiLanguage::ChineseTraditional => OsWords {
             window: "視窗",
             minimize: "縮到最小",
             zoom: "縮放",
-            new_window: "新增視窗",
-            screenshot: "截圖",
-            aspect_ratio: "長寬比\u{2026}",
-            open_by_default: "預設開啟\u{2026}",
-            app_info: "App 資訊",
             bring_all_to_front: "將此程式所有視窗移至最前",
             hide_app: "隱藏\u{300c}{app}\u{300d}",
             hide_others: "隱藏其他",
             show_all: "顯示全部",
             quit_app: "結束\u{300c}{app}\u{300d}",
         },
-        UiLanguage::Spanish => MenuText {
+        UiLanguage::Spanish => OsWords {
             window: "Ventana",
             minimize: "Minimizar",
             zoom: "Zoom",
-            new_window: "Nueva ventana",
-            screenshot: "Captura de pantalla",
-            aspect_ratio: "Relación de aspecto\u{2026}",
-            open_by_default: "Abrir de forma predeterminada\u{2026}",
-            app_info: "Información de la app",
             bring_all_to_front: "Traer todo al frente",
             hide_app: "Ocultar {app}",
             hide_others: "Ocultar otros",
             show_all: "Mostrar todo",
             quit_app: "Salir de {app}",
         },
-        UiLanguage::French => MenuText {
+        UiLanguage::French => OsWords {
             window: "Fenêtre",
             minimize: "Placer dans le Dock",
             zoom: "Réduire/agrandir",
-            new_window: "Nouvelle fenêtre",
-            screenshot: "Capture d\u{2019}écran",
-            aspect_ratio: "Format d\u{2019}image\u{2026}",
-            open_by_default: "Ouvrir par défaut\u{2026}",
-            app_info: "Infos sur l\u{2019}app",
             bring_all_to_front: "Tout ramener au premier plan",
             hide_app: "Masquer {app}",
             hide_others: "Masquer les autres",
             show_all: "Tout afficher",
             quit_app: "Quitter {app}",
         },
-        UiLanguage::German => MenuText {
+        UiLanguage::German => OsWords {
             window: "Fenster",
             minimize: "Im Dock ablegen",
             zoom: "Zoomen",
-            new_window: "Neues Fenster",
-            screenshot: "Bildschirmfoto",
-            aspect_ratio: "Seitenverhältnis\u{2026}",
-            open_by_default: "Standardmäßig öffnen\u{2026}",
-            app_info: "App-Info",
             bring_all_to_front: "Alle nach vorne bringen",
             hide_app: "{app} ausblenden",
             hide_others: "Andere ausblenden",
             show_all: "Alle einblenden",
             quit_app: "{app} beenden",
         },
-        UiLanguage::PortugueseBrazil => MenuText {
+        UiLanguage::PortugueseBrazil => OsWords {
             window: "Janela",
             minimize: "Minimizar",
             zoom: "Zoom",
-            new_window: "Nova Janela",
-            screenshot: "Captura de Tela",
-            aspect_ratio: "Proporção\u{2026}",
-            open_by_default: "Abrir por Padrão\u{2026}",
-            app_info: "Informações do App",
             bring_all_to_front: "Trazer Todas para a Frente",
             hide_app: "Ocultar {app}",
             hide_others: "Ocultar Outros",
             show_all: "Mostrar Tudo",
             quit_app: "Encerrar {app}",
         },
-        UiLanguage::Russian => MenuText {
+        UiLanguage::Russian => OsWords {
             window: "Окно",
             minimize: "Свернуть",
             zoom: "Изменить масштаб",
-            new_window: "Новое окно",
-            screenshot: "Снимок экрана",
-            aspect_ratio: "Соотношение сторон\u{2026}",
-            open_by_default: "Открывать по умолчанию\u{2026}",
-            app_info: "О приложении",
             bring_all_to_front: "Переместить все окна вперед",
             hide_app: "Скрыть {app}",
             hide_others: "Скрыть остальные",
             show_all: "Показать все",
             quit_app: "Завершить {app}",
         },
-        UiLanguage::Italian => MenuText {
+        UiLanguage::Italian => OsWords {
             window: "Finestra",
             minimize: "Contrai",
             zoom: "Zoom",
-            new_window: "Nuova finestra",
-            screenshot: "Istantanea schermo",
-            aspect_ratio: "Proporzioni\u{2026}",
-            open_by_default: "Apri per impostazione predefinita\u{2026}",
-            app_info: "Info app",
             bring_all_to_front: "Porta tutto in primo piano",
             hide_app: "Nascondi {app}",
             hide_others: "Nascondi altre",
             show_all: "Mostra tutte",
             quit_app: "Esci da {app}",
         },
-        UiLanguage::Vietnamese => MenuText {
+        UiLanguage::Vietnamese => OsWords {
             window: "Cửa sổ",
             minimize: "Thu nhỏ",
             zoom: "Thu/phóng",
-            new_window: "Cửa sổ mới",
-            screenshot: "Ảnh chụp màn hình",
-            aspect_ratio: "Tỷ lệ khung hình\u{2026}",
-            open_by_default: "Mở theo mặc định\u{2026}",
-            app_info: "Thông tin ứng dụng",
             bring_all_to_front: "Đưa tất cả ra trước",
             hide_app: "Ẩn {app}",
             hide_others: "Ẩn ứng dụng khác",
             show_all: "Hiển thị tất cả",
             quit_app: "Thoát {app}",
         },
-        UiLanguage::Indonesian => MenuText {
+        UiLanguage::Indonesian => OsWords {
             window: "Jendela",
             minimize: "Minimalkan",
             zoom: "Perbesar/Perkecil",
-            new_window: "Jendela Baru",
-            screenshot: "Jepretan Layar",
-            aspect_ratio: "Rasio Aspek\u{2026}",
-            open_by_default: "Buka secara Default\u{2026}",
-            app_info: "Info App",
             bring_all_to_front: "Bawa Semua ke Depan",
             hide_app: "Sembunyikan {app}",
             hide_others: "Sembunyikan Lainnya",
             show_all: "Tampilkan Semua",
             quit_app: "Keluar dari {app}",
         },
-        UiLanguage::Turkish => MenuText {
+        UiLanguage::Turkish => OsWords {
             window: "Pencere",
             minimize: "Küçült",
             zoom: "Büyüt/Küçült",
-            new_window: "Yeni Pencere",
-            screenshot: "Ekran Görüntüsü",
-            aspect_ratio: "En Boy Oranı\u{2026}",
-            open_by_default: "Varsayılan Olarak Aç\u{2026}",
-            app_info: "Uygulama Bilgileri",
             bring_all_to_front: "Tümünü Öne Getir",
             hide_app: "{app} Uygulamasını Gizle",
             hide_others: "Diğerlerini Gizle",

@@ -63,8 +63,8 @@ use std::time::Duration;
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
     AddonImage, AddonImagePart, AddonImageRead, AndroidFiles, ArmTranslationState, Envelope,
-    FileSharing, GappsState, GuestBoot, GuestSharedMemory, HostCertificates, LocationRequest,
-    PowerHintKind, RootElevationConfig,
+    FileSharing, GappsState, GoogleDeviceId, GuestBoot, GuestSharedMemory, HostCertificates,
+    LocationRequest, PowerHintKind, RootElevationConfig,
 };
 
 use crate::arm_translation::ArmTranslation;
@@ -287,6 +287,8 @@ pub struct Router {
     arm_translation: Option<Arc<ArmTranslation>>,
     /// The Google apps' image on the user's disk, which the host installs and removes.
     gapps: Option<Arc<Gapps>>,
+    /// Reads the Android ID where Google Play services keep it, for when the agent has none.
+    google_device_id: Option<GoogleDeviceIdSource>,
     /// The gamepad devices of the host's controllers.
     gamepads: Option<Arc<GamepadDevices>>,
     /// Drives the kernel's su guard for the host's root elevation config.
@@ -319,6 +321,9 @@ type SharedMemorySwitch = Box<dyn Fn(&GuestSharedMemory) + Send + Sync>;
 /// Drives the kernel's su guard for a root elevation config: which uids may see su, on or off.
 type RootElevationSwitch = Box<dyn Fn(&RootElevationConfig) + Send + Sync>;
 
+/// The Google Services Framework Android ID, read from Google Play services' own files.
+type GoogleDeviceIdSource = Box<dyn Fn() -> Option<String> + Send + Sync>;
+
 /// Says whether the caller of the current call is the agent. It runs on the caller's thread.
 type AgentCheck = Box<dyn Fn(Peer) -> Result<(), String> + Send + Sync>;
 
@@ -340,6 +345,7 @@ impl Router {
             shared_memory: None,
             arm_translation: None,
             gapps: None,
+            google_device_id: None,
             gamepads: None,
             root_elevation: None,
             su_relay: None,
@@ -439,6 +445,17 @@ impl Router {
     /// Hands the host's ARM translation messages to `package`, and its answers to the host.
     pub fn on_arm_translation(mut self, package: Arc<ArmTranslation>) -> Router {
         self.arm_translation = Some(package);
+        self
+    }
+
+    /// Fills in the Google Services Framework Android ID from `read` when the agent's answer to
+    /// the host has none: Google Play services refuse the agent their provider, but the daemon
+    /// may read the ID from their files.
+    pub fn on_google_device_id(
+        mut self,
+        read: impl Fn() -> Option<String> + Send + Sync + 'static,
+    ) -> Router {
+        self.google_device_id = Some(Box::new(read));
         self
     }
 
@@ -864,12 +881,19 @@ impl Router {
                     "an add-on image on the user's disk is the daemon's to send".to_string(),
                 ))
             }
-            Some(Body::GoogleDeviceId(_)) => {
+            Some(Body::GoogleDeviceId(answer)) => {
                 (self.agent_check)(sender).map_err(|why| {
                     SendError::NotAllowed(format!(
                         "only the agent says the Google Services Framework Android ID: {why}"
                     ))
                 })?;
+                if answer.id.trim().is_empty() {
+                    if let Some(id) = self.google_device_id.as_ref().and_then(|read| read()) {
+                        frame = dsa_protocol::encode(&Envelope {
+                            body: Some(Body::GoogleDeviceId(GoogleDeviceId { id })),
+                        });
+                    }
+                }
             }
             // The host stores what the backup transport sends as the user's app data, and
             // trusts a passkey request to name the app Android's credential manager says

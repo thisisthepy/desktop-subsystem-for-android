@@ -1,0 +1,4 @@
+# The boot asked for the dxg OpenGL ES driver (androidboot.dsa.egl=dxg): Mesa's d3d12 driver in
+# place of ANGLE. Nothing passes the argument by default; it is for comparing the two on the dxg
+# path. Only an image made with --dxg-drivers has this file.
+ro.hardware.egl=dxg

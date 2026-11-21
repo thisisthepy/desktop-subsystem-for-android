@@ -14,6 +14,7 @@
 //! - [`launch`]: starting an app's window host from its bundle.
 //! - `hosts`, `present`, `graphics`, `run` (macOS only): the window hosts' connections, the
 //!   frames' way to them, the graphics streams, and the loop that runs it all.
+//! - `clipboard` (macOS only): the clipboard between the user's pasteboard and their Android.
 //! - `notifications` (macOS only): the user's notifications, and DSA's own news about updates,
 //!   in the Notification Center.
 //! - [`widget_panels`]: what a widget's panel is on the desktop, its units, input and menu
@@ -24,6 +25,8 @@ pub mod launch;
 pub mod manager;
 pub mod widget_panels;
 
+#[cfg(target_os = "macos")]
+pub mod clipboard;
 #[cfg(target_os = "macos")]
 pub mod graphics;
 #[cfg(target_os = "macos")]

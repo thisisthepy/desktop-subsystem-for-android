@@ -58,7 +58,42 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertRegex(cil, r"\(allow dsa_channeld self \(capability \([^)]*\bsys_nice\b[^)]*\bsys_ptrace\b")
         rc = (here / "dsa-channeld.rc").read_text()
         service = rc[rc.index("service dsa_channeld"):rc.index("on property:sys.boot_completed=1")]
-        self.assertIn("capabilities SYS_NICE SYS_PTRACE", service)
+        self.assertIn("capabilities SYS_NICE SYS_PTRACE\n", service)
+
+    def test_fr32_a_root_helper_reads_the_android_id_google_play_services_keep(self):
+        # Google Play services refuse their gservices provider to the agent and keep the ID in a
+        # file of their app user. AOSP's domain.te has a neverallow that forbids dac_read_search
+        # outside its own list of domains, and another for opening privapp_data_file. The image's
+        # secilc compile runs with -N, so it does not enforce neverallow rules and this test is
+        # DSA's own guard: the daemon and the helper's domain must not use the capability or open
+        # that data, so the helper init runs as root is permissive instead, as the approved root
+        # command's domain is, and gets the one capability the file needs from init.
+        here = Path(__file__).parent
+        rules = [line for sd in (here / "sepolicy").glob("*.cil")
+                 for line in sd.read_text().splitlines() if not line.lstrip().startswith(";")]
+        # Only these two domains are held to it. dsa_sharemount and dsa_widevine_reset carry
+        # dac_read_search for folders they own, as shipped since Nov 5 and Nov 13.
+        for line in rules:
+            if re.match(r"\(allow\s+(dsa_channeld|dsa_google_id)\s", line):
+                self.assertNotIn("dac_read_search", line, line)
+                self.assertNotIn("privapp_data_file", line, line)
+        policy = "\n".join(rules)
+        self.assertIn("(typepermissive dsa_google_id)", policy)
+        setters = re.findall(r"\(allow\s+(\S+)\s+dsa_google_id_prop\s+\(\s*property_service\s+\(([^)]*)\)", policy)
+        self.assertEqual({who for who, perms in setters if "set" in perms.split()},
+                         {"dsa_channeld", "dsa_google_id"})
+        rc = (here / "dsa-channeld.rc").read_text()
+        block = [line.strip() for line in rc[rc.index("service dsa_google_id"):].split("\n\n")[0].splitlines()]
+        for option in ["service dsa_google_id /vendor/bin/dsa-channeld --google-device-id", "user root",
+                       "capabilities DAC_READ_SEARCH", "seclabel u:r:dsa_google_id:s0", "oneshot", "disabled"]:
+            self.assertIn(option, block)
+        self.assertIn("on property:vendor.dsa.google_device_id=request\n    start dsa_google_id", rc)
+        self.assertEqual(make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT,
+                         "vendor.dsa.google_device_id u:object_r:dsa_google_id_prop:s0 exact string")
+        self.assertIn(make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT,
+                      make_image.update_vendor_property_contexts("").splitlines())
+        # The daemon reads the answer, and nothing it may reach is anything of the services'.
+        self.assertRegex(policy, r"\(allow\s+dsa_channeld\s+dsa_google_id_prop\s+\(\s*file\s+\(\s*read\b")
 
     def test_fr21_channeld_may_clear_the_pstore_records_the_host_collected(self):
         # init leaves /sys/fs/pstore read only to system; the daemon makes it writable to
@@ -66,6 +101,20 @@ class ImageLayoutTests(unittest.TestCase):
         cil = (Path(__file__).parent / "sepolicy" / "channeld.cil").read_text()
         self.assertRegex(cil, r"\(allow dsa_channeld pstorefs \(dir \([^)]*\bsetattr\b[^)]*\bremove_name\b")
         self.assertRegex(cil, r"\(allow dsa_channeld pstorefs \(file \([^)]*\bunlink\b")
+
+    def test_nfr2_channeld_may_read_the_free_page_reporting_numbers(self):
+        # Every console showed "avc: denied { read } ... name="reported_kb"
+        # tcontext=...dsa_sysfs_page_reporting_stats" from an image without the rule.
+        cil = (Path(__file__).parent / "sepolicy" / "channeld.cil").read_text()
+        self.assertRegex(
+            cil,
+            r"\(allow dsa_channeld dsa_sysfs_page_reporting_stats \(file \([^)]*\bread\b[^)]*\bopen\b")
+        memory = (Path(__file__).parent / "sepolicy" / "memory.cil").read_text()
+        self.assertIn('(genfscon sysfs "/module/page_reporting/parameters/reported_kb" '
+                      '(u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))', memory)
+        # The image check refuses an image whose policy lost it.
+        check = (Path(__file__).with_name("check-image.py")).read_text()
+        self.assertIn("dsa_sysfs_page_reporting_stats", check)
 
     # The SELinux type and class of every kernel file dsa-channeld opens, as the guest's kernel
     # labels it, and the permission an open asks of it when that is not read (dir: search). A
@@ -85,6 +134,23 @@ class ImageLayoutTests(unittest.TestCase):
         "/proc/{pid}/status": [("appdomain", "file")],
         "/proc/{}/oom_score_adj": [("appdomain", "file")],
         "/proc/{}/maps": [("appdomain", "file")],
+        # zram's size and statistics, which the reclaim and the writeback read, and the free page
+        # reporting numbers the reclaim logs, which have a type of their own.
+        "/sys/devices/virtual/block/zram0": [("sysfs_zram", "dir"), ("sysfs_zram", "file")],
+        "/sys/devices/virtual/block/zram0/disksize": [("sysfs_zram", "dir"), ("sysfs_zram", "file")],
+        "/sys/module/page_reporting/parameters/reported_kb": [
+            ("sysfs", "dir"),
+            ("dsa_sysfs_page_reporting_stats", "file"),
+        ],
+        # The second zram device's helper: what is swapped, zram-control's hot_add, and zram1's
+        # own size and reset.
+        "/proc/swaps": [("proc_swaps", "file")],
+        "/sys/class/zram-control/hot_add": [("sysfs", "dir"), ("sysfs", "file")],
+        "/sys/devices/virtual/block/zram1": [
+            ("sysfs_zram", "dir"),
+            ("sysfs_zram", "file"),
+            ("sysfs_zram", "file", "write"),
+        ],
         # The kernel's su guard on securityfs, which only the elevation helper writes.
         "/sys/kernel/security/dsa_su/control": [
             ("securityfs", "dir"),
@@ -97,8 +163,26 @@ class ImageLayoutTests(unittest.TestCase):
     # of its own: on the guest the daemon hands each config to the elevation helper
     # (HelperGuard), because the guard refuses the daemon, which runs as system.
     CHANNELD_KERNEL_NAMED_NOT_OPENED = {("su_relay.rs", "/sys/kernel/security/dsa_su/control")}
+    # What a source's mode needs from a path where it is not what the daemon needs: the memory
+    # report lists the processes through /proc with the permission every domain has on it.
+    CHANNELD_SOURCE_PATHS = {
+        "memory_report.rs": {
+            "/proc": [("proc", "dir")],
+            "/proc/slabinfo": [("proc_slabinfo", "file")],
+            "/proc/vmallocinfo": [("proc_vmallocinfo", "file")],
+            "/proc/allocinfo": [("proc_allocinfo", "file")],
+            "/sys/fs/cgroup/cgroup.stat": [("cgroup_v2", "dir"), ("cgroup_v2", "file")],
+            "/sys/module/dm_bufio/parameters/current_allocated_bytes": [
+                ("sysfs", "dir"),
+                ("sysfs", "file"),
+            ],
+        },
+    }
     # The modes init runs the same binary in, each in a domain of its own.
     CHANNELD_SOURCE_DOMAINS = {
+        "memory_report.rs": ("dsa_memory_report", "channeld.cil"),
+        # The second zram device's helper (dsa-channeld --zram-extra).
+        "zram_grow.rs": ("dsa_zram_extra", "memory.cil"),
         "share_mount.rs": ("dsa_sharemount", "files.cil"),
         "android_files.rs": ("dsa_files", "files.cil"),
         "webdav.rs": ("dsa_files", "files.cil"),
@@ -109,10 +193,15 @@ class ImageLayoutTests(unittest.TestCase):
         "keymint_key.rs": ("dsa_keymint_key", "channeld.cil"),
         # The packet filter rules that send DNS queries to the stub (dsa-channeld --dns-redirect).
         "dns_redirect.rs": ("dsa_dns_redirect", "channeld.cil"),
+        # The Google device ID helper (dsa-channeld --google-device-id). Its domain is
+        # permissive, because the platform's neverallow rules forbid any rule for the file it
+        # reads, so the scans below leave its source out (see the FR-32 test on the policy).
+        "google_id_reader.rs": ("dsa_google_id", "channeld.cil"),
     }
+    CHANNELD_PERMISSIVE_DOMAINS = {"dsa_google_id"}
     # The policy files the image installs together with the daemon, so a rule for one of its
     # domains may live in any of them (the daemon's root elevation rules are in su.cil).
-    CHANNELD_POLICY_FILES = ("channeld.cil", "files.cil", "su.cil")
+    CHANNELD_POLICY_FILES = ("channeld.cil", "files.cil", "su.cil", "memory.cil")
 
     @classmethod
     def _daemon_policy(cls, here):
@@ -129,6 +218,8 @@ class ImageLayoutTests(unittest.TestCase):
             domain, policy_file = self.CHANNELD_SOURCE_DOMAINS.get(
                 source.name, ("dsa_channeld", "channeld.cil")
             )
+            if domain in self.CHANNELD_PERMISSIVE_DOMAINS:
+                continue
             policy = self._daemon_policy(here)
             for number, line in enumerate(source.read_text().splitlines(), 1):
                 if line.strip().startswith("//"):
@@ -140,14 +231,15 @@ class ImageLayoutTests(unittest.TestCase):
                     if (source.name, path) in self.CHANNELD_KERNEL_NAMED_NOT_OPENED:
                         continue
                     where = f"{source.name}:{number} opens {path}"
+                    paths = {**self.CHANNELD_KERNEL_PATHS, **self.CHANNELD_SOURCE_PATHS.get(source.name, {})}
                     self.assertIn(
                         path,
-                        self.CHANNELD_KERNEL_PATHS,
+                        paths,
                         f"{where}, which this test does not know: add its SELinux type here "
                         f"and an allow rule for {domain} to sepolicy/{policy_file}",
                     )
                     found += 1
-                    for target, cls, *asked in self.CHANNELD_KERNEL_PATHS[path]:
+                    for target, cls, *asked in paths[path]:
                         perm = asked[0] if asked else "search" if cls == "dir" else "read"
                         self.assertRegex(
                             policy,
@@ -237,6 +329,8 @@ class ImageLayoutTests(unittest.TestCase):
             domain, policy_file = self.CHANNELD_SOURCE_DOMAINS.get(
                 source.name, ("dsa_channeld", "channeld.cil")
             )
+            if domain in self.CHANNELD_PERMISSIVE_DOMAINS:
+                continue
             policy = self._daemon_policy(here)
             for number, line in self._production_lines(source):
                 for path in literal.findall(line):
@@ -2713,8 +2807,8 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))", policy)
 
     def test_nfr2_the_agent_may_read_what_free_page_reporting_gave_back(self):
-        # The agent's memory report carries the kernel's counts; only it may read them, and
-        # nothing may write them.
+        # The agent's memory report carries the kernel's counts, and channeld's reclaim reads
+        # how much the last one gave back; only they may read them, and nothing may write them.
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             for name in ["reported_kb", "reported_total_kb", "refaulted_total_kb"]:
@@ -2724,7 +2818,8 @@ class GuestMemoryTests(unittest.TestCase):
                     policy,
                 )
             readers = re.findall(r"\(allow (\S+) dsa_sysfs_page_reporting_stats \(file \(([^)]*)\)\)\)", policy)
-            self.assertEqual(sorted(readers), [("platform_app", "read open getattr"),
+            self.assertEqual(sorted(readers), [("dsa_channeld", "read open getattr"),
+                                               ("platform_app", "read open getattr"),
                                                ("system_app", "read open getattr")])
 
     def test_nfr2_the_reclaims_compact_only_where_the_host_takes_back_whole_blocks(self):
@@ -3119,7 +3214,7 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertEqual(rc[trigger + 1], "    start dsa_memory_report")
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn("(typeattributeset domain (dsa_memory_report))", policy)
-            for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo"]:
+            for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo", "proc_allocinfo"]:
                 self.assertIn(f"(allow dsa_memory_report {kind} (file (read open getattr)))", policy)
             # It writes nothing but its log.
             writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)
@@ -3219,7 +3314,7 @@ class GuestMemoryTests(unittest.TestCase):
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
             trigger = rc[rc.index("on property:vendor.dsa.memory.trim=1"):]
             self.assertIn("vendor.dsa.memory.trim_size u:object_r:dsa_memory_prop:s0 exact int", contexts)
-            self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"', trigger)
+            self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"', trigger)
             self.assertNotIn("drop_caches", trigger)
             # What the trim freed is scattered: compacting gathers it into whole blocks that free
             # page reporting hands back now, not when background compaction gets to it.
@@ -3251,7 +3346,9 @@ class GuestMemoryTests(unittest.TestCase):
             + make_image.FILES_PROPERTY_CONTEXT + "\n"
             + make_image.ROOT_ELEVATION_PROPERTY_CONTEXT + "\n"
             + make_image.DNS_PROPERTY_CONTEXT + "\n"
+            + make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT + "\n"
             + make_image.HOST_MEMORY_PROPERTY_CONTEXT + "\n"
+            + make_image.HOST_MEMORY_REAL_PROPERTY_CONTEXT + "\n"
             + make_image.VIDEO_PICTURES_PROPERTY_CONTEXT + "\n"
             + make_image.GRAPHICS_MEMORY_PROPERTY_CONTEXT + "\n"
             + "".join(context + "\n" for context in make_image.GAPPS_COMPILE_PROPERTY_CONTEXTS.values())
@@ -6295,7 +6392,7 @@ class PublishedOdexTests(unittest.TestCase):
                 # members after it lie elsewhere in the new archive than in the published one,
                 # so a member read from the published archive after it is copied is read at
                 # its new place, which is no member's start there.
-                archive.writestr("SYSTEM/app/Traceur/Traceur.apk", b"removed" * 64)
+                archive.writestr("SYSTEM/app/Music/Music.apk", b"removed" * 64)
                 for name, data in files.items():
                     archive.writestr(name, data)
             make_image.modify(source, root / "modified.zip")
@@ -8861,6 +8958,9 @@ class HostMemoryImageTests(unittest.TestCase):
         rc = files[make_image.MEMORY_RC].decode().replace("\r\n", "\n")
         self.assertIn("on property:vendor.dsa.host_memory.uids=*\n"
                       "    write /sys/module/dsa_host_memory/parameters/uids ${vendor.dsa.host_memory.uids}", rc)
+        self.assertIn("on property:vendor.dsa.host_memory.real_uids=*\n"
+                      "    write /sys/module/dsa_host_memory/parameters/real_uids "
+                      "${vendor.dsa.host_memory.real_uids}", rc)
 
     def test_fr32_no_app_may_name_itself_or_read_the_computers_memory(self):
         writers = re.findall(r"\(allow\s+(\S+)\s+dsa_sysfs_host_memory\s+\(\s*file\s+\(([^)]*)\)",
@@ -8885,7 +8985,9 @@ class HostMemoryImageTests(unittest.TestCase):
         framework = {"framework": {"files": {"SYSTEM/lib64/libhwui.so": "0" * 64}}}
         problems = make_image.host_memory_problems(framework, list(files), files.__getitem__)
         expected = ["does not hand vendor.dsa.host_memory.uids to the kernel",
+                    "does not hand vendor.dsa.host_memory.real_uids to the kernel",
                     "does not give vendor.dsa.host_memory.uids its type",
+                    "does not give vendor.dsa.host_memory.real_uids its type",
                     "untrusted_app may write the kernel's list",
                     "untrusted_app may name the apps",
                     "has no SYSTEM/lib64/libandroid_runtime.so"]
@@ -8893,18 +8995,24 @@ class HostMemoryImageTests(unittest.TestCase):
             self.assertTrue(any(text in p for p in problems), (text, problems))
         self.assertEqual(len(problems), len(expected), problems)
 
-    def test_fr32_the_framework_answers_google_plays_memory_info_with_the_computers(self):
-        # ActivityManager.getMemoryInfo is computed in system_server from
-        # Process.getTotalMemory; the patch answers a listed binder caller with total_kb.
+    def test_fr32_the_framework_answers_apps_memory_info_with_the_memory_the_vm_may_grow_to(self):
+        # ActivityManager.getMemoryInfo is computed in system_server from Process.getTotalMemory,
+        # getMemAvailable and getMemFree; the patch answers an app binder caller with total_kb
+        # (store_total_kb for the app store), plus what the VM may still grow, and a system
+        # caller or one in real_uids with the VM's own size.
         framework = self.HERE.parent / "framework" / "patches" / "frameworks" / "base"
         for android in ("android16", "android17"):
-            patch = (framework / android / "0002-show-google-play-the-computers-memory.patch").read_text()
+            patch = (framework / android / "0002-show-apps-the-memory-the-vm-may-grow-to.patch").read_text()
             self.assertIn("+++ b/core/jni/android_util_Process.cpp", patch)
             self.assertIn("IPCThreadState::self()->getCallingUid()", patch)
             self.assertIn("/sys/module/dsa_host_memory/parameters/", patch)
-            self.assertIn('std::string(kDir) + "uids"', patch)
-            self.assertIn('std::string(kDir) + "total_kb"', patch)
+            for name in ("total_kb", "store_total_kb", "uids", "real_uids"):
+                self.assertIn(f'"{name}"', patch)
             self.assertIn("caller % kPerUserRange", patch)
+            self.assertIn("app < kFirstApplicationUid", patch)
+            self.assertIn("+    return dsaMemoryForCaller(own, &headroom);", patch)
+            self.assertEqual(patch.count("+    return dsaFreeMemoryForCaller("), 2)
+            self.assertIn(f"(Android {android[-2:]})", patch)
         self.assertIn(make_image.HOST_MEMORY_FRAMEWORK_FILE, make_image.FRAMEWORK_FILES)
 
     def test_fr32_the_framework_shows_google_play_a_phones_density(self):
@@ -9636,6 +9744,13 @@ class SlimSystemServerTests(unittest.TestCase):
         for app in ("DynamicSystemInstallationService", "DeviceDiagnostics"):
             self.assertNotIn(app, make_image.REMOVED_APPS)
 
+    def test_nfr1_system_tracing_and_the_android_easter_egg_stay_without_starting_at_boot(self):
+        # A phone has both: System Tracing in developer options, and the logo that opens when
+        # the Android version in About is tapped. Neither runs until it is opened.
+        for app in ("Traceur", "EasterEgg"):
+            self.assertNotIn(app, make_image.REMOVED_APPS)
+        self.assertIn("/Traceur.apk", make_image.BOOT_RECEIVER_FREE_APKS)
+
     def test_nfr1_check_image_refuses_an_app_that_still_starts_at_boot(self):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()
         self.assertIn("make_image.boot_receivers_left(z.read(name))", script)
@@ -9765,6 +9880,278 @@ class AppGraphicsMemoryAccessTests(unittest.TestCase):
         header = (self.HERE.parent.parent / "graphics/include/dsa_graphics_memory_device.h").read_text(
             encoding="utf-8")
         self.assertIn('"' + make_image.VULKAN_DRIVER_GRAPHICS_DEVICE_TEXT.decode() + ", errno", header)
+
+
+class DxgDriverTests(unittest.TestCase):
+    """The image's half of the dxg graphics path: the drivers ride along only with --dxg-drivers,
+    only a boot that asks uses them, and no closed or glibc binary gets in."""
+
+    @staticmethod
+    def _library(machine=62, needed=("libc.so", "libm.so", "libdl.so", "liblog.so"), body=b""):
+        """A 64-bit ELF library for `machine` that needs `needed`."""
+        return KeyMintImageTests._elf(machine, list(needed), body)
+
+    def _drivers(self, root, machine=62, extra=None, needed=None):
+        folder = root / "dxg"
+        folder.mkdir()
+        for name in make_image.DXG_DRIVER_FILES:
+            libs = list(needed) if needed is not None else ["libc.so", "libm.so", "libdl.so", "libglapi.so"]
+            (folder / name).write_bytes(self._library(machine, libs, name.encode()))
+        (folder / "lib").mkdir()
+        (folder / "lib/libglapi.so").write_bytes(self._library(machine, ["libc.so"], b"glapi"))
+        for name, data in (extra or {}).items():
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(data)
+        return folder
+
+    def _modify(self, root, dxg_drivers=None, ueventd=None):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            archive.writestr("SYSTEM/build.prop", "ro.debuggable=1\n")
+            archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+            archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
+            archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\n")
+            archive.writestr("VENDOR/etc/selinux/vendor_file_contexts",
+                             "/(vendor|system/vendor)/bin/sh u:object_r:vendor_shell_exec:s0\n")
+            if ueventd is not None:
+                archive.writestr(make_image.DXG_UEVENTD, ueventd)
+        modified = root / "modified.zip"
+        make_image.modify(source, modified, dxg_drivers=dxg_drivers)
+        return zipfile.ZipFile(modified)
+
+    def test_pr3_an_image_without_dxg_drivers_has_no_trace_of_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._modify(Path(tmp)) as archive:
+                names = set(archive.namelist())
+                product = archive.read("PRODUCT/etc/build.prop").decode()
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+        for target in [*make_image.DXG_DRIVER_FILES.values(), *make_image.DXG_PROPS, make_image.DXG_UEVENTD]:
+            self.assertNotIn(target, names)
+        for line in make_image.DXG_IMPORTS:
+            self.assertNotIn(line, product)
+        self.assertNotIn("/dev/dxg", contexts)
+        # The build.prop still picks the host renderer's drivers.
+        self.assertEqual(make_image.GRAPHICS_PROPS["ro.hardware.vulkan"], "ranchu")
+        self.assertEqual(make_image.GRAPHICS_PROPS["ro.hardware.egl"], "angle")
+
+    def test_pr3_the_dxg_drivers_are_vendor_libraries_a_boot_argument_selects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            drivers = self._drivers(root)
+            with self._modify(root, dxg_drivers=drivers) as archive:
+                names = set(archive.namelist())
+                product = archive.read("PRODUCT/etc/build.prop").decode().splitlines()
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode().splitlines()
+                vendor_fs = archive.read("META/vendor_filesystem_config.txt").decode().splitlines()
+                system_fs = archive.read("META/filesystem_config.txt").decode().splitlines()
+                ueventd = archive.read(make_image.DXG_UEVENTD).decode().splitlines()
+                props = {name: archive.read(name).decode() for name in make_image.DXG_PROPS}
+                vulkan = archive.read("VENDOR/lib64/hw/vulkan.dxg.so")
+                glapi = archive.read("VENDOR/lib64/libglapi.so")
+            self.assertEqual(vulkan, (drivers / "vulkan.dxg.so").read_bytes())
+            self.assertEqual(glapi, (drivers / "lib/libglapi.so").read_bytes())
+        for target in make_image.DXG_DRIVER_FILES.values():
+            self.assertIn(target, names)
+            path = target[len("VENDOR/"):]
+            # Loaded into every app's process, so labelled as a same-process HAL.
+            self.assertIn(f"/vendor/{re.escape(path)} u:object_r:same_process_hal_file:s0", contexts)
+            self.assertIn(f"vendor/{path} 0 0 644 capabilities=0x0", vendor_fs)
+        # The imports come after the build's own properties, so they win; the default files say
+        # what the build.prop says, so a boot that asks for nothing renders as before.
+        for line in make_image.DXG_IMPORTS:
+            self.assertIn(line, product)
+        self.assertIn("ro.hardware.vulkan=dxg", props["SYSTEM/etc/dsa/vulkan-dxg.prop"].splitlines())
+        self.assertIn("ro.hardware.vulkan=ranchu", props["SYSTEM/etc/dsa/vulkan-ranchu.prop"].splitlines())
+        self.assertIn("ro.hardware.egl=dxg", props["SYSTEM/etc/dsa/egl-dxg.prop"].splitlines())
+        self.assertIn("ro.hardware.egl=angle", props["SYSTEM/etc/dsa/egl-angle.prop"].splitlines())
+        self.assertIn("import /system/etc/dsa/vulkan-${ro.boot.dsa.vulkan:-ranchu}.prop", product)
+        self.assertIn("import /system/etc/dsa/egl-${ro.boot.dsa.egl:-angle}.prop", product)
+        # The Google Play and ARM translation imports stay last.
+        self.assertEqual(product[-1], make_image.ARM_TRANSLATION_IMPORT)
+        self.assertLess(product.index(make_image.DXG_IMPORTS[-1]), product.index(make_image.GAPPS_IMPORT))
+        for name in make_image.DXG_PROPS:
+            self.assertIn(f"system/{name[len('SYSTEM/'):]} 0 0 644 capabilities=0x0", system_fs)
+        # Every graphics client may open the device, which has the label apps use for a GPU.
+        self.assertIn("/dev/dxg u:object_r:gpu_device:s0", contexts)
+        self.assertIn("/dev/dxg 0666 system graphics", ueventd)
+        self.assertIn("vendor/etc/ueventd.rc 0 0 644 capabilities=0x0", vendor_fs)
+
+    def test_pr3_the_vendor_ueventd_rules_keep_theirs_and_gain_the_device(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            own = "/dev/dri/* 0666 system graphics\n/dev/dxg 0600 root root\n"
+            with self._modify(root, dxg_drivers=self._drivers(root), ueventd=own) as archive:
+                rules = archive.read(make_image.DXG_UEVENTD).decode().splitlines()
+                self.assertEqual(archive.namelist().count(make_image.DXG_UEVENTD), 1)
+        self.assertIn("/dev/dri/* 0666 system graphics", rules)
+        self.assertEqual([rule for rule in rules if rule.startswith("/dev/dxg")], ["/dev/dxg 0666 system graphics"])
+
+    def test_nfr7_no_closed_direct3d_runtime_or_gpu_vendor_driver_enters_the_image(self):
+        # Mesa loads Microsoft's Direct3D 12 runtime and DXCore at run time. Those, and the
+        # vendors' user-mode drivers in their Windows driver packages, are closed binaries.
+        for name in ["libd3d12.so", "lib/libd3d12core.so", "lib/libdxcore.so", "lib/libnvwgf2umx.so",
+                     "lib/libigd12umd64.so", "lib/libigd12um64xe2.so", "lib/libcuda.so.1", "nested/libdxcore.so"]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                drivers = self._drivers(Path(tmp), extra={name: self._library()})
+                with self.assertRaises(ValueError) as caught:
+                    make_image.checked_dxg_drivers(drivers, "x86_64")
+                self.assertIn("closed Microsoft or GPU vendor binary", str(caught.exception))
+                self.assertIn(Path(name).name, str(caught.exception))
+
+    def test_pr3_a_library_built_against_glibc_is_refused(self):
+        # WSL's libraries need glibc (libc.so.6, libpthread.so.0, ...), which Android's linker
+        # cannot load.
+        with tempfile.TemporaryDirectory() as tmp:
+            drivers = self._drivers(Path(tmp), needed=["libc.so.6", "libpthread.so.0", "libdl.so.2"])
+            with self.assertRaises(ValueError) as caught:
+                make_image.checked_dxg_drivers(drivers, "x86_64")
+        message = str(caught.exception)
+        self.assertIn("built against glibc", message)
+        self.assertIn("libc.so.6", message)
+        self.assertIn("libpthread.so.0", message)
+
+    def test_pr3_drivers_for_another_architecture_or_missing_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drivers = self._drivers(Path(tmp), machine=183)
+            with self.assertRaises(ValueError) as caught:
+                make_image.checked_dxg_drivers(drivers, "x86_64")
+            self.assertIn("not x86_64 (62)", str(caught.exception))
+            self.assertEqual(sorted(make_image.checked_dxg_drivers(drivers, "arm64")),
+                             sorted([*make_image.DXG_DRIVER_FILES.values(), "VENDOR/lib64/libglapi.so"]))
+            (drivers / "libEGL_dxg.so").unlink()
+            with self.assertRaises(ValueError) as caught:
+                make_image.checked_dxg_drivers(drivers, "arm64")
+            self.assertIn("libEGL_dxg.so is missing", str(caught.exception))
+
+    def test_pr3_a_library_the_drivers_need_must_be_in_vendor_or_the_llndk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drivers = self._drivers(Path(tmp), needed=["libc.so", "libglapi.so", "libdrm.so", "libnativewindow.so"])
+            payloads = make_image.checked_dxg_drivers(drivers, "x86_64")
+        problems = make_image.dxg_library_problems(payloads, ["VENDOR/lib64/libc++.so"])
+        self.assertEqual(len(problems), len(make_image.DXG_DRIVER_FILES), problems)
+        self.assertTrue(all("needs libdrm.so" in problem for problem in problems), problems)
+        self.assertEqual(make_image.dxg_library_problems(payloads, ["VENDOR/lib64/libdrm.so"]), [])
+
+    def test_pr3_the_image_json_says_which_boot_arguments_select_the_drivers(self):
+        self.assertEqual(make_image.DXG_MANIFEST, {"vulkan": "dxg", "egl": "dxg"})
+        self.assertIn("ro.boot.dsa.vulkan", make_image.DXG_IMPORTS[0])
+        self.assertIn("ro.boot.dsa.egl", make_image.DXG_IMPORTS[1])
+
+
+def fake_apk(package):
+    """An APK whose compiled manifest names `package`."""
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as z:
+        z.writestr("AndroidManifest.xml", compiled_xml(("manifest", [("", "package", package)], [])))
+    return data.getvalue()
+
+
+class DefaultAppsTests(unittest.TestCase):
+    ANDROID = "android17"
+
+    def setUp(self):
+        self.apps = make_image.default_apps()
+        self.files = {app["image"]: fake_apk(app["package"]) for app in self.apps}
+        self.records = [{**make_image.default_app_provenance(app, self.ANDROID), "image": app["image"]}
+                        for app in self.apps]
+
+    def problems(self, files=None, records="same"):
+        files = self.files if files is None else files
+        return make_image.default_apps_problems(
+            set(files), files.__getitem__, self.records if records == "same" else records, self.ANDROID)
+
+    def test_fr42_the_default_apps_are_in_the_image_with_aosp_package_names(self):
+        self.assertEqual({app["name"]: app["package"] for app in self.apps}, {
+            "deskclock": "com.android.deskclock",
+            "gallery": "com.android.gallery3d",
+            "camera": "com.android.camera2",
+            "music": "com.android.music",
+            "calculator": "com.android.calculator2",
+            "recorder": "com.android.soundrecorder",
+            "documentsui": "com.android.documentsui",
+        })
+        self.assertEqual(self.problems(), [])
+        for app in self.apps:
+            self.assertEqual(make_image.apk_manifest_package(self.files[app["image"]]), app["package"])
+
+        # An app missing, or under its upstream package name, is refused.
+        missing = {k: v for k, v in self.files.items() if "DsaClock" not in k}
+        self.assertTrue(any("no Clock app" in p for p in self.problems(missing)))
+        renamed = dict(self.files)
+        renamed["SYSTEM/app/DsaCamera/DsaCamera.apk"] = fake_apk("org.lineageos.aperture")
+        self.assertTrue(any("org.lineageos.aperture, not com.android.camera2" in p for p in self.problems(renamed)))
+
+        # An app built without dsa/apps' patches, or with no record at all, is refused.
+        stale = [dict(r) for r in self.records]
+        stale[0]["patches"] = {"0001-follow-the-dsa-design.patch": "0" * 64}
+        self.assertTrue(any("other patches" in p for p in self.problems(records=stale)))
+        self.assertTrue(any("does not say what" in p for p in self.problems(records=None)))
+
+        # The AOSP apps they replace, and Calendar, are not left beside them.
+        left = dict(self.files)
+        left["PRODUCT/app/DeskClock/DeskClock.apk"] = fake_apk("com.android.deskclock")
+        left["SYSTEM/app/Calendar/Calendar.apk"] = fake_apk("com.android.calendar")
+        problems = self.problems(left)
+        self.assertTrue(any("DeskClock/DeskClock.apk is still in the image" in p for p in problems))
+        self.assertTrue(any("Calendar/Calendar.apk is still in the image" in p for p in problems))
+
+    def test_fr42_the_image_takes_the_aosp_apps_out_and_compiles_the_default_ones(self):
+        for name in ("PRODUCT/app/DeskClock/DeskClock.apk", "SYSTEM/app/Camera2/Camera2.apk",
+                     "PRODUCT/app/Calculator/Calculator.apk",
+                     "SYSTEM/priv-app/DocumentsUI/oat/x86_64/DocumentsUI.odex"):
+            self.assertTrue(make_image.replaced_by_default_apps(name), name)
+        for app in self.apps:
+            self.assertFalse(make_image.replaced_by_default_apps(app["image"]), app["image"])
+            self.assertFalse(make_image.removed(app["image"]), app["image"])
+            self.assertIn(app["image"], make_image.COMPILED_APPS)
+        # Calendar stays out of every image, default apps or not.
+        self.assertIn("Calendar", make_image.UNNEEDED_APPS)
+
+    def test_fr42_the_default_apps_are_signed_and_configured(self):
+        by_name = {app["name"]: app for app in self.apps}
+        self.assertIn('certificate="build/make/target/product/security/platform.x509.pem"',
+                      make_image.default_app_apkcerts(by_name["documentsui"]))
+        self.assertEqual(
+            make_image.default_app_apkcerts(by_name["camera"]),
+            'name="DsaCamera.apk" certificate="build/make/target/product/security/testkey.x509.pem" '
+            'private_key="build/make/target/product/security/testkey.pk8" partition="system"')
+        sysconfig = make_image.default_apps_sysconfig(self.apps)
+        ET.fromstring(sysconfig)
+        for app in self.apps:
+            self.assertIn(f'<initial-package-state package="{app["package"]}" stopped="false" />', sysconfig)
+        self.assertIn('<allow-in-power-save package="com.android.deskclock" />', sysconfig)
+        permissions = make_image.default_apps_permissions(self.apps)
+        ET.fromstring(permissions)
+        self.assertIn('<exception package="com.android.deskclock">', permissions)
+        self.assertIn('<permission name="android.permission.POST_NOTIFICATIONS" fixed="false" />', permissions)
+        fs_config = make_image.default_apps_fs_config([by_name["camera"]])
+        self.assertIn("system/app/dsacamera 0 0 755 capabilities=0x0", fs_config)
+        self.assertIn("system/app/dsacamera/dsacamera.apk 0 0 644 capabilities=0x0", fs_config)
+        self.assertIn("system/etc/sysconfig/dsa-default-apps.xml 0 0 644 capabilities=0x0", fs_config)
+
+    def test_fr42_make_image_refuses_default_apps_built_from_other_patches(self):
+        apps_script = make_image._apps_script()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "default-apps"
+            for app in self.apps:
+                apk = Path(tmp) / f"{app['name']}.apk"
+                apk.write_bytes(self.files[app["image"]])
+                apps_script.write_record(app, apk, folder, self.ANDROID)
+            payloads, records = make_image.load_default_apps(folder, self.ANDROID)
+            self.assertEqual(set(payloads), {app["image"] for app in self.apps})
+            self.assertEqual([r["name"] for r in records], [app["name"] for app in self.apps])
+            self.assertEqual(self.problems(records=records), [])
+
+            record = folder / "music.json"
+            written = json.loads(record.read_text())
+            written["commit"] = "0" * 40
+            record.write_text(json.dumps(written))
+            with self.assertRaisesRegex(ValueError, "music was built from another commit"):
+                make_image.load_default_apps(folder, self.ANDROID)
+            record.unlink()
+            with self.assertRaisesRegex(ValueError, "no Music app"):
+                make_image.load_default_apps(folder, self.ANDROID)
 
 
 if __name__ == "__main__":

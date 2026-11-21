@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use dsa_host_windows::guid::Guid;
 use dsa_host_windows::vm::{
     fine_grained_memory_supported, hosting_process_name_suffix_supported, memory_resize_request,
-    runtime_id_from_properties, AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
+    runtime_id_from_properties, shared_memory_regions_supported, sparse_files_setting_supported,
+    AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
 };
 
 #[test]
@@ -69,10 +70,12 @@ fn config() -> AndroidVmConfig {
         image_version: Some("17.0.0-1".into()),
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
+        always_allow_sparse_files: true,
         network_adapter: None,
         direct_mapped: None,
         picture_region: None,
         graphics_region: None,
+        gpu_paravirtualization: false,
     }
 }
 
@@ -551,7 +554,7 @@ fn fr21_the_kernel_keeps_its_last_log_on_the_pstore_disk_not_in_ram() {
     assert!(
         cmdline.contains(&format!(
             "pstore_blk.blkdev=PARTUUID={}",
-            dsa_host_windows::pstore_disk::PARTITION_UUID
+            dsa_host_core::disk::pstore::PARTITION_UUID
         )),
         "{cmdline}"
     );
@@ -961,4 +964,148 @@ fn nfr1_only_the_views_of_the_mapped_disks_are_given_back() {
         r"\Device\HarddiskVolume4\ProgramData\DSA\direct-mapped\a.vhd",
         folder
     ));
+}
+
+#[test]
+fn fr2_a_windows_10_host_gets_a_document_with_schema_2_3_settings_only() {
+    let mut config = config();
+    config.picture_region =
+        dsa_host_windows::picture_region::picture_region(Some("S-1-5-21-1-2-3-1001"), None);
+    config.graphics_region =
+        dsa_host_windows::graphics_region::graphics_region(Some("S-1-5-21-1-2-3-1001"), None);
+    for (build, ubr) in [(19041, 1), (19044, 6456), (19045, 3392)] {
+        let mut fitted = config.clone();
+        assert!(fitted.fit_to_build(build, ubr));
+        let doc = document(&fitted);
+        let vm = &doc["VirtualMachine"];
+        let disks = &vm["Devices"]["Scsi"]["0"]["Attachments"];
+        assert!(disks["1"].get("AlwaysAllowSparseFiles").is_none());
+        assert!(vm["Devices"].get("SharedMemory").is_none());
+        let memory = &vm["ComputeTopology"]["Memory"];
+        assert!(memory.get("BackingPageSize").is_none());
+        assert!(memory.get("HostingProcessNameSuffix").is_none());
+    }
+}
+
+#[test]
+fn pr3_without_gpu_paravirtualization_the_vm_has_no_gpu_settings() {
+    for (arch, config) in [
+        (GuestArch::X86_64, config()),
+        (GuestArch::Arm64, arm64_config()),
+    ] {
+        let doc = config.to_hcs_document_for(arch).unwrap();
+        let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+        assert!(memory.get("HighMmioGapInMB").is_none(), "{memory}");
+        assert!(doc["VirtualMachine"]["ComputeTopology"]
+            .get("Gpu")
+            .is_none());
+        let cmdline = config.full_kernel_cmdline_for(arch);
+        assert!(!cmdline.contains("androidboot.dsa.gpu"), "{cmdline}");
+        assert!(!cmdline.contains("androidboot.dsa.vulkan"), "{cmdline}");
+    }
+}
+
+#[test]
+fn fr2_a_newer_host_keeps_sparse_disks_and_shared_memory() {
+    let mut config = config();
+    config.graphics_region =
+        dsa_host_windows::graphics_region::graphics_region(Some("S-1-5-21-1-2-3-1001"), None);
+    assert!(!config.fit_to_build(26100, 1));
+    let doc = document(&config);
+    let vm = &doc["VirtualMachine"];
+    assert_eq!(
+        vm["Devices"]["Scsi"]["0"]["Attachments"]["1"]["AlwaysAllowSparseFiles"],
+        true
+    );
+    assert!(vm["Devices"].get("SharedMemory").is_some());
+    assert_eq!(
+        vm["ComputeTopology"]["Memory"]["HostingProcessNameSuffix"],
+        HOSTING_PROCESS_NAME_SUFFIX
+    );
+}
+
+#[test]
+fn pr3_gpu_paravirtualization_widens_the_high_mmio_window_and_tells_the_guest() {
+    use dsa_host_windows::vm::{GPU_HIGH_MMIO_GAP_MB, GPU_PARAVIRTUALIZATION_CMDLINE};
+    for (arch, mut config) in [
+        (GuestArch::X86_64, config()),
+        (GuestArch::Arm64, arm64_config()),
+    ] {
+        let without = config.to_hcs_document_for(arch).unwrap();
+        config.gpu_paravirtualization = true;
+        let doc = config.to_hcs_document_for(arch).unwrap();
+        let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+        assert_eq!(memory["HighMmioGapInMB"], GPU_HIGH_MMIO_GAP_MB);
+        assert_eq!(GPU_HIGH_MMIO_GAP_MB, 16 * 1024);
+        // HCS places the window: a fixed base would cap how far the VM's memory can grow.
+        assert!(memory.get("HighMmioBaseInMB").is_none());
+        // The GPU is assigned to the running VM, not in the document that creates it.
+        assert!(doc["VirtualMachine"]["ComputeTopology"]
+            .get("Gpu")
+            .is_none());
+        // Apart from the window and the boot's command line, nothing changes.
+        let comparable = |doc: &Value| -> Value {
+            let mut doc = doc.clone();
+            doc["VirtualMachine"]["Chipset"] = Value::Null;
+            if let Some(memory) = doc["VirtualMachine"]["ComputeTopology"]["Memory"].as_object_mut()
+            {
+                memory.remove("HighMmioGapInMB");
+            }
+            doc
+        };
+        assert_eq!(comparable(&doc), comparable(&without));
+        let cmdline = config.full_kernel_cmdline_for(arch);
+        assert!(
+            cmdline.contains(GPU_PARAVIRTUALIZATION_CMDLINE),
+            "{cmdline}"
+        );
+        let words: Vec<&str> = cmdline.split_whitespace().collect();
+        assert!(words.contains(&"androidboot.dsa.gpu=dxg"), "{cmdline}");
+        assert!(words.contains(&"androidboot.dsa.vulkan=dxg"), "{cmdline}");
+    }
+}
+
+#[test]
+fn pr3_a_vulkan_driver_named_in_the_configured_command_line_wins_over_dxg() {
+    let mut config = config();
+    config.gpu_paravirtualization = true;
+    config.kernel_cmdline = "androidboot.dsa.vulkan=ranchu".into();
+    let cmdline = config.full_kernel_cmdline_for(GuestArch::X86_64);
+    let dxg = cmdline.find("androidboot.dsa.vulkan=dxg").unwrap();
+    let own = cmdline.find("androidboot.dsa.vulkan=ranchu").unwrap();
+    // Android keeps the last value of a repeated androidboot key.
+    assert!(dxg < own, "{cmdline}");
+    assert!(
+        cmdline.ends_with("androidboot.dsa.vulkan=ranchu"),
+        "{cmdline}"
+    );
+}
+
+#[test]
+fn fr2_the_sparse_disk_setting_and_shared_memory_follow_the_build() {
+    assert!(!sparse_files_setting_supported(19045));
+    assert!(!sparse_files_setting_supported(20348));
+    assert!(sparse_files_setting_supported(22000));
+    assert!(!shared_memory_regions_supported(19044));
+    assert!(!shared_memory_regions_supported(19045));
+    assert!(shared_memory_regions_supported(20348));
+    assert!(shared_memory_regions_supported(26100));
+}
+
+#[test]
+fn pr3_the_gpu_assignment_request_gives_the_vm_every_host_gpu() {
+    use dsa_host_windows::vm::{gpu_assignment_request, GPU_RESOURCE_PATH};
+    let request: Value = serde_json::from_str(&gpu_assignment_request()).unwrap();
+    assert_eq!(
+        request["ResourcePath"],
+        "VirtualMachine/ComputeTopology/Gpu"
+    );
+    assert_eq!(request["ResourcePath"], GPU_RESOURCE_PATH);
+    assert_eq!(request["RequestType"], "Update");
+    let settings = request["Settings"].as_object().unwrap();
+    assert_eq!(settings["AssignmentMode"], "Mirror");
+    assert_eq!(settings["AllowVendorExtension"], true);
+    // Builds before 22545 refuse a request with the settings that turn presentation and GDI
+    // acceleration off, so they are never sent.
+    assert_eq!(settings.len(), 2, "{request}");
 }

@@ -7,14 +7,14 @@
 //! never waits for a window. A window host that does not answer in time is not waited for any
 //! longer.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// How many surfaces each task has.
 pub const SLOTS: usize = 2;
 
 /// How long a window host may take to show a frame before the next one goes without its
-/// answer.
-pub const PRESENT_WAIT: Duration = Duration::from_millis(500);
+/// answer: the same on every host.
+pub use dsa_host_core::compositor::window_sizing::PRESENT_WAIT;
 
 /// A frame to announce to the window host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

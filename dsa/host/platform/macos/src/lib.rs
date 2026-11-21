@@ -42,6 +42,8 @@
 //! platform neutral and tested on every build host. The parts that call the frameworks are
 //! compiled on macOS only.
 
+pub mod app_layout;
+pub mod app_service;
 pub mod cmdline;
 pub mod compositor;
 pub mod computer_identity;
@@ -61,17 +63,6 @@ pub mod user_disk;
 pub use dsa_host_unix::vhdx;
 pub mod vm_config;
 pub mod wm;
-
-/// GUID partition tables, shared with the Windows host: the same disks, read the same way.
-#[allow(dead_code)]
-#[path = "../../windows/src/gpt.rs"]
-pub(crate) mod gpt;
-
-/// The pstore disk, shared with the Windows host. macOS attaches its disk part, without the
-/// VHD footer.
-#[allow(dead_code)]
-#[path = "../../windows/src/pstore_disk.rs"]
-pub(crate) mod pstore_disk;
 
 #[cfg(target_os = "macos")]
 pub mod adb_discovery;

@@ -229,6 +229,35 @@ mod daemon {
         }
     }
 
+    /// Off Android there are no properties to set.
+    #[cfg(not(target_os = "android"))]
+    fn set_property(name: &str, _value: &str) -> Result<(), String> {
+        Err(format!("there is no property {name} off Android"))
+    }
+
+    /// The daemon's side of the Google device ID exchange: the property the root helper
+    /// answers through (`dsa-channeld.rc` runs it when the daemon sets the request).
+    fn google_device_id_source() -> dsa_guest_channeld::google_device_id::DeviceIdSource {
+        use dsa_guest_channeld::google_device_id::{DeviceIdSource, PROPERTY};
+        DeviceIdSource::new(
+            || read_property(PROPERTY),
+            |value| {
+                if let Err(why) = set_property(PROPERTY, value) {
+                    say!("could not ask for the Google device ID: {why}");
+                }
+            },
+        )
+    }
+
+    /// `--google-device-id`: says the Google Services Framework Android ID, which init runs as
+    /// root in a domain of its own because the services' files are no one else's to read.
+    fn google_device_id() -> i32 {
+        dsa_guest_channeld::google_id_reader::run(
+            std::path::Path::new(dsa_guest_channeld::google_id_reader::CHECKIN_PREFERENCES),
+            &set_property,
+        )
+    }
+
     /// Tells the router once Android has finished booting. Init sets the property the daemon
     /// may read when `sys.boot_completed` is set (`dsa-channeld.rc`). The property lasts for
     /// the boot, and the daemon restarts within it, so a late look still sees it.
@@ -626,6 +655,7 @@ mod daemon {
     /// Asks init for a second zram device when the guest has more memory than zram0 was sized
     /// for at boot, and for none when it is back (see `zram_grow`). zram0 not yet on asks
     /// nothing.
+    #[cfg(target_os = "android")]
     fn ask_for_zram_extra(memory: &dsa_guest_channeld::reclaim::MemInfo, asked: &mut Option<u64>) {
         use dsa_guest_channeld::zram_grow::{extra_mib, ZRAM_EXTRA_PROPERTY};
         let zram0 = std::fs::read_to_string("/sys/devices/virtual/block/zram0/disksize")
@@ -871,27 +901,43 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn write_back_cold_zram(_router: Arc<Router>) {}
 
-    /// Names the apps that see the computer's memory as the device's (the Play Store and Google
-    /// Play services) in `vendor.dsa.host_memory.uids`, from the package manager's list, again
-    /// whenever Google Play is installed or removed. init hands the list to the kernel
-    /// (`dsa-memory.rc`), and the framework reads the property itself.
+    /// Names, from the package manager's list, the apps that see the computer's memory as the
+    /// device's (the Play Store and Google Play services) in `vendor.dsa.host_memory.uids`, and
+    /// the apps that see the VM's own size (DSA's agent) in `vendor.dsa.host_memory.real_uids`,
+    /// again whenever one is installed or removed. Every other app sees the memory the VM may
+    /// grow to. init hands the lists to the kernel (`dsa-memory.rc`), and the framework reads
+    /// the kernel's parameters itself.
     #[cfg(target_os = "android")]
     fn name_host_memory_apps() {
-        use dsa_guest_channeld::host_memory::{HostMemoryApps, POLL, PROPERTY};
+        use dsa_guest_channeld::host_memory::{
+            HostMemoryApps, APPS, POLL, PROPERTY, REAL_SIZE_APPS, REAL_SIZE_PROPERTY,
+        };
         use dsa_guest_channeld::su_relay::PACKAGES_LIST;
-        let mut apps = HostMemoryApps::new();
+        let mut lists = [
+            (
+                HostMemoryApps::for_apps(&APPS),
+                PROPERTY,
+                "apps that see the computer's memory",
+                "Google Play sees the memory the VM may grow to",
+            ),
+            (
+                HostMemoryApps::for_apps(&REAL_SIZE_APPS),
+                REAL_SIZE_PROPERTY,
+                "apps that see the VM's own memory",
+                "the agent reports the memory the VM may grow to as the guest's",
+            ),
+        ];
         loop {
             let text = std::fs::read_to_string(PACKAGES_LIST).ok();
-            if let Some(value) = apps.look(text.as_deref()) {
-                match set_property(PROPERTY, &value) {
-                    Ok(()) => {
-                        say!("apps that see the computer's memory (uids): {value}");
-                        apps.set(value);
+            for (apps, property, what, otherwise) in &mut lists {
+                if let Some(value) = apps.look(text.as_deref()) {
+                    match set_property(property, &value) {
+                        Ok(()) => {
+                            say!("{what} (uids): {value}");
+                            apps.set(value);
+                        }
+                        Err(why) => say!("could not name the {what}, so {otherwise}: {why}"),
                     }
-                    Err(why) => say!(
-                        "could not name the apps that see the computer's memory, so Google \
-                         Play sees the VM's: {why}"
-                    ),
                 }
             }
             thread::sleep(POLL);
@@ -1052,6 +1098,9 @@ mod daemon {
         if std::env::args().nth(1).as_deref() == Some("--keymint-key") {
             return keymint_key();
         }
+        if std::env::args().nth(1).as_deref() == Some("--google-device-id") {
+            return google_device_id();
+        }
         if std::env::args().nth(1).as_deref() == Some("--dns-redirect") {
             return dns_redirect();
         }
@@ -1142,6 +1191,10 @@ mod daemon {
                     gapps::DIR,
                     GuestFacts::of_system(read_property),
                 )))
+                .on_google_device_id({
+                    let source = google_device_id_source();
+                    move || source.read()
+                })
                 .on_gamepads(gamepads)
                 .on_root_elevation(Arc::clone(&su_relay), move |config| {
                     su_config.apply(config);

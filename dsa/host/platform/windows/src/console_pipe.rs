@@ -33,8 +33,9 @@ use windows_sys::Win32::System::Pipes::{
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
-use crate::console_log::{ConsoleLog, ConsoleSigns};
+use crate::console_log::ConsoleLog;
 use crate::pipe::{millis, new_event, wide, OwnedHandle, PipeStream};
+use dsa_host_core::boot_signs::BootSigns;
 
 /// Who may open the console pipe: SYSTEM and administrators, and the VM worker processes
 /// (every VM's own account is in `NT VIRTUAL MACHINE\Virtual Machines`, S-1-5-83-0), which
@@ -297,8 +298,16 @@ impl ConsoleCapture {
             .to_path_buf()
     }
 
+    /// Whether the guest has printed anything on this boot's console: its kernel ran.
+    pub fn guest_printed(&self) -> bool {
+        self.log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .guest_printed()
+    }
+
     /// What this boot's console has shown about why it is late.
-    pub fn signs(&self) -> ConsoleSigns {
+    pub fn signs(&self) -> BootSigns {
         self.log.lock().unwrap_or_else(|e| e.into_inner()).signs()
     }
 

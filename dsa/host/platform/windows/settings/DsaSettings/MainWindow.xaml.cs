@@ -51,6 +51,10 @@ public partial class MainWindow : FluentWindow
         // Pages sit 56 px from the edges in a wide window and 36 px in a narrow one, as the
         // Settings app's do; 1008 px is WinUI's wide breakpoint.
         SizeChanged += (_, e) => ApplyPageMargins(e.NewSize.Width);
+        // Memory goes back to Windows while the window is minimised or hidden, and the heap is
+        // compacted after each page change, once the page left has let go of its controls.
+        WorkingSetTrim.Attach(this);
+        Navigation.Navigated += (_, _) => WorkingSetTrim.PageLeft(this);
         Loaded += (_, _) =>
         {
             // The watcher follows changes; the theme to start with is the apps' setting, which
@@ -69,11 +73,19 @@ public partial class MainWindow : FluentWindow
         };
     }
 
-    private const double WideWindowWidth = 1008;
+    private double _pageSide;
 
     private void ApplyPageMargins(double width)
     {
-        var side = width >= WideWindowWidth ? 56 : 36;
+        // The margins are app resources, and setting one makes every page element that uses it
+        // look it up and lay itself out again. A resize sends a size change for each step, so
+        // they are set only when the window crosses the breakpoint, not on every step.
+        var side = Dsa.Settings.Core.PageMargins.Side(width);
+        if (side == _pageSide)
+        {
+            return;
+        }
+        _pageSide = side;
         System.Windows.Application.Current.Resources["PageHeaderMargin"] = new System.Windows.Thickness(side, 16, side, 20);
         System.Windows.Application.Current.Resources["PageContentMargin"] = new System.Windows.Thickness(side, 0, side, 24);
     }

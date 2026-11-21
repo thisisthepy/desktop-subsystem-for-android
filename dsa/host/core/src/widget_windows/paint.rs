@@ -55,6 +55,12 @@ pub struct Look {
 }
 
 impl Look {
+    /// The look on a dark or light desktop with `accent`, or `fallback` when the desktop names
+    /// none (an accent of 0, or with no alpha).
+    pub fn with_default_accent(dark: bool, accent: Argb, fallback: Argb) -> Look {
+        Look::new(dark, if accent >> 24 == 0 { fallback } else { accent })
+    }
+
     /// The look on a light or a dark desktop, with `accent` its accent color.
     pub fn new(dark: bool, accent: Argb) -> Look {
         if dark {
@@ -304,6 +310,20 @@ mod tests {
 
     fn alpha(pixels: &[u8], width: usize, x: usize, y: usize) -> u8 {
         pixels[(y * width + x) * 4 + 3]
+    }
+
+    #[test]
+    fn fr12_a_desktop_with_no_accent_gets_the_hosts_own() {
+        let own = 0xFF11_2233;
+        assert_eq!(Look::with_default_accent(true, 0, own).accent, own);
+        assert_eq!(
+            Look::with_default_accent(false, 0x00FF_0000, own).accent,
+            own
+        );
+        assert_eq!(
+            Look::with_default_accent(false, 0xFFAA_BBCC, own),
+            Look::new(false, 0xFFAA_BBCC)
+        );
     }
 
     #[test]

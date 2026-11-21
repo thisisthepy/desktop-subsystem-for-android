@@ -146,23 +146,6 @@ fn percent_encode(text: &str) -> String {
     out
 }
 
-fn percent_decode(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = text.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
 /// The URI a click on the toast of the notification with `key` launches.
 pub fn activation_uri(key: &str) -> String {
     format!("{PROTOCOL}:open?key={}", percent_encode(key))
@@ -219,7 +202,7 @@ fn launched(uri: &str) -> Option<Launched> {
         query
             .split('&')
             .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
-            .map(percent_decode)
+            .map(dsa_host_core::percent::decode_text)
     };
     let key = value("key")??;
     if !dsa_host_core::notifications::valid_key(&key) {
@@ -631,14 +614,34 @@ fn apply(
                 quiet: quiet(&notification),
                 key: notification.key.clone(),
             };
-            if let Err(why) = toasts.show(&toast, acted.clone()) {
-                note(
+            // DSA's notice about an app (one that cannot run here): Windows updates a toast
+            // of a tag it still holds in the notification centre without popping it up, so a
+            // notice left there by an earlier run is removed first and shows as new.
+            let is_notice = dsa_host_core::native_abi::Notice::parse(&notification.key).is_some();
+            if is_notice {
+                if let Err(why) = toasts.remove(&app_id, &tag) {
+                    note(
+                        logger,
+                        &format!("an older notice's toast stayed before the new one: {why}"),
+                    );
+                }
+            }
+            match toasts.show(&toast, acted.clone()) {
+                Ok(()) if is_notice => note(
+                    logger,
+                    &format!(
+                        "the notice {} about {} is shown",
+                        notification.key, notification.package_name
+                    ),
+                ),
+                Ok(()) => {}
+                Err(why) => note(
                     logger,
                     &format!(
                         "a notification of {} was not shown: {why}",
                         notification.package_name
                     ),
-                );
+                ),
             }
             if let Some(old) = shown.insert(notification.key, Shown { app_id, tag, icon }) {
                 if let Some(old_icon) = old.icon {
@@ -1207,6 +1210,37 @@ mod tests {
             self.removed.push((app_id.into(), tag.into()));
             Ok(())
         }
+    }
+
+    #[test]
+    fn fr25_a_notice_about_an_app_replaces_the_toast_left_in_the_notification_centre() {
+        let mut toasts = Recorded::default();
+        let mut shown = HashMap::new();
+        let (tx, _rx) = mpsc::channel();
+        let mut notice = chat(&Notice::Needs64Bit.key("com.example.chat"));
+        notice.title = "Chat cannot run in DSA".into();
+        apply(
+            NotificationEvent::Posted(notice),
+            &mut toasts,
+            &mut shown,
+            None,
+            &tx,
+            None,
+        );
+        // The older toast goes first, then the new one is shown, so Windows pops it up.
+        assert_eq!(toasts.removed.len(), 1);
+        assert_eq!(toasts.shown.len(), 1);
+        // An app's own notification is only replaced.
+        apply(
+            NotificationEvent::Posted(chat(KEY)),
+            &mut toasts,
+            &mut shown,
+            None,
+            &tx,
+            None,
+        );
+        assert_eq!(toasts.removed.len(), 1);
+        assert_eq!(toasts.shown.len(), 2);
     }
 
     #[test]

@@ -23,6 +23,7 @@
 //! places return why.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Where the host keeps its files. See the module documentation for what each place holds.
 pub trait HostPaths: Send + Sync {
@@ -46,6 +47,12 @@ pub trait HostPaths: Send + Sync {
     fn user_logs(&self, user: &str) -> Result<PathBuf, String>;
     /// Temporary files of `user`'s processes.
     fn user_tmp(&self, user: &str) -> Result<PathBuf, String>;
+}
+
+/// The folder a host keeps its sealed keys in: `keys`, beside its settings folder
+/// `settings_dir`.
+pub fn keys_dir_beside(settings_dir: &Path) -> PathBuf {
+    settings_dir.with_file_name("keys")
 }
 
 /// [`HostPaths`] under two folders a test chooses, with the same layout as the hosts use:
@@ -106,5 +113,33 @@ impl HostPaths for FakeHostPaths {
     }
     fn user_tmp(&self, user: &str) -> Result<PathBuf, String> {
         Ok(below(&self.user(user)?, "tmp"))
+    }
+}
+
+/// A file name no other process and no other call in this one uses: `<prefix>-<pid>-<n><suffix>`.
+pub fn unique_name(prefix: &str, suffix: &str) -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{prefix}-{}-{}{suffix}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[cfg(test)]
+mod unique_name_tests {
+    use super::unique_name;
+
+    #[test]
+    fn d9_a_unique_name_carries_the_process_and_never_repeats() {
+        let first = unique_name("print", ".pdf");
+        let second = unique_name("print", ".pdf");
+        let prefix = format!("print-{}-", std::process::id());
+        assert!(
+            first.starts_with(&prefix) && first.ends_with(".pdf"),
+            "{first}"
+        );
+        assert_ne!(first, second);
+        assert!(unique_name("vm", "").starts_with("vm-"));
     }
 }

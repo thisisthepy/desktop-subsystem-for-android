@@ -170,10 +170,8 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// The pstore/blk settings for the kernel command line: the partition by its UUID, the same
-/// disk layout as on every host (see `pstore`).
-pub const PSTORE_CMDLINE: &str = "pstore_blk.blkdev=PARTUUID=5f8b3c2e-9a41-4d6e-b07c-1e2d3f4a5b6c \
-     pstore_blk.best_effort=y pstore_blk.kmsg_size=64 pstore_blk.console_size=256 \
-     pstore_blk.pmsg_size=256";
+/// disk layout as on every host.
+pub use dsa_host_core::disk::pstore::KERNEL_CMDLINE as PSTORE_CMDLINE;
 
 /// What the host writes to the console's input to stop the guest in order. On the virtio
 /// console (`hvc0`) a Ctrl-O starts a SysRq: `s` syncs every file system, `u` remounts them

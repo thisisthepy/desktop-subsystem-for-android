@@ -402,6 +402,15 @@ pub struct ClipboardText {
     #[prost(string, tag = "1")]
     pub text: ::prost::alloc::string::String,
 }
+/// An image on a clipboard, as PNG, on a connection that carries the clipboard
+/// (WatchClipboard), in the same way as ClipboardText. The client sends one each time the user's
+/// host clipboard gets an image, and the service sends one each time the caller's Android copies
+/// an image. Neither sends a PNG longer than 12 MiB, so one always fits a frame.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClipboardImage {
+    #[prost(bytes = "vec", tag = "1")]
+    pub png: ::prost::alloc::vec::Vec<u8>,
+}
 /// Turns the connection into a watch of the notifications of the caller's Android: after the
 /// answer (Done), the service sends a Notification each time an app posts one or changes one,
 /// and a NotificationRemoved when one is gone, including every one that was shown when the
@@ -3600,7 +3609,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 333, 334, 335, 12, 13, 11, 15, 16, 14, 17, 18, 19, 22, 23, 20, 50, 51, 120, 121, 122, 200, 201, 202, 21, 300, 301, 620, 470, 471, 640, 641, 660"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 333, 334, 335, 12, 13, 11, 24, 15, 16, 14, 17, 18, 19, 22, 23, 20, 50, 51, 120, 121, 122, 200, 201, 202, 21, 300, 301, 620, 470, 471, 640, 641, 660"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3640,6 +3649,8 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "11")]
         ClipboardText(super::ClipboardText),
+        #[prost(message, tag = "24")]
+        ClipboardImage(super::ClipboardImage),
         #[prost(message, tag = "15")]
         Notification(super::Notification),
         #[prost(message, tag = "16")]

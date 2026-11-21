@@ -8,13 +8,21 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use ed25519_dalek::VerifyingKey;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
+use crate::session::SessionConfig;
+use crate::settings::{
+    keep_first_channel_logged, service_settings, FileSettings, PreviousRenderGpu, SettingsStore,
+};
 use crate::update::manifest;
 use crate::update::policy::InstalledImage;
 use crate::update::program::ReleaseChannel;
+use crate::update::service::UpdatesConfig;
+use crate::update::store::ImageStore;
 
 /// The VM's memory when the configuration names none and the user set no limit, in MiB: what
 /// it boots with, before it grows. 2 GiB rather than 3: the guest kernel keeps 64 bytes of page
@@ -211,4 +219,175 @@ pub fn expand_locations(text: &str, data: &Path, program: &Path) -> String {
     };
     text.replace("{data}", &json(data))
         .replace("{program}", &json(program))
+}
+
+/// The file a preset installer leaves beside the program (in the app bundle's resources on
+/// macOS) to fix the computer to one Android major. A default installer leaves none.
+pub const PRESET_FILE: &str = "installer-preset.json";
+
+/// What a preset installer (such as `a16`) carries: the Android major it installs and keeps.
+/// The installer is the same build as the default one; only this differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstallerPreset {
+    pub android_major: u32,
+}
+
+impl InstallerPreset {
+    pub fn parse(json: &str) -> Result<InstallerPreset, HostConfigError> {
+        let preset: InstallerPreset =
+            serde_json::from_str(json).map_err(|e| HostConfigError(e.to_string()))?;
+        if preset.android_major == 0 {
+            return Err(HostConfigError(
+                "an installer preset names Android major 0, which is no version".into(),
+            ));
+        }
+        Ok(preset)
+    }
+
+    /// Reads [`PRESET_FILE`] in `dir`: `Ok(None)` when there is none (a default
+    /// installation).
+    pub fn read_in(dir: &Path) -> Result<Option<InstallerPreset>, HostConfigError> {
+        let path = dir.join(PRESET_FILE);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => InstallerPreset::parse(&text)
+                .map(Some)
+                .map_err(|e| HostConfigError(format!("{}: {}", path.display(), e.0))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(HostConfigError(format!("reading {}: {e}", path.display()))),
+        }
+    }
+
+    /// Reads the preset in `dir`, if there is one, and applies it to `store`: the line to
+    /// log, or `None` for a default installation.
+    pub fn apply_from(dir: &Path, store: &ImageStore) -> Option<String> {
+        match InstallerPreset::read_in(dir) {
+            Ok(Some(preset)) => preset.apply(store),
+            Ok(None) => None,
+            Err(why) => Some(why.to_string()),
+        }
+    }
+
+    /// Fixes `store` to this preset's major ([`ImageStore::apply_preset`]), once. Returns the
+    /// line to log: what was done, or why the version was left as it was.
+    pub fn apply(&self, store: &ImageStore) -> Option<String> {
+        match store.apply_preset(self.android_major) {
+            Ok(None) => store
+                .state()
+                .ok()
+                .filter(|state| state.pinned_major() == Some(self.android_major))
+                .map(|_| {
+                    format!(
+                        "this installation is fixed to Android {}",
+                        self.android_major
+                    )
+                }),
+            Ok(Some(why)) => Some(why),
+            Err(why) => Some(format!(
+                "fixing this installation to Android {}: {why}",
+                self.android_major
+            )),
+        }
+    }
+}
+
+/// What every host's configuration file says in the same words: where the image store is,
+/// how the session is timed and where updates come from. Each platform's file has these keys
+/// beside its own (the VM's sockets, its pipe, how it finds a user's profile), reads them into
+/// its own struct, which keeps its unknown-key check, and hands the shared ones over here, so
+/// the rules built on them (the session's timings, the update store, the settings store) are
+/// written once.
+pub trait HostConfigFile {
+    /// The update store's folder.
+    fn images_dir(&self) -> Option<&Path>;
+    /// The image the installer put in the store.
+    fn first_image(&self) -> Option<&InstalledImage>;
+    /// The image the package installed last bundled, for a host whose package bundles one.
+    fn bundled_image(&self) -> Option<&InstalledImage> {
+        None
+    }
+    /// Where new images and program updates come from.
+    fn update(&self) -> Option<&UpdateSettings>;
+    fn connect_timeout_secs(&self) -> u64;
+    fn ready_timeout_secs(&self) -> u64;
+    fn stop_timeout_secs(&self) -> u64;
+    fn doze_delay_secs(&self) -> u64;
+    fn freeze_after_minutes(&self) -> Option<u64>;
+
+    /// The session's timings.
+    fn session_config(&self) -> SessionConfig {
+        SessionConfig {
+            connect_timeout: Duration::from_secs(self.connect_timeout_secs()),
+            ready_timeout: Duration::from_secs(self.ready_timeout_secs()),
+            stop_timeout: Duration::from_secs(self.stop_timeout_secs()),
+            doze_delay: Duration::from_secs(self.doze_delay_secs()),
+            freeze_after: self
+                .freeze_after_minutes()
+                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
+            ..SessionConfig::default()
+        }
+    }
+
+    /// The channel of the installer that put version `running` here: the configured one, else
+    /// the one the version was published on.
+    fn installer_channel(&self, running: &str) -> ReleaseChannel {
+        self.update().map_or_else(
+            || ReleaseChannel::of_version(running),
+            |update| update.installer_channel(running),
+        )
+    }
+
+    /// Whether this installation downloads new Android images at all.
+    fn image_updates_available(&self) -> bool {
+        self.update().is_some() && self.images_dir().is_some()
+    }
+}
+
+/// What the configuration says about the update store.
+pub fn updates_config(config: &dyn HostConfigFile) -> UpdatesConfig<'_> {
+    UpdatesConfig {
+        images_dir: config.images_dir(),
+        first_image: config.first_image(),
+        bundled_image: config.bundled_image(),
+        boot_timeout_secs: config.update().map(|u| u.boot_timeout_secs),
+        preset_dir: None,
+    }
+}
+
+/// The settings in the service's own folder `dir`, as a store.
+pub fn settings_store(
+    dir: PathBuf,
+    first_channel: Option<ReleaseChannel>,
+    previous_render_gpu: Option<PreviousRenderGpu>,
+) -> Arc<dyn SettingsStore> {
+    Arc::new(service_settings(dir, first_channel, previous_render_gpu))
+}
+
+/// The settings in `dir`, with the release channel recorded first when the settings record none
+/// yet (`first_channel`, the installer's), so that every later upgrade keeps it, and the
+/// service's log saying which channel it is.
+pub fn service_file_settings(
+    dir: PathBuf,
+    first_channel: ReleaseChannel,
+    previous_render_gpu: Option<PreviousRenderGpu>,
+    build: &str,
+) -> FileSettings {
+    let files = service_settings(dir, Some(first_channel), previous_render_gpu);
+    keep_first_channel_logged(&files, build);
+    files
+}
+
+/// [`service_file_settings`] as a store.
+pub fn service_settings_store(
+    dir: PathBuf,
+    first_channel: ReleaseChannel,
+    previous_render_gpu: Option<PreviousRenderGpu>,
+    build: &str,
+) -> Arc<dyn SettingsStore> {
+    Arc::new(service_file_settings(
+        dir,
+        first_channel,
+        previous_render_gpu,
+        build,
+    ))
 }

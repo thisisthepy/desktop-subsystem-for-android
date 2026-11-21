@@ -48,6 +48,10 @@ class CpuUploads {
     // or the host refused it; true when it was copied or did not need to be.
     bool upload(HostRenderer& host, uint32_t colorBuffer, const BufferRef& buffer, bool fresh);
     void forget(uint32_t bufferId) { mTracker.forget(bufferId); }
+    // Whether a layer of `buffer` may be shown from its ColorBuffer: it is not written by a
+    // CPU, or its last copy up succeeded. A CPU-written buffer (a video's pictures) whose copy
+    // failed or never happened holds zeros, solid green for YUV, or an older picture.
+    bool holdsPicture(HostRenderer& host, const BufferRef& buffer) const;
     // A new host connection: its ColorBuffers hold nothing yet.
     void clear() { mTracker = dsa::UploadTracker{}; }
 

@@ -19,16 +19,14 @@
 //! is in their DSA folder, `data_dir` when it is set.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde::Deserialize;
 
 use dsa_host_core::host_config::{
     default_connect_timeout_secs, default_control_port, default_data_disk_size_gb,
     default_doze_delay_secs, default_log_port, default_processors, default_ready_timeout_secs,
-    default_stop_timeout_secs, default_true, HostConfigError, UpdateSettings, DEFAULT_MEMORY_MB,
+    default_stop_timeout_secs, default_true, HostConfigError, HostConfigFile, UpdateSettings,
 };
-use dsa_host_core::session::SessionConfig;
 use dsa_host_core::update::policy::InstalledImage;
 
 /// The name of the configuration file.
@@ -177,48 +175,33 @@ impl MacHostConfig {
             .clone()
             .unwrap_or_else(|| user.root.join("settings"))
     }
-
-    /// The session's timings.
-    pub fn session_config(&self) -> SessionConfig {
-        SessionConfig {
-            connect_timeout: Duration::from_secs(self.connect_timeout_secs),
-            ready_timeout: Duration::from_secs(self.ready_timeout_secs),
-            stop_timeout: Duration::from_secs(self.stop_timeout_secs),
-            doze_delay: Duration::from_secs(self.doze_delay_secs),
-            freeze_after: self
-                .freeze_after_minutes
-                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
-            ..SessionConfig::default()
-        }
-    }
-
-    /// The memory the VM starts with and may grow to, in MiB, for a user whose limit is
-    /// `limit_mb` (0 for none) on a Mac with `total_mb` of memory when known.
-    pub fn memory_mb(&self, limit_mb: u32, total_mb: Option<u64>) -> (u64, u64) {
-        if let Some(fixed) = self.memory_mb {
-            return (u64::from(fixed), u64::from(fixed));
-        }
-        memory_range_mb(limit_mb, total_mb)
-    }
 }
 
-/// The memory a VM starts with and may grow to, in MiB: it starts at the default size (or
-/// the user's lower limit) and grows to their limit, or with none to half the Mac's memory.
-/// Growth and return follow the shared policy: the guest trims its page cache to its working
-/// set all the time, and the balloon grows the VM when the guest runs short and takes memory
-/// back once it is not.
-pub fn memory_range_mb(limit_mb: u32, total_mb: Option<u64>) -> (u64, u64) {
-    let start = match limit_mb {
-        0 => DEFAULT_MEMORY_MB,
-        limit => limit.clamp(2048, DEFAULT_MEMORY_MB),
-    };
-    let start = u64::from(start);
-    let max = match total_mb {
-        Some(total) => dsa_host_core::memory::half_host_vm_memory_mb(total, limit_mb),
-        None if limit_mb > 0 => u64::from(limit_mb),
-        None => start,
-    };
-    (start.min(max), max.max(start.min(max)))
+impl HostConfigFile for MacHostConfig {
+    fn images_dir(&self) -> Option<&Path> {
+        self.images_dir.as_deref()
+    }
+    fn first_image(&self) -> Option<&InstalledImage> {
+        self.first_image.as_ref()
+    }
+    fn update(&self) -> Option<&UpdateSettings> {
+        self.update.as_ref()
+    }
+    fn connect_timeout_secs(&self) -> u64 {
+        self.connect_timeout_secs
+    }
+    fn ready_timeout_secs(&self) -> u64 {
+        self.ready_timeout_secs
+    }
+    fn stop_timeout_secs(&self) -> u64 {
+        self.stop_timeout_secs
+    }
+    fn doze_delay_secs(&self) -> u64 {
+        self.doze_delay_secs
+    }
+    fn freeze_after_minutes(&self) -> Option<u64> {
+        self.freeze_after_minutes
+    }
 }
 
 /// The ports of the guest the window manager (`dsa-wm`) serves: its graphics streams.
@@ -270,9 +253,9 @@ impl UserFolders {
     pub fn addon_disk(&self) -> PathBuf {
         self.root.join("addons.img")
     }
-    /// The raw copies of image `version`'s disks.
-    pub fn image_cache(&self, version: &str) -> PathBuf {
-        self.root.join("cache").join("images").join(version)
+    /// The folder that holds the raw copies of the image disks, one folder per image version.
+    pub fn image_cache(&self) -> PathBuf {
+        self.root.join("cache").join("images")
     }
     /// Each boot's initrd, with its secret, while the VM starts.
     pub fn boot_dir(&self) -> PathBuf {

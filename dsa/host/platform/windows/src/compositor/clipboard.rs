@@ -2,21 +2,25 @@
 //!
 //! The service runs in session 0 and cannot reach the user's clipboard, so the window manager,
 //! which runs in the user's session for as long as their Android runs, carries it. It listens
-//! for changes to the user's clipboard ([`ClipboardWindow`]) and passes new text to the service,
-//! and puts the text the user's Android copies on the user's clipboard ([`sync`]). The service
-//! decides whether anything crosses, from the user's clipboard setting.
+//! for changes to the user's clipboard ([`ClipboardWindow`]) and passes new text and images to
+//! the service, and puts what the user's Android copies on the user's clipboard ([`sync`],
+//! which runs the loop every host shares). The service decides whether anything crosses, from
+//! the user's clipboard setting.
 //!
-//! Text the window manager put on the clipboard itself is not passed back: the clipboard
-//! window ignores changes it made, and [`sync`] does not send the text it was just given.
+//! Images cross as PNG. The window reads the registered "PNG" format when a program put one
+//! there, and otherwise turns `CF_DIBV5` or `CF_DIB` into PNG; it puts an image from Android
+//! there as `CF_DIBV5`, from which Windows makes `CF_DIB` and `CF_BITMAP`, and as "PNG", which
+//! keeps it exact in the programs that take one.
+//!
+//! What the window manager put on the clipboard itself is not passed back: the clipboard
+//! window ignores changes it made, and [`sync`] does not send the clip it was just given.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
-use dsa_host_core::clipboard;
-use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::clipboard::{self, Clip, HostClipboard};
 use dsa_transport::Connector;
 
 use super::log::{note, CompositorLogger};
@@ -24,111 +28,22 @@ use super::log::{note, CompositorLogger};
 /// The build the window manager names itself by on the local API.
 const BUILD: &str = "dsa-wm clipboard";
 
-/// How long the window manager waits for the service to answer.
-const ANSWER: Duration = Duration::from_secs(2);
-
-/// How long it waits before trying the service again.
-const RETRY: Duration = Duration::from_millis(500);
-
-/// How long it waits for text from Android before it looks for text copied on the host.
-const POLL: Duration = Duration::from_millis(50);
-
-/// The user's clipboard, as [`sync`] uses it.
-pub trait HostClipboard {
-    /// The text on the clipboard now, if it holds text.
-    fn text(&mut self) -> Option<String>;
-    /// Puts `text` on the clipboard.
-    fn set_text(&mut self, text: &str) -> Result<(), String>;
-}
-
-/// Keeps the user's clipboard and their Android's in step until `stop` is set.
-///
-/// `changes` carries each text the user copies on the host. Each new connection to the service
-/// first passes the text the clipboard holds then, so the service has it for an Android that
-/// starts later. A connection that breaks is made again; text copied meanwhile is not lost,
-/// since the next connection passes the clipboard's text.
+/// Keeps the user's clipboard and their Android's in step until `stop` is set; see
+/// [`clipboard::sync`].
 pub fn sync(
-    mut connector: Box<dyn Connector>,
+    connector: Box<dyn Connector>,
     clipboard: &mut dyn HostClipboard,
-    changes: Receiver<String>,
+    changes: Receiver<Clip>,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
-    let mut last_error = String::new();
-    // The text Android copied that the window manager put on the clipboard last.
-    let mut from_android: Option<String> = None;
-    while !stop.load(Ordering::Relaxed) {
-        let stream = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_clipboard());
-        let mut stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    note(
-                        logger.as_deref(),
-                        &format!("the clipboard cannot reach Android: {error}"),
-                    );
-                    last_error = error;
-                }
-                // What was copied meanwhile is on the clipboard for the next connection.
-                while changes.try_recv().is_ok() {}
-                thread::sleep(RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        let current = clipboard.text();
-        if let Some(text) = current.filter(|text| from_android.as_ref() != Some(text)) {
-            if offer(&text, logger.as_deref()) && stream.send(&text).is_err() {
-                continue;
-            }
-        }
-        'connected: while !stop.load(Ordering::Relaxed) {
-            while let Ok(text) = changes.try_recv() {
-                if from_android.as_ref() == Some(&text) || !offer(&text, logger.as_deref()) {
-                    continue;
-                }
-                if stream.send(&text).is_err() {
-                    break 'connected;
-                }
-            }
-            match stream.next(POLL) {
-                Ok(Some(text)) => {
-                    if let Err(why) = clipboard.set_text(&text) {
-                        note(
-                            logger.as_deref(),
-                            &format!(
-                                "could not put text copied in Android on the clipboard: {why}"
-                            ),
-                        );
-                    }
-                    from_android = Some(text);
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    note(
-                        logger.as_deref(),
-                        &format!("the clipboard's connection to the service ended: {error}"),
-                    );
-                    break;
-                }
-            }
-        }
-    }
+    clipboard::sync(connector, BUILD, clipboard, changes, stop, &|line| {
+        note(logger.as_deref(), line)
+    });
 }
 
-/// Whether `text` may cross, saying so in the log when it may not.
-fn offer(text: &str, logger: Option<&CompositorLogger>) -> bool {
-    if clipboard::fits(text) {
-        return true;
-    }
-    note(logger, &clipboard::too_long(text, "host"));
-    false
-}
-
-/// A message-only window that listens for changes to the user's clipboard, reads its text, and
-/// puts text on it.
+/// A message-only window that listens for changes to the user's clipboard, reads its text and
+/// images, and puts text and images on it.
 pub struct ClipboardWindow {
     /// The window, as an integer so it crosses threads.
     hwnd: Arc<std::sync::atomic::AtomicIsize>,
@@ -137,11 +52,15 @@ pub struct ClipboardWindow {
 
 /// `CF_UNICODETEXT`: UTF-16 text ending in a zero.
 const CF_UNICODETEXT: u32 = 13;
+/// `CF_DIB`: a device independent bitmap with a `BITMAPINFOHEADER`.
+const CF_DIB: u32 = 8;
+/// `CF_DIBV5`: a device independent bitmap with a `BITMAPV5HEADER`.
+const CF_DIBV5: u32 = 17;
 
 impl ClipboardWindow {
-    /// Opens the window on a thread of its own. Each text the user copies afterwards goes to
-    /// the returned receiver. An error says why the clipboard cannot be followed.
-    pub fn open() -> Result<(ClipboardWindow, Receiver<String>), String> {
+    /// Opens the window on a thread of its own. Each text or image the user copies afterwards
+    /// goes to the returned receiver. An error says why the clipboard cannot be followed.
+    pub fn open() -> Result<(ClipboardWindow, Receiver<Clip>), String> {
         let (changes_tx, changes) = std::sync::mpsc::channel();
         let (ready_tx, ready) = std::sync::mpsc::channel();
         let hwnd = Arc::new(std::sync::atomic::AtomicIsize::new(0));
@@ -192,12 +111,16 @@ pub struct WindowsClipboard {
 }
 
 impl HostClipboard for WindowsClipboard {
-    fn text(&mut self) -> Option<String> {
-        window::read_text(self.hwnd.load(Ordering::SeqCst))
+    fn read(&mut self) -> Option<Clip> {
+        window::read_clip(self.hwnd.load(Ordering::SeqCst))
     }
 
-    fn set_text(&mut self, text: &str) -> Result<(), String> {
-        window::write_text(self.hwnd.load(Ordering::SeqCst), text)
+    fn write(&mut self, clip: &Clip) -> Result<(), String> {
+        let hwnd = self.hwnd.load(Ordering::SeqCst);
+        match clip {
+            Clip::Text(text) => window::write_text(hwnd, text),
+            Clip::Image(png) => window::write_image(hwnd, png),
+        }
     }
 }
 
@@ -209,10 +132,11 @@ mod window {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use dsa_host_core::clipboard::{self, Clip};
     use windows_sys::Win32::Foundation::{GlobalFree, HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::DataExchange::{
         AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData,
-        GetClipboardOwner, IsClipboardFormatAvailable, OpenClipboard,
+        GetClipboardOwner, IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW,
         RemoveClipboardFormatListener, SetClipboardData,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -225,15 +149,23 @@ mod window {
         WM_CLIPBOARDUPDATE, WM_CLOSE, WM_DESTROY, WNDCLASSEXW,
     };
 
-    use super::CF_UNICODETEXT;
+    use super::{CF_DIB, CF_DIBV5, CF_UNICODETEXT};
 
     thread_local! {
-        /// Where the window's thread sends the text the user copies.
-        static CHANGES: RefCell<Option<Sender<String>>> = const { RefCell::new(None) };
+        /// Where the window's thread sends what the user copies.
+        static CHANGES: RefCell<Option<Sender<Clip>>> = const { RefCell::new(None) };
     }
 
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// The registered "PNG" clipboard format, which programs that copy images put a PNG
+    /// under; 0 when it cannot be registered.
+    fn png_format() -> u32 {
+        let name = wide("PNG");
+        // SAFETY: the name lives through the call.
+        unsafe { RegisterClipboardFormatW(name.as_ptr()) }
     }
 
     unsafe extern "system" fn window_proc(
@@ -248,10 +180,10 @@ mod window {
                 let owner = unsafe { GetClipboardOwner() };
                 // What the window manager put there came from Android; it does not go back.
                 if owner != hwnd {
-                    if let Some(text) = read_text(hwnd as isize) {
+                    if let Some(clip) = read_clip(hwnd as isize) {
                         CHANGES.with(|changes| {
                             if let Some(changes) = changes.borrow().as_ref() {
-                                let _ = changes.send(text);
+                                let _ = changes.send(clip);
                             }
                         });
                     }
@@ -279,7 +211,7 @@ mod window {
     /// Opens the window, says whether it did, and runs its messages until it is closed.
     pub(super) fn run(
         slot: Arc<AtomicIsize>,
-        changes: Sender<String>,
+        changes: Sender<Clip>,
         ready: Sender<Result<(), String>>,
     ) {
         CHANGES.with(|slot| *slot.borrow_mut() = Some(changes));
@@ -375,199 +307,154 @@ mod window {
         false
     }
 
-    /// The text on the clipboard, if it holds text and can be opened.
-    pub(super) fn read_text(hwnd: isize) -> Option<String> {
+    /// The bytes of `format` on the open clipboard, if it holds that format.
+    ///
+    /// # Safety
+    ///
+    /// The clipboard is open.
+    unsafe fn data(format: u32) -> Option<Vec<u8>> {
+        let handle = GetClipboardData(format);
+        if handle.is_null() {
+            return None;
+        }
+        let data = GlobalLock(handle) as *const u8;
+        if data.is_null() {
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(data, GlobalSize(handle)).to_vec();
+        GlobalUnlock(handle);
+        Some(bytes)
+    }
+
+    /// Puts `bytes` on the open clipboard as `format`.
+    ///
+    /// # Safety
+    ///
+    /// The clipboard is open and was emptied by this process.
+    unsafe fn set_data(format: u32, bytes: &[u8]) -> Result<(), String> {
+        let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+        if memory.is_null() {
+            return Err("no memory for the clipboard".to_string());
+        }
+        let data = GlobalLock(memory) as *mut u8;
+        if data.is_null() {
+            GlobalFree(memory);
+            return Err("could not fill the clipboard".to_string());
+        }
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), data, bytes.len());
+        GlobalUnlock(memory);
+        // The clipboard owns the memory once it takes it; it is freed here only if not.
+        if SetClipboardData(format, memory).is_null() {
+            let why = std::io::Error::last_os_error();
+            GlobalFree(memory);
+            return Err(format!("the clipboard did not take it: {why}"));
+        }
+        Ok(())
+    }
+
+    /// What the clipboard holds, if it holds text or an image and can be opened: text when
+    /// there is text, otherwise the "PNG" format, otherwise a bitmap turned into PNG.
+    pub(super) fn read_clip(hwnd: isize) -> Option<Clip> {
         if hwnd == 0 {
             return None;
         }
-        // SAFETY: asks only whether a format is there.
-        if unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) } == 0 {
+        let png = png_format();
+        // SAFETY: asks only whether formats are there.
+        let (has_text, has_png, has_dib) = unsafe {
+            (
+                IsClipboardFormatAvailable(CF_UNICODETEXT) != 0,
+                png != 0 && IsClipboardFormatAvailable(png) != 0,
+                IsClipboardFormatAvailable(CF_DIBV5) != 0
+                    || IsClipboardFormatAvailable(CF_DIB) != 0,
+            )
+        };
+        if !has_text && !has_png && !has_dib {
             return None;
         }
         if !open(hwnd) {
             return None;
         }
-        // SAFETY: the clipboard is open; the handle stays the clipboard's, and is read only
+        // SAFETY: the clipboard is open; each handle stays the clipboard's, and is read only
         // between its lock and unlock, within its size.
-        let text = unsafe {
-            let handle = GetClipboardData(CF_UNICODETEXT);
-            if handle.is_null() {
-                None
+        let (text, image) = unsafe {
+            let text = if has_text {
+                data(CF_UNICODETEXT).map(|bytes| {
+                    let units: Vec<u16> = bytes
+                        .chunks_exact(2)
+                        .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+                        .collect();
+                    let len = units
+                        .iter()
+                        .position(|&unit| unit == 0)
+                        .unwrap_or(units.len());
+                    String::from_utf16_lossy(&units[..len])
+                })
             } else {
-                let data = GlobalLock(handle) as *const u16;
-                if data.is_null() {
-                    None
-                } else {
-                    let units = GlobalSize(handle) / 2;
-                    let all = std::slice::from_raw_parts(data, units);
-                    let len = all.iter().position(|&unit| unit == 0).unwrap_or(units);
-                    let text = String::from_utf16_lossy(&all[..len]);
-                    GlobalUnlock(handle);
-                    Some(text)
-                }
-            }
+                None
+            };
+            let image = if text.is_some() {
+                None
+            } else if has_png {
+                data(png).map(Ok)
+            } else {
+                data(CF_DIBV5)
+                    .or_else(|| data(CF_DIB))
+                    .map(|dib| clipboard::dib_to_png(&dib))
+            };
+            (text, image)
         };
         // SAFETY: closes what `open` opened.
         unsafe { CloseClipboard() };
-        text
+        clipboard::choose(text, || match image? {
+            Ok(png) => Some(png),
+            Err(why) => {
+                eprintln!("clipboard: a bitmap copied on the host cannot cross: {why}");
+                None
+            }
+        })
     }
 
     /// Puts `text` on the clipboard, owned by `hwnd`.
     pub(super) fn write_text(hwnd: isize, text: &str) -> Result<(), String> {
+        let units = wide(text);
+        let bytes: Vec<u8> = units.iter().flat_map(|unit| unit.to_le_bytes()).collect();
+        write(hwnd, &[(CF_UNICODETEXT, &bytes)])
+    }
+
+    /// Puts the image `png` on the clipboard, owned by `hwnd`: as `CF_DIBV5`, which every
+    /// program pastes, and as "PNG".
+    pub(super) fn write_image(hwnd: isize, png: &[u8]) -> Result<(), String> {
+        let dib = clipboard::png_to_dib(png)?;
+        let format = png_format();
+        if format == 0 {
+            return write(hwnd, &[(CF_DIBV5, &dib)]);
+        }
+        write(hwnd, &[(CF_DIBV5, &dib), (format, png)])
+    }
+
+    /// Empties the clipboard and puts each format on it, owned by `hwnd`. The first must go
+    /// on; the others are extras.
+    fn write(hwnd: isize, formats: &[(u32, &[u8])]) -> Result<(), String> {
         if hwnd == 0 {
             return Err("the clipboard's window is closed".into());
         }
-        let units = wide(text);
         if !open(hwnd) {
             return Err("another program holds the clipboard".into());
         }
-        // SAFETY: the clipboard is open. The memory is filled within its size, and the
-        // clipboard owns it once SetClipboardData takes it; it is freed here only if not.
+        // SAFETY: the clipboard is open and emptied here.
         let result = unsafe {
             EmptyClipboard();
-            let memory = GlobalAlloc(GMEM_MOVEABLE, units.len() * 2);
-            if memory.is_null() {
-                Err("no memory for the clipboard's text".to_string())
-            } else {
-                let data = GlobalLock(memory) as *mut u16;
-                if data.is_null() {
-                    GlobalFree(memory);
-                    Err("could not fill the clipboard's text".to_string())
-                } else {
-                    std::ptr::copy_nonoverlapping(units.as_ptr(), data, units.len());
-                    GlobalUnlock(memory);
-                    if SetClipboardData(CF_UNICODETEXT, memory).is_null() {
-                        let why = std::io::Error::last_os_error();
-                        GlobalFree(memory);
-                        Err(format!("the clipboard did not take the text: {why}"))
-                    } else {
-                        Ok(())
-                    }
+            let mut result = Ok(());
+            for (index, (format, bytes)) in formats.iter().enumerate() {
+                let put = set_data(*format, bytes);
+                if index == 0 {
+                    result = put;
                 }
             }
+            result
         };
         // SAFETY: closes what `open` opened.
         unsafe { CloseClipboard() };
         result
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
-    use dsa_transport::local;
-    use std::sync::mpsc;
-    use std::time::Instant;
-
-    const WAIT: Duration = Duration::from_secs(10);
-
-    /// A clipboard in memory that records what was put on it.
-    #[derive(Default)]
-    struct FakeClipboard {
-        text: Option<String>,
-        set: Arc<std::sync::Mutex<Vec<String>>>,
-    }
-
-    impl HostClipboard for FakeClipboard {
-        fn text(&mut self) -> Option<String> {
-            self.text.clone()
-        }
-        fn set_text(&mut self, text: &str) -> Result<(), String> {
-            self.text = Some(text.to_string());
-            self.set.lock().unwrap().push(text.to_string());
-            Ok(())
-        }
-    }
-
-    fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
-        let deadline = Instant::now() + WAIT;
-        while !done() {
-            assert!(Instant::now() < deadline, "timed out waiting for {what}");
-            thread::sleep(Duration::from_millis(5));
-        }
-    }
-
-    #[test]
-    fn fr13_the_window_manager_carries_text_both_ways_without_echo() {
-        let (listener, connector) = local::pair();
-        let androids = Arc::new(FakeAndroids::default());
-        let _service = RunningService::start(Box::new(listener), androids.clone());
-        let (changes_tx, changes) = mpsc::channel();
-        let set = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut host = FakeClipboard {
-            text: Some("on the clipboard at the start".into()),
-            set: Arc::clone(&set),
-        };
-        let stop = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&stop);
-        let syncing = thread::spawn(move || {
-            sync(Box::new(connector), &mut host, changes, flag, None);
-        });
-
-        // The clipboard's text at the start goes to the service.
-        wait_until("the first text", || {
-            androids
-                .of("test")
-                .is_some_and(|android| android.host_clipboard.lock().unwrap().len() == 1)
-        });
-        let android = androids.of("test").unwrap();
-
-        // Text copied on the host goes to the service.
-        changes_tx.send("copied on the host".into()).unwrap();
-        wait_until("the copied text", || {
-            android.host_clipboard.lock().unwrap().len() == 2
-        });
-
-        // Text Android copied goes on the clipboard, and is not sent back when the clipboard
-        // says it changed.
-        android.copy_in_android("copied in Android");
-        wait_until("the clipboard to be set", || set.lock().unwrap().len() == 1);
-        changes_tx.send("copied in Android".into()).unwrap();
-        changes_tx.send("then the host again".into()).unwrap();
-        wait_until("the next text", || {
-            android.host_clipboard.lock().unwrap().len() == 3
-        });
-        assert_eq!(
-            *android.host_clipboard.lock().unwrap(),
-            vec![
-                "on the clipboard at the start".to_string(),
-                "copied on the host".to_string(),
-                "then the host again".to_string(),
-            ]
-        );
-        assert_eq!(*set.lock().unwrap(), vec!["copied in Android".to_string()]);
-
-        stop.store(true, Ordering::SeqCst);
-        syncing.join().unwrap();
-    }
-
-    #[test]
-    fn fr13_text_longer_than_the_limit_is_not_passed_on() {
-        let (listener, connector) = local::pair();
-        let androids = Arc::new(FakeAndroids::default());
-        let _service = RunningService::start(Box::new(listener), androids.clone());
-        let (changes_tx, changes) = mpsc::channel();
-        let mut host = FakeClipboard::default();
-        let stop = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&stop);
-        let syncing = thread::spawn(move || {
-            sync(Box::new(connector), &mut host, changes, flag, None);
-        });
-        changes_tx
-            .send("x".repeat(clipboard::MAX_CLIPBOARD_BYTES + 1))
-            .unwrap();
-        changes_tx.send("short".into()).unwrap();
-        wait_until("the short text", || {
-            androids
-                .of("test")
-                .is_some_and(|android| !android.host_clipboard.lock().unwrap().is_empty())
-        });
-        assert_eq!(
-            *androids.of("test").unwrap().host_clipboard.lock().unwrap(),
-            vec!["short".to_string()]
-        );
-        stop.store(true, Ordering::SeqCst);
-        syncing.join().unwrap();
     }
 }

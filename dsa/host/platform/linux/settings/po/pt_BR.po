@@ -804,8 +804,8 @@ msgstr "Esta configuração vale para todos os usuários deste computador, entã
 msgid "The newest supported version (now Android {0})"
 msgstr "A versão compatível mais recente (agora Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} e suas atualizações de segurança"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Fixado no Android {0}: suas atualizações de segurança e de imagem, nunca um Android mais novo por conta própria"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Nenhuma atualização do Android pendente. O DSA verifica todo dia e, sem janelas de apps abertas, reinicia o Android para atualizar."
@@ -1251,8 +1251,8 @@ msgstr "Baixando e instalando o Google Play. Isso pode levar vários minutos."
 msgid "Enter this number on Google's registration page."
 msgstr "Insira este número na página de registro do Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Ele aparece aqui quando o Google Play estiver instalado e o Android tiver iniciado."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "O Android ID ainda não está disponível. Os serviços do Google Play o criam quando este dispositivo faz o primeiro check-in no Google.\nPara isso, é preciso ter o Google Play instalado, o Android iniciado com ele e uma conexão de rede.\nSe continuar vazio alguns minutos depois, reinicie o Android.\nO ID é um número decimal, o formato que a página de registro do Google aceita."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "O Android iniciou antes desta alteração. Pare e inicie o Android para que o Google Play a siga."
@@ -1838,3 +1838,39 @@ msgstr "Seguir o padrão (na tela inteira)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Seguir o padrão (dentro da janela)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "O Android para e inicia novamente.\n\nAs janelas dos apps são fechadas. Abra os apps novamente quando ele tiver iniciado."
+
+msgid "Alternative stores"
+msgstr "Lojas alternativas"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. Remova uma loja pela lista de apps."
+
+msgid "Installed, version {0}"
+msgstr "Instalada, versão {0}"
+
+msgid "Downloading and installing…"
+msgstr "Baixando e instalando…"
+
+msgid "Not installed: {0}"
+msgstr "Não instalada: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Memória que vários processos usam juntos, como imagens de janelas e buffers gráficos. É liberada quando os apps que a usam fecham."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Memória que nada está usando agora. O Android a devolve ao PC, então ela não ocupa a RAM do PC."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Espaço de trabalho que o kernel mantém para cada thread em execução. Diminui quando apps fecham."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Os mapas que dizem ao processador onde a memória de cada app está na RAM. Diminuem quando apps fecham."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Buffers grandes que o kernel e seus drivers reservam, entre outros para gráficos. São liberados quando não são mais necessários."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Dados que o kernel mantém uma vez para cada núcleo do processador. O tamanho é fixado quando o Android inicia."

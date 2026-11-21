@@ -113,9 +113,11 @@ pub fn check(
             RejectReason::SchemaHashMismatch,
             format!(
                 "the peer ({}) was built from a different protocol definition \
-                 (schema hash {}, expected {}); rebuild both sides from the same control.proto",
+                 (schema hash {}), and this side ({}) from one with schema hash {}; \
+                 rebuild both sides from the same control.proto",
                 peer.build,
                 short(&peer.schema_hash),
+                local.build,
                 short(&local.schema_hash)
             ),
         ));

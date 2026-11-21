@@ -56,7 +56,7 @@ class UnknownColorBufferPatchTests(unittest.TestCase):
                 self.assertTrue(line[:1] in (" ", "+", "-"), repr(line))
 
     def test_nfr5_the_fetch_applies_0042_after_0041(self):
-        self.assertIn(" 0041 0042;", read(HOST / "fetch.sh"))
+        self.assertIn(" 0041 0042 ", read(HOST / "fetch.sh"))
         self.assertIn('-Filter "0042-*.patch"', read(HOST / "fetch.ps1"))
 
 

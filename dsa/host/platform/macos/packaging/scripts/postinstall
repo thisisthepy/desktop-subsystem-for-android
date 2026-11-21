@@ -1,8 +1,14 @@
 #!/bin/sh
-# Runs after the installer put DSA.app in place: installs (or reloads) the launchd agents of
-# the user at the console, the service (dsa-hostd), the window manager (dsa-wm) and the
-# device lender (dsa-devices), so DSA runs without a restart or a login. Other users get theirs when they run `dsa-hostd
-# install-agent` or open DSA. A failure here leaves the installation as it is.
+# Runs after the installer put DSA.app in place: registers (or reloads) the launchd agents of
+# the user at the console, the service (dsa-hostd), the window manager (dsa-wm) and the device
+# lender (dsa-devices), so DSA runs without a restart or a login. Other users get theirs when
+# they run `dsa-hostd install-agent` or open DSA.
+#
+# install-agent runs from DSA.app's Contents/MacOS as the console user, so DSA.app is its main
+# bundle, which SMAppService needs: it registers the property lists inside DSA.app
+# (Contents/Library/LaunchAgents), and macOS names the agents DSA. It first removes the legacy
+# agents an earlier version left in ~/Library/LaunchAgents, and writes legacy agents again only
+# if the registration fails. A failure here leaves the installation as it is.
 #
 # $2 is where the package was installed (/Applications).
 

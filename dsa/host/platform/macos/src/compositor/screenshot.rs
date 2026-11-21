@@ -17,44 +17,15 @@
 
 use std::path::{Path, PathBuf};
 
+use dsa_host_core::screenshot::PixelOrder;
 use dsa_host_core::ui_language::UiLanguage;
 
-/// A screenshot: `width` by `height` opaque pixels as RGBA rows, top row first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Shot {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-}
+pub use dsa_host_core::screenshot::Shot;
 
 /// The app's content of a frame: of the BGRA `pixels` (`stride` bytes a row), the top-left
-/// `content` region less its top `band` rows, every pixel opaque. `None` when nothing is left
-/// under the band or the pixels are fewer than the region needs.
+/// `content` region less its top `band` rows, every pixel opaque.
 pub fn app_content(pixels: &[u8], stride: usize, content: (u32, u32), band: u32) -> Option<Shot> {
-    let (width, height) = content;
-    let row = width as usize * 4;
-    let band = band.min(height);
-    let rows = height - band;
-    if width == 0 || rows == 0 || stride < row {
-        return None;
-    }
-    let needed = (height as usize - 1) * stride + row;
-    if pixels.len() < needed {
-        return None;
-    }
-    let mut rgba = Vec::with_capacity(row * rows as usize);
-    for y in band as usize..height as usize {
-        let start = y * stride;
-        for pixel in pixels[start..start + row].chunks_exact(4) {
-            // The window shows a frame without its alpha, so the picture is what the user saw.
-            rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 0xFF]);
-        }
-    }
-    Some(Shot {
-        width,
-        height: rows,
-        rgba,
-    })
+    dsa_host_core::screenshot::app_content(pixels, stride, content, band, PixelOrder::Bgra)
 }
 
 /// The rows of a task's frame that a band of `band` client pixels covers in a window that

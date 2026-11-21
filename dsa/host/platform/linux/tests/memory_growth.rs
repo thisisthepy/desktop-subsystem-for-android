@@ -79,7 +79,7 @@ fn nfr2_memory_growth_sets_the_virtio_mem_request() {
         kernel,
         initrd: Some(initrd),
         kernel_cmdline: "androidboot.boot_devices=vmbus".into(),
-        system_image: None,
+        system_disk: None,
         disk_template: None,
     };
     let mut launcher = LinuxVmLauncher::new(

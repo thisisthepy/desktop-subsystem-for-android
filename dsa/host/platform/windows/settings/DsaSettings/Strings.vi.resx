@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Khởi động</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Khởi động lại</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android dừng rồi khởi động lại.
+
+Các cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng khi nó đã khởi động xong.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Dừng</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>Không thể khởi động Android. Hãy thử lại, và xem chi tiết nếu vẫn không thành công.</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Máy tính này không chạy được Android. Đây là sự cố của máy tính, không phải của Android; phiên bản Android đang dùng được giữ nguyên. Xem lý do trong phần chi tiết.</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Chi tiết</value>
@@ -262,6 +273,9 @@ DSA sẽ tải xuống ảnh khác nếu có. Phiên bản DSA tiếp theo sẽ 
   <data name="Memory_Shared" xml:space="preserve">
     <value>Bộ nhớ dùng chung</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Bộ nhớ nhiều tiến trình dùng chung, như hình ảnh cửa sổ và bộ đệm đồ họa. Được giải phóng khi các ứng dụng dùng nó đóng lại.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Bộ nhớ nén</value>
   </data>
@@ -270,6 +284,9 @@ DSA sẽ tải xuống ảnh khác nếu có. Phiên bản DSA tiếp theo sẽ 
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Trống</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Bộ nhớ hiện không có gì dùng. Android trả lại cho PC, nên nó không chiếm RAM của PC.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Tiến trình {0}</value>
@@ -747,7 +764,10 @@ Hãy cài đặt lại Google Play.</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android ID hiện ở đây khi Google Play đã được cài đặt và Android đã khởi động cùng nó.</value>
+    <value>Android ID chưa có. Dịch vụ Google Play tạo ID này khi thiết bị lần đầu check-in với Google.
+Việc đó cần Google Play đã cài, Android khởi động cùng nó và có kết nối mạng.
+Nếu vài phút sau vẫn trống, hãy khởi động lại Android.
+ID là một số thập phân, định dạng mà trang đăng ký của Google chấp nhận.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Nhà phát triển</value>
@@ -850,14 +870,26 @@ Tự động: tối đa bằng bộ nhớ của PC này trừ phần Windows gi�
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Ngăn xếp luồng</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Vùng làm việc kernel giữ cho mỗi luồng đang chạy. Giảm khi đóng ứng dụng.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Bảng trang</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Các bảng cho bộ xử lý biết bộ nhớ của mỗi ứng dụng nằm ở đâu trong RAM. Giảm khi đóng ứng dụng.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Ánh xạ kernel (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Các bộ đệm lớn kernel và trình điều khiển dành riêng, trong đó có cho đồ họa. Được giải phóng khi không còn cần.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Dữ liệu theo từng CPU</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Dữ liệu kernel giữ một bản cho mỗi lõi bộ xử lý. Kích thước được cố định khi Android khởi động.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Trình điều khiển</value>
@@ -2303,7 +2335,7 @@ Hãy bật trong Ứng dụng ARM, khởi động lại Android và cài đặt 
     <value>Phiên bản mới nhất được hỗ trợ (hiện là Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} và các bản cập nhật bảo mật của nó</value>
+    <value>Cố định ở Android {0}: chỉ nhận các bản cập nhật bảo mật và ảnh hệ thống của nó, không tự chuyển sang Android mới hơn</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Cập nhật Android</value>
@@ -2604,5 +2636,32 @@ Hãy lấy bản dựng x86_64 hoặc arm64-v8a của ứng dụng.</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Tất cả tệp</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Cửa hàng thay thế</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Chưa cài đặt</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Đã cài đặt</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Đã cài đặt, phiên bản {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Đang tải và cài đặt…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Chưa cài đặt: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Cài đặt</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Mở</value>
   </data>
 </root>

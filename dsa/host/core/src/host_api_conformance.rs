@@ -113,6 +113,9 @@ pub struct FakeAndroid {
     /// The text copied on the host it was given, in order.
     pub host_clipboard: Mutex<Vec<String>>,
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// The images copied on the host it was given, as PNG, in order.
+    pub host_clipboard_images: Mutex<Vec<Vec<u8>>>,
+    clip_watchers: Mutex<Vec<Sender<crate::clipboard::Clip>>>,
     /// What the user did with its notifications on the host, in order.
     pub notification_actions: Mutex<Vec<NotificationAction>>,
     notification_watchers: Mutex<Vec<Sender<NotificationEvent>>>,
@@ -274,6 +277,8 @@ impl FakeAndroid {
             clipboard_shared: Mutex::new(Vec::new()),
             host_clipboard: Mutex::new(Vec::new()),
             clipboard_watchers: Mutex::new(Vec::new()),
+            host_clipboard_images: Mutex::new(Vec::new()),
+            clip_watchers: Mutex::new(Vec::new()),
             notification_actions: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
             print_results: Mutex::new(Vec::new()),
@@ -394,6 +399,19 @@ impl FakeAndroid {
             .lock()
             .unwrap()
             .retain(|watcher| watcher.send(text.to_string()).is_ok());
+        self.publish_clip(crate::clipboard::Clip::Text(text.to_string()));
+    }
+
+    /// Copies an image (`png`) as an app in this Android would, and tells the clip watchers.
+    pub fn copy_image_in_android(&self, png: &[u8]) {
+        self.publish_clip(crate::clipboard::Clip::Image(png.into()));
+    }
+
+    fn publish_clip(&self, clip: crate::clipboard::Clip) {
+        self.clip_watchers
+            .lock()
+            .unwrap()
+            .retain(|watcher| watcher.send(clip.clone()).is_ok());
     }
 
     /// Ends every watch of its tasks, as a service that goes away does.
@@ -590,6 +608,14 @@ impl UserAndroid for FakeAndroid {
     fn watch_clipboard(&self) -> Option<mpsc::Receiver<String>> {
         let (tx, rx) = mpsc::channel();
         self.clipboard_watchers.lock().unwrap().push(tx);
+        Some(rx)
+    }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        self.host_clipboard_images.lock().unwrap().push(png);
+    }
+    fn watch_clips(&self) -> Option<mpsc::Receiver<crate::clipboard::Clip>> {
+        let (tx, rx) = mpsc::channel();
+        self.clip_watchers.lock().unwrap().push(tx);
         Some(rx)
     }
     fn watch_notifications(&self) -> Option<mpsc::Receiver<NotificationEvent>> {
@@ -1270,6 +1296,14 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::input_stream_that_sends_a_request_is_disconnected(
                 &mut || $make,
             );
+        }
+        #[test]
+        fn fr13_an_image_copied_on_the_host_reaches_the_callers_android() {
+            $crate::host_api_conformance::host_clipboard_image_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr13_an_image_copied_in_the_callers_android_reaches_the_client() {
+            $crate::host_api_conformance::guest_clipboard_image_reaches_the_client(&mut || $make);
         }
         #[test]
         fn fr13_text_copied_on_the_host_reaches_the_callers_android() {
@@ -2905,6 +2939,62 @@ pub fn guest_clipboard_reaches_the_client(make: MakeLocal<'_>) {
     assert_eq!(
         clipboard.next(WAIT).unwrap().as_deref(),
         Some("copied in Android")
+    );
+}
+
+/// A small image as PNG: a 2 by 2 bitmap of four colours.
+fn sample_png() -> Vec<u8> {
+    let mut dib = vec![0u8; 40];
+    dib[0] = 40;
+    dib[4] = 2;
+    dib[8] = 2;
+    dib[12] = 1;
+    dib[14] = 24;
+    // Two rows of two blue-green-red pixels, each row padded to four bytes.
+    dib.extend_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0]);
+    dib.extend_from_slice(&[0, 0, 255, 255, 255, 255, 0, 0]);
+    crate::clipboard::dib_to_png(&dib).expect("a PNG")
+}
+
+pub fn host_clipboard_image_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut clipboard = connect(&mut *connector)
+        .watch_clipboard()
+        .expect("carrying the clipboard");
+    let png = sample_png();
+    clipboard.send_image(&png).unwrap();
+    // Something that is not a PNG is refused by the client, and the connection goes on.
+    assert!(clipboard.send_image(b"not an image").is_err());
+    clipboard.send("after the image").unwrap();
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(host_texts(&android, 1), vec!["after the image".to_string()]);
+    assert_eq!(*android.host_clipboard_images.lock().unwrap(), vec![png]);
+}
+
+pub fn guest_clipboard_image_reaches_the_client(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut clipboard = connect(&mut *connector)
+        .watch_clipboard()
+        .expect("carrying the clipboard");
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(
+        clipboard.next_clip(Duration::from_millis(50)).unwrap(),
+        None
+    );
+    let png = sample_png();
+    android.copy_image_in_android(&png);
+    android.copy_in_android("then text");
+    assert_eq!(
+        clipboard.next_clip(WAIT).unwrap(),
+        Some(crate::clipboard::Clip::Image(png.into()))
+    );
+    assert_eq!(
+        clipboard.next_clip(WAIT).unwrap(),
+        Some(crate::clipboard::Clip::Text("then text".into()))
     );
 }
 

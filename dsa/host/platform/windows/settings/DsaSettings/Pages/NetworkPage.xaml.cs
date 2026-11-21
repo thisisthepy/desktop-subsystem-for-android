@@ -19,7 +19,7 @@ public partial class NetworkPage : Page
     {
         InitializeComponent();
         DataContext = ViewModel;
-        _adbTimer.Tick += async (_, _) => await ViewModel.PollAdbAutoConnectAsync();
+        _adbTimer.Tick += PollingTimers.Once(ViewModel.PollAdbAutoConnectAsync);
         PollingTimers.Attach(this, _adbTimer);
         Loaded += async (_, _) =>
         {

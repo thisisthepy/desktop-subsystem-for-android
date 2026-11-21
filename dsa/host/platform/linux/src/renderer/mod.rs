@@ -16,6 +16,7 @@
 //!
 //! This file holds what both sides share.
 
+use dsa_host_core::render_gpu::RenderGpu;
 use dsa_protocol::renderer::types::{GpuRule, Start};
 
 use crate::compositor::gfxstream::{GpuChoice, COMMAND_PORT, PROCESS_PIPE_PORT};
@@ -32,12 +33,13 @@ const GPU_NAME: u32 = 4;
 /// of a device's name). A Linux desktop says no adapter for its primary monitor, so `display`
 /// leaves the choice to gfxstream's own ranking.
 pub fn start_for(render_gpu: &str, frames_on_gpu: bool) -> Start {
-    let setting = render_gpu.trim();
-    let (rule, name) = match setting.to_ascii_lowercase().as_str() {
-        "" | "display" => (GpuRule::Ranking, String::new()),
-        "integrated" => (GpuRule::Integrated, String::new()),
-        "discrete" => (GpuRule::Discrete, String::new()),
-        _ => (GpuRule::Name, setting.to_string()),
+    // No display source says which GPU drives the primary monitor here, so the renderer ranks
+    // the GPUs itself for `display` and for a blank setting.
+    let (rule, name) = match RenderGpu::parse(render_gpu).unwrap_or_default() {
+        RenderGpu::Display => (GpuRule::Ranking, String::new()),
+        RenderGpu::Integrated => (GpuRule::Integrated, String::new()),
+        RenderGpu::Discrete => (GpuRule::Discrete, String::new()),
+        RenderGpu::Named(name) => (GpuRule::Name, name),
     };
     Start {
         gpu_rule: rule as i32,

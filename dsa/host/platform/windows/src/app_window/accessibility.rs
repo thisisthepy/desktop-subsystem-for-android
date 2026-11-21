@@ -86,12 +86,15 @@ use dsa_host_core::accessibility::{
     from_screen, to_screen, ActionRequest, Announcement, Changes, ClientDemand, Demand,
     DemandReason, GuestAccessibility, Node, NodeAction, PresenceChange, Tree, TreeError,
 };
+#[cfg(test)]
 use dsa_host_core::compositor::caption::{CaptionButton, CaptionLayout};
+pub use dsa_host_core::compositor::caption::{CaptionCells, CaptionKind, ClientRect};
 use dsa_host_core::compositor::window_sizing::{frame_placement, FramePlacement};
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::input::{InputEvent, WindowGeometry};
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::caption::{caption_name, loading_name, loading_status};
 use dsa_transport::Connector;
 use windows::core::{
     implement, Error, IUnknown, IUnknownImpl, Interface, BOOL, BSTR, HRESULT, PCWSTR,
@@ -109,31 +112,6 @@ use crate::ui_automation::{
     patterns_of, row_at_percent, scroll_action, Pattern,
 };
 
-/// A rectangle in the window's client pixels: left, top, width, height.
-pub type ClientRect = (i32, i32, u32, u32);
-
-/// What the window says of itself (its item status) while its app opens: until the first
-/// frame it shows only the splash, and a screen reader would otherwise read an empty window
-/// with no hint that something is coming. `None` once the app shows.
-fn loading_status(language: UiLanguage, loading: bool) -> Option<&'static str> {
-    loading.then_some(match language {
-        UiLanguage::English => "Opening the app",
-        UiLanguage::Korean => "앱을 여는 중",
-        UiLanguage::Japanese => "アプリを開いています",
-        UiLanguage::ChineseSimplified => "正在打开应用",
-        UiLanguage::ChineseTraditional => "正在開啟應用程式",
-        UiLanguage::Spanish => "Abriendo la aplicación",
-        UiLanguage::French => "Ouverture de l'application",
-        UiLanguage::German => "App wird geöffnet",
-        UiLanguage::PortugueseBrazil => "Abrindo o app",
-        UiLanguage::Russian => "Открытие приложения",
-        UiLanguage::Italian => "Apertura dell'app",
-        UiLanguage::Vietnamese => "Đang mở ứng dụng",
-        UiLanguage::Indonesian => "Membuka aplikasi",
-        UiLanguage::Turkish => "Uygulama açılıyor",
-    })
-}
-
 /// Whether the window `hwnd` has not yet presented its app's first frame, as the presenter
 /// marks it on the window.
 fn shared_loading(hwnd: isize) -> bool {
@@ -141,29 +119,14 @@ fn shared_loading(hwnd: isize) -> bool {
     read_time(hwnd, FIRST_FRAME_PROPERTY).is_none()
 }
 
-/// One button of the title bar the window draws.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CaptionKind {
-    /// The back arrow in the icon's cell, while the task can go back.
-    Back,
-    /// The app's icon in its cell, which opens the window menu.
-    SystemMenu,
-    Minimize,
-    /// Maximize, or Restore while the window is maximized or fills its monitor.
-    Maximize,
-    Close,
+/// What UI Automation needs of a title bar button beyond what the buttons are.
+trait CaptionKindUia {
+    fn runtime_id(self) -> [i32; 2];
+    fn automation_id(self) -> &'static str;
+    fn accelerator(self) -> Option<&'static str>;
 }
 
-impl CaptionKind {
-    /// Every kind, in the order they stand in the title bar.
-    const ALL: [CaptionKind; 5] = [
-        CaptionKind::Back,
-        CaptionKind::SystemMenu,
-        CaptionKind::Minimize,
-        CaptionKind::Maximize,
-        CaptionKind::Close,
-    ];
-
+impl CaptionKindUia for CaptionKind {
     /// The button's runtime ID. A node's has three parts, so one of two never equals it, and
     /// the second part tells the buttons apart.
     fn runtime_id(self) -> [i32; 2] {
@@ -199,217 +162,6 @@ impl CaptionKind {
     }
 }
 
-/// The title bar buttons' names in `language`, as Windows names its own caption buttons:
-/// Back, System menu, Minimize, Maximize, Restore and Close.
-fn caption_names(language: UiLanguage) -> [&'static str; 6] {
-    match language {
-        UiLanguage::English => [
-            "Back",
-            "System menu",
-            "Minimize",
-            "Maximize",
-            "Restore",
-            "Close",
-        ],
-        UiLanguage::Korean => [
-            "뒤로",
-            "시스템 메뉴",
-            "최소화",
-            "최대화",
-            "이전 크기로",
-            "닫기",
-        ],
-        UiLanguage::Japanese => [
-            "戻る",
-            "システム メニュー",
-            "最小化",
-            "最大化",
-            "元に戻す (縮小)",
-            "閉じる",
-        ],
-        UiLanguage::ChineseSimplified => {
-            ["返回", "系统菜单", "最小化", "最大化", "向下还原", "关闭"]
-        }
-        UiLanguage::ChineseTraditional => {
-            ["返回", "系統功能表", "最小化", "最大化", "還原", "關閉"]
-        }
-        UiLanguage::Spanish => [
-            "Atrás",
-            "Menú del sistema",
-            "Minimizar",
-            "Maximizar",
-            "Restaurar",
-            "Cerrar",
-        ],
-        UiLanguage::French => [
-            "Retour",
-            "Menu système",
-            "Réduire",
-            "Agrandir",
-            "Restaurer",
-            "Fermer",
-        ],
-        UiLanguage::German => [
-            "Zurück",
-            "Systemmenü",
-            "Minimieren",
-            "Maximieren",
-            "Wiederherstellen",
-            "Schließen",
-        ],
-        UiLanguage::PortugueseBrazil => [
-            "Voltar",
-            "Menu do sistema",
-            "Minimizar",
-            "Maximizar",
-            "Restaurar",
-            "Fechar",
-        ],
-        UiLanguage::Russian => [
-            "Назад",
-            "Системное меню",
-            "Свернуть",
-            "Развернуть",
-            "Восстановить",
-            "Закрыть",
-        ],
-        UiLanguage::Italian => [
-            "Indietro",
-            "Menu di sistema",
-            "Riduci a icona",
-            "Ingrandisci",
-            "Ripristina",
-            "Chiudi",
-        ],
-        UiLanguage::Vietnamese => [
-            "Quay lại",
-            "Menu hệ thống",
-            "Thu nhỏ",
-            "Phóng to",
-            "Khôi phục",
-            "Đóng",
-        ],
-        UiLanguage::Indonesian => [
-            "Kembali",
-            "Menu sistem",
-            "Minimalkan",
-            "Maksimalkan",
-            "Pulihkan",
-            "Tutup",
-        ],
-        UiLanguage::Turkish => [
-            "Geri",
-            "Sistem menüsü",
-            "Simge durumuna küçült",
-            "Ekranı kapla",
-            "Önceki boyut",
-            "Kapat",
-        ],
-    }
-}
-
-/// A title bar button's name in `language`. The maximize button is named Restore while the
-/// window is `maximized` (or fills its monitor), as the glyph it shows then says.
-fn caption_name(kind: CaptionKind, maximized: bool, language: UiLanguage) -> &'static str {
-    let [back, system_menu, minimize, maximize, restore, close] = caption_names(language);
-    match kind {
-        CaptionKind::Back => back,
-        CaptionKind::SystemMenu => system_menu,
-        CaptionKind::Minimize => minimize,
-        CaptionKind::Maximize if maximized => restore,
-        CaptionKind::Maximize => maximize,
-        CaptionKind::Close => close,
-    }
-}
-
-/// The back button's name in `language`.
-#[cfg(test)]
-fn back_name(language: UiLanguage) -> &'static str {
-    caption_name(CaptionKind::Back, false, language)
-}
-
-/// The user's display language now, which the buttons are named in.
-fn display_language() -> UiLanguage {
-    crate::ui_language::user_language()
-}
-
-/// The title bar's buttons as the window draws them now: their cells in client pixels and
-/// what they say.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CaptionCells {
-    /// The icon's cell; `None` in a window too narrow for it.
-    pub icon: Option<ClientRect>,
-    /// Whether the icon's cell shows the back arrow rather than the app's icon.
-    pub back: bool,
-    /// The minimize, maximize and close buttons' cells; `None` before the window has laid
-    /// its title bar out.
-    pub buttons: Option<[ClientRect; 3]>,
-    /// Whether the window is maximized or fills its monitor, when the middle button restores.
-    pub maximized: bool,
-    /// Whether the middle button does anything: a window the user's settings fix in size
-    /// cannot be maximized, but one that fills its monitor can always leave it.
-    pub can_maximize: bool,
-    /// Whether the title bar is hidden: a window that fills its monitor shows it only once
-    /// the pointer or the keyboard brings it out.
-    pub offscreen: bool,
-}
-
-impl CaptionCells {
-    /// The buttons of a title bar laid out as `layout`, its icon's cell showing the back arrow
-    /// when `back`.
-    pub fn of(
-        layout: &CaptionLayout,
-        back: bool,
-        maximized: bool,
-        can_maximize: bool,
-        offscreen: bool,
-    ) -> CaptionCells {
-        CaptionCells {
-            icon: layout.icon_cell(),
-            back,
-            buttons: Some(CaptionButton::ALL.map(|button| layout.button_rect(button))),
-            maximized,
-            can_maximize,
-            offscreen,
-        }
-    }
-
-    /// The buttons there are, left to right.
-    fn kinds(&self) -> Vec<CaptionKind> {
-        CaptionKind::ALL
-            .into_iter()
-            .filter(|kind| self.cell(*kind).is_some())
-            .collect()
-    }
-
-    /// Where `kind` is drawn, in client pixels; `None` while the title bar has no such button.
-    fn cell(&self, kind: CaptionKind) -> Option<ClientRect> {
-        match kind {
-            CaptionKind::Back => self.icon.filter(|_| self.back),
-            CaptionKind::SystemMenu => self.icon.filter(|_| !self.back),
-            CaptionKind::Minimize => self.buttons.map(|cells| cells[0]),
-            CaptionKind::Maximize => self.buttons.map(|cells| cells[1]),
-            CaptionKind::Close => self.buttons.map(|cells| cells[2]),
-        }
-    }
-
-    /// Whether `kind` does anything when pressed now.
-    fn enabled(&self, kind: CaptionKind) -> bool {
-        kind != CaptionKind::Maximize || self.can_maximize
-    }
-}
-
-/// The button a client point (`x`, `y`) is on; none while the title bar is hidden.
-fn caption_at(cells: &CaptionCells, x: f64, y: f64) -> Option<CaptionKind> {
-    if cells.offscreen {
-        return None;
-    }
-    cells
-        .kinds()
-        .into_iter()
-        .find(|kind| cells.cell(*kind).is_some_and(|cell| in_cell(cell, x, y)))
-}
-
 /// What pressing `kind` posts to the window, as the `WM_SYSCOMMAND` command and its `lparam`:
 /// the window menu as Alt+Space opens it, and the commands a click on the caption buttons
 /// posts. `None` for the back arrow, which sends the task Back instead, and for a button that
@@ -435,26 +187,6 @@ fn caption_command(kind: CaptionKind, cells: &CaptionCells) -> Option<(u32, isiz
 
 /// The loading item's runtime ID, as unlike a node's as the back button's.
 const LOADING_RUNTIME_ID: [i32; 2] = [UiaAppendRuntimeId as i32, 0x4c4f_4144];
-
-/// What the loading item says in `language`.
-fn loading_name(language: UiLanguage) -> &'static str {
-    match language {
-        UiLanguage::English => "Loading",
-        UiLanguage::Korean => "불러오는 중",
-        UiLanguage::Japanese => "読み込み中",
-        UiLanguage::ChineseSimplified => "正在加载",
-        UiLanguage::ChineseTraditional => "正在載入",
-        UiLanguage::Spanish => "Cargando",
-        UiLanguage::French => "Chargement",
-        UiLanguage::German => "Wird geladen",
-        UiLanguage::PortugueseBrazil => "Carregando",
-        UiLanguage::Russian => "Загрузка",
-        UiLanguage::Italian => "Caricamento",
-        UiLanguage::Vietnamese => "Đang tải",
-        UiLanguage::Indonesian => "Memuat",
-        UiLanguage::Turkish => "Yükleniyor",
-    }
-}
 
 /// One child of the window's fragment root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -494,15 +226,6 @@ fn root_sibling(children: &[RootChild], of: RootChild, forward: bool) -> Option<
         at.checked_sub(1)
             .and_then(|before| children.get(before).copied())
     }
-}
-
-/// Whether the client point (`x`, `y`) is in `cell`.
-fn in_cell(cell: ClientRect, x: f64, y: f64) -> bool {
-    let (left, top, width, height) = cell;
-    x >= left as f64
-        && x < left as f64 + width as f64
-        && y >= top as f64
-        && y < top as f64 + height as f64
 }
 
 /// What happened to a title bar button, for the events the window raises.
@@ -1075,7 +798,7 @@ impl IRawElementProviderFragmentRoot_Impl for RootProvider_Impl {
         let state = self.shared.lock();
         // The title bar is drawn over the app's top, so a button is what a point in its cell
         // hits, while the title bar shows.
-        let button = caption_at(&state.caption, x - origin.0 as f64, y - origin.1 as f64);
+        let button = state.caption.at(x - origin.0 as f64, y - origin.1 as f64);
         if let Some(kind) = button {
             drop(state);
             return Ok(caption_of(&self.shared, kind));
@@ -2521,6 +2244,11 @@ fn sleep_unless_stopped(stop: &AtomicBool, wait: Duration) {
 
 /// UI Automation's own numbers for what [`crate::ui_automation`] names, checked here against
 /// the Windows headers.
+/// The user's display language now, which the buttons are named in.
+fn display_language() -> UiLanguage {
+    crate::ui_language::user_language()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2602,6 +2330,7 @@ mod tests {
     #[test]
     fn fr22_the_back_arrow_is_a_button_named_back_for_ui_automation() {
         use crate::ui_language::from_langid;
+        use dsa_host_core::ui_text::caption::back_name;
         assert_eq!(back_name(UiLanguage::Korean), "뒤로");
         assert_eq!(back_name(UiLanguage::English), "Back");
         // The language IDs Windows gives Korean and US English.
@@ -2610,37 +2339,9 @@ mod tests {
     }
 
     #[test]
-    fn fr17_the_window_is_read_out_in_every_language() {
+    fn fr17_the_default_action_is_read_out_in_every_language() {
         use crate::ui_language::assert_translation;
-        let english = caption_names(UiLanguage::English);
-        let what = [
-            "Back",
-            "System menu",
-            "Minimize",
-            "Maximize",
-            "Restore",
-            "Close",
-        ];
         for language in UiLanguage::ALL {
-            let names = caption_names(language);
-            for ((what, en), name) in what.iter().zip(english).zip(names) {
-                assert_translation(language, what, en, name);
-            }
-            // Maximize and Restore are told apart in every language.
-            assert_ne!(names[3], names[4], "{language:?}");
-            assert_translation(
-                language,
-                "Opening the app",
-                loading_status(UiLanguage::English, true).unwrap(),
-                loading_status(language, true).unwrap(),
-            );
-            assert_eq!(loading_status(language, false), None);
-            assert_translation(
-                language,
-                "Loading",
-                loading_name(UiLanguage::English),
-                loading_name(language),
-            );
             for long in [false, true] {
                 assert_translation(
                     language,
@@ -2648,9 +2349,6 @@ mod tests {
                     patterns::action_name_in(long, UiLanguage::English),
                     patterns::action_name_in(long, language),
                 );
-            }
-            if language != UiLanguage::English {
-                assert_ne!(loading_name(language), "Loading", "{language:?}");
             }
         }
     }
@@ -2788,10 +2486,10 @@ mod tests {
                 left as f64 + width as f64 / 2.0,
                 top as f64 + height as f64 / 2.0,
             );
-            assert_eq!(caption_at(&cells, middle.0, middle.1), Some(kind));
+            assert_eq!(cells.at(middle.0, middle.1), Some(kind));
         }
         // Below the band is the app.
-        assert_eq!(caption_at(&cells, 790.0, 40.0), None);
+        assert_eq!(cells.at(790.0, 40.0), None);
     }
 
     /// The text a VARIANT this module made holds, if it holds text.
@@ -2899,13 +2597,13 @@ mod tests {
         }
         // Hidden, no point finds them: the app is drawn there.
         let (left, _, _, _) = layout.button_rect(CaptionButton::Close);
-        assert_eq!(caption_at(&hidden, left as f64 + 4.0, 10.0), None);
+        assert_eq!(hidden.at(left as f64 + 4.0, 10.0), None);
         // Revealed, they are on the screen, and each says so.
         let revealed = CaptionCells::of(&layout, false, true, true, false);
         let shown = caption_property(CaptionKind::Close, &revealed, UIA_IsOffscreenPropertyId, EN);
         assert_eq!(truth_of(&shown), Some(false));
         assert_eq!(
-            caption_at(&revealed, left as f64 + 4.0, 10.0),
+            revealed.at(left as f64 + 4.0, 10.0),
             Some(CaptionKind::Close)
         );
         let changes = caption_changes(&hidden, &revealed);
@@ -2988,16 +2686,6 @@ mod tests {
                 (CaptionKind::Close, CaptionChange::Moved),
             ]
         );
-    }
-
-    #[test]
-    fn fr22_a_point_in_the_icons_cell_hits_the_back_button() {
-        let cell = (4, 0, 40, 32);
-        assert!(in_cell(cell, 4.0, 0.0));
-        assert!(in_cell(cell, 43.5, 31.5));
-        assert!(!in_cell(cell, 44.0, 10.0));
-        assert!(!in_cell(cell, 3.9, 10.0));
-        assert!(!in_cell(cell, 10.0, 32.0));
     }
 
     #[test]

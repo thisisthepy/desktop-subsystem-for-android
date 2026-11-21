@@ -21,6 +21,11 @@ class FakeProcesses : AppProcesses {
 
     override fun hasForegroundService(packageName: String) = packageName in foreground
 
+    /** Packages one of whose activities the user sees. */
+    val visible = mutableSetOf<String>()
+
+    override fun showsActivity(packageName: String) = packageName in visible
+
     override fun stop(packageName: String) {
         stopped += packageName
         if (stubborn.remove(packageName)) return
@@ -107,6 +112,54 @@ class ClosedAppsTest {
         assertTrue(line, line.endsWith("; still running: pid 90"))
         assertEquals(listOf("org.example.video", "org.example.video"), processes.stopped)
         assertTrue(processes.running.isEmpty())
+    }
+
+    @Test
+    fun nfr2_an_app_whose_task_root_became_a_permission_dialog_it_opened_is_not_stopped() {
+        // ONE store's task 133: the app asked for a permission and finished its own
+        // activities, so the framework named the permission dialog as the task's root and the
+        // task was reported as com.android.permissioncontroller's. The app's activities were
+        // still in the task, under the dialog the user was answering.
+        val app = "com.skt.skaf.A000Z00040"
+        val dialog = "com.android.permissioncontroller"
+        processes.running[app] = mutableMapOf(7218 to 169L * 1024)
+        apps.tasks(setOf(app), inTasks = setOf(app))
+        apps.tasks(setOf(dialog), inTasks = setOf(dialog, app))
+        scheduler.advance(ClosedApps.SETTLE_MILLIS * (ClosedApps.MAX_RECHECKS + 1))
+        assertTrue(processes.stopped.toString(), processes.stopped.isEmpty())
+        // The dialog answered and the task closed: the app is ended then.
+        apps.tasks(emptySet(), inTasks = emptySet())
+        assertEquals(listOf(dialog, app), processes.stopped)
+        assertTrue(log.lines.toString(), log.lines.contains("info: force-stopping $app: it has no task window and no activity in any task"))
+    }
+
+    @Test
+    fun nfr2_an_app_opened_in_another_apps_task_is_not_stopped_again_after_its_own_task_closed() {
+        // Settings' own task closed and Settings was ended; its process outlived the end, and
+        // meanwhile a test app opened Settings' screens in the test app's own task.
+        val settings = "com.android.settings"
+        val probe = "io.github.thisisthepy.dsa.fr34probe"
+        processes.running[settings] = mutableMapOf(5629 to 76L * 1024)
+        processes.stubborn += settings
+        apps.tasks(setOf(settings, probe), inTasks = setOf(settings, probe))
+        apps.tasks(setOf(probe), inTasks = setOf(probe))
+        assertEquals(listOf(settings), processes.stopped)
+        processes.running[settings] = mutableMapOf(5673 to 76L * 1024)
+        apps.tasks(setOf(probe), inTasks = setOf(probe, settings))
+        scheduler.advance(ClosedApps.SETTLE_MILLIS)
+        assertEquals(listOf(settings), processes.stopped)
+    }
+
+    @Test
+    fun nfr2_an_app_that_still_shows_an_activity_is_stopped_only_once_it_stops_showing() {
+        processes.running["org.example.notes"] = mutableMapOf(41 to 40L * 1024)
+        processes.visible += "org.example.notes"
+        apps.tasks(setOf("org.example.notes"))
+        apps.tasks(emptySet())
+        assertTrue(processes.stopped.isEmpty())
+        processes.visible.clear()
+        scheduler.advance(ClosedApps.SETTLE_MILLIS)
+        assertEquals(listOf("org.example.notes"), processes.stopped)
     }
 
     @Test

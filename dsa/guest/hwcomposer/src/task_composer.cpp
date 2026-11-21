@@ -116,6 +116,7 @@ void TaskComposer::send(const std::vector<std::vector<uint8_t>>& outbox) {
 
 void TaskComposer::taskUpdated(const TaskUpdate& update) {
     bool changed;
+    std::vector<int64_t> resend;
     {
         std::lock_guard<std::mutex> lock(mMutex);
         changed = mTasks.update(update.id, update.bounds, update.overlay);
@@ -123,8 +124,17 @@ void TaskComposer::taskUpdated(const TaskUpdate& update) {
             logTrace(mTrace.boundsChanged(update.id, update.bounds.width(),
                                           update.bounds.height(), traceMonoMs(), traceWallMs()));
         }
+        const auto output = mOutputs.find(update.id);
+        resend = resendAfterReport(changed, output != mOutputs.end() && output->second.posted);
     }
-    if (changed) {
+    if (resend.size() > 1) {
+        // The later frame, for a window the host reopens only after the first one arrived.
+        std::lock_guard<std::mutex> lock(mReconnectMutex);
+        const int64_t due = std::max<int64_t>(steadyMs() + resend.back(), 1);
+        mRefreshAtMs = mRefreshAtMs == 0 ? due : std::min(mRefreshAtMs, due);
+        mReconnectWake.notify_all();
+    }
+    if (changed || !resend.empty()) {
         // The window's frame has to follow its new place now, not at the next app redraw.
         RefreshRequest refresh;
         {
@@ -208,7 +218,11 @@ uint32_t TaskComposer::sharedHandleLocked(const BufferRef& buffer) {
     if (it != mShared.end()) {
         return it->second;
     }
+    const double openStart = traceMonoMs();
     const uint32_t handle = mHost.openSharedColorBuffer(buffer);
+    // The buffer belongs to a layer, not yet to a task here: the line says -1.
+    logTrace(mTrace.colorBuffer(-1, buffer.width, buffer.height, "open",
+                                traceMonoMs() - openStart, traceMonoMs(), traceWallMs()));
     if (handle != 0) {
         mShared.emplace(buffer.id, handle);
     }
@@ -321,6 +335,11 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                     fill.cropHeight = layer.crop.bottom - layer.crop.top;
                 }
                 fills.push_back(fill);
+                if (device && !layer.client) {
+                    logTrace(mTrace.appBuffer(task.task, width, height, layer.buffer.width,
+                                              layer.buffer.height, traceMonoMs(),
+                                              traceWallMs()));
+                }
             }
             // A task whose app shows nothing any more is ending: its window keeps its last
             // frame and closes with it, rather than emptying first.
@@ -457,8 +476,12 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
 
             uint32_t& target = output.targets[output.next];
             if (target == 0) {
+                const double createStart = traceMonoMs();
                 target = mHost.createColorBuffer(static_cast<uint32_t>(output.buffers.width),
                                                  static_cast<uint32_t>(output.buffers.height));
+                logTrace(mTrace.colorBuffer(task.task, output.buffers.width, output.buffers.height,
+                                            "create", traceMonoMs() - createStart, traceMonoMs(),
+                                            traceWallMs()));
             }
             if (target == 0) {
                 continue;
@@ -494,7 +517,9 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                                  static_cast<long long>(layer.id), kFenceTimeoutMs);
                     }
                     in.colorBuffer = sharedHandleLocked(layer.buffer);
-                    if (in.colorBuffer == 0) {
+                    // A video buffer whose picture never reached its ColorBuffer would show
+                    // solid green: the task keeps its last frame (the last good picture) instead.
+                    if (in.colorBuffer == 0 || !mUploads.holdsPicture(mHost, layer.buffer)) {
                         layerMissing = true;
                         continue;
                     }

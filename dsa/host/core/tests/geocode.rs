@@ -292,6 +292,11 @@ fn fr36_the_installed_file_is_found_beside_the_host_programs_on_every_host() {
     std::fs::create_dir_all(mac.join("Resources").join("geodata")).unwrap();
     std::fs::write(mac.join("Resources").join("geodata").join(file), b"x").unwrap();
     assert!(boundaries::installed_file(&mac.join("MacOS").join("dsa-devices")).is_file());
+    // macOS, the device lender in its helper bundle:
+    // DSA.app/Contents/Helpers/DSA Devices.app/Contents/MacOS/dsa-devices.
+    let helper = mac.join("Helpers/DSA Devices.app/Contents/MacOS");
+    std::fs::create_dir_all(&helper).unwrap();
+    assert!(boundaries::installed_file(&helper.join("dsa-devices")).is_file());
 }
 
 /// A file about the size of the shipped one's Korean layer: a grid of small dongs over a

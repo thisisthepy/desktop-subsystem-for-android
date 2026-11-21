@@ -27,6 +27,17 @@ pub const TAG: &str = "input-trace";
 /// `input_trace` setting turns them on too.
 pub const DETAIL_ENV: &str = "DSA_INPUT_TRACE";
 
+/// The kernel command line setting that turns the guest's input trace on, which the clock
+/// lines pair with.
+pub const GUEST_INPUT_TRACE: &str = "androidboot.hardware.dsa_input_trace=1";
+
+/// Whether a guest booted with `cmdline` writes the input trace.
+pub fn guest_traces_input(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .any(|word| word == GUEST_INPUT_TRACE)
+}
+
 /// One trace line. `mono` is the time on the process's monotonic clock, `wall` the time since
 /// the Unix epoch, `host` the time on the host's shared monotonic clock (the platform reads
 /// it; this function does not), and `detail` the stage's own `key=value` fields.
@@ -70,5 +81,19 @@ mod tests {
             "input-trace stage=app.present task=7 utc=1970-01-01T00:00:01.000Z mono=1234.567 \
              host=98765432.100 took=1.5"
         );
+    }
+
+    #[test]
+    fn d9_guest_traces_input_only_with_the_exact_word() {
+        assert!(guest_traces_input(
+            "androidboot.hardware=dsa androidboot.hardware.dsa_input_trace=1"
+        ));
+        assert!(!guest_traces_input("androidboot.hardware=dsa"));
+        assert!(!guest_traces_input(
+            "androidboot.hardware.dsa_input_trace=0"
+        ));
+        assert!(!guest_traces_input(
+            "androidboot.hardware.dsa_input_trace=10"
+        ));
     }
 }

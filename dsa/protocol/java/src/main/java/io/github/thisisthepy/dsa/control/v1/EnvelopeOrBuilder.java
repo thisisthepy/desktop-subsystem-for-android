@@ -338,6 +338,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ClipboardSharing getClipboardSharing();
 
   /**
+   * <code>.dsa.control.v1.ClipboardImage clipboard_image = 31;</code>
+   * @return Whether the clipboardImage field is set.
+   */
+  boolean hasClipboardImage();
+  /**
+   * <code>.dsa.control.v1.ClipboardImage clipboard_image = 31;</code>
+   * @return The clipboardImage.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClipboardImage getClipboardImage();
+
+  /**
    * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    * @return Whether the clockProbe field is set.
    */

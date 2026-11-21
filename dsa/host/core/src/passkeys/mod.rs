@@ -60,6 +60,7 @@
 
 pub mod asset_links;
 pub mod encoding;
+pub mod follower;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

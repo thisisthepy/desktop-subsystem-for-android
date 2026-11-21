@@ -276,9 +276,7 @@ unsafe fn anchor_window(ceremony: &Ceremony) -> Result<Retained<AnyObject>, Stri
     let _: () = msg_send![&*window, center];
     let app_class = class(c"NSApplication")?;
     let shared: *mut AnyObject = msg_send![app_class, sharedApplication];
-    if !shared.is_null() {
-        let _: () = msg_send![shared, activateIgnoringOtherApps: true];
-    }
+    crate::objc::activate_as_accessory(shared);
     let _: () = msg_send![&*window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
     Ok(window)
 }

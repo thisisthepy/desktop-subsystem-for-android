@@ -538,6 +538,68 @@ fn fr7_opening_an_app_while_android_stops_starts_it_again_once_stopped() {
     assert_eq!(android.starts(), 1);
 }
 
+fn booting_service(android: Arc<Booting>) -> (MemoryLocalConnector, RunningService) {
+    let (listener, connector) = local::pair();
+    let androids = Arc::new(PerUser::new(move |_: &str| {
+        Ok(Arc::clone(&android) as Arc<dyn UserAndroid>)
+    }));
+    (
+        connector,
+        RunningService::start(Box::new(listener), androids),
+    )
+}
+
+#[test]
+fn fr7_opening_an_app_from_its_window_program_starts_a_stopped_android_once() {
+    let android = Arc::new(Booting::new(SessionState::Stopped, 0, false));
+    let (mut connector, _service) = booting_service(Arc::clone(&android));
+    let mut told = 0;
+    dsa_host_core::host_api::ensure_android_for_app(
+        &mut connector,
+        "test",
+        WAIT,
+        Duration::from_millis(1),
+        || told += 1,
+    )
+    .expect("Android runs");
+    assert_eq!(android.state(), SessionState::Active);
+    assert_eq!(android.starts(), 1);
+    assert_eq!(told, 1, "the wait is shown once");
+}
+
+#[test]
+fn fr7_opening_an_app_from_its_window_program_on_a_running_android_waits_for_nothing() {
+    let android = Arc::new(Booting::new(SessionState::Active, 0, false));
+    let (mut connector, _service) = booting_service(Arc::clone(&android));
+    let mut told = 0;
+    dsa_host_core::host_api::ensure_android_for_app(
+        &mut connector,
+        "test",
+        WAIT,
+        Duration::from_millis(1),
+        || told += 1,
+    )
+    .expect("Android runs");
+    assert_eq!(android.starts(), 0);
+    assert_eq!(told, 0);
+}
+
+#[test]
+fn fr7_opening_an_app_from_its_window_program_says_why_android_did_not_start() {
+    let android = Arc::new(Booting::new(SessionState::Stopped, 0, true));
+    let (mut connector, _service) = booting_service(android);
+    let why = dsa_host_core::host_api::ensure_android_for_app(
+        &mut connector,
+        "test",
+        WAIT,
+        Duration::from_millis(1),
+        || {},
+    )
+    .expect_err("Android does not start");
+    assert!(why.starts_with("Android did not start"), "{why}");
+    assert!(why.contains("no disk"), "{why}");
+}
+
 /// An Android that runs but has stalled, and says why.
 struct Stalled;
 

@@ -11,6 +11,9 @@ from pathlib import Path
 CONFIG = Path(__file__).with_name("android.config")
 ARM64_CONFIG = Path(__file__).with_name("android-arm64.config")
 VIRTIO_CONFIG = Path(__file__).with_name("virtio.config")
+DXG_CONFIG = Path(__file__).with_name("dxg.config")
+DEBUG_CONFIG = Path(__file__).with_name("android-debug.config")
+PROFILE_CONFIG = Path(__file__).with_name("android-memory-profile.config")
 PATCHES = Path(__file__).with_name("patches")
 BUILD = Path(__file__).with_name("build.sh")
 APPLY = Path(__file__).with_name("apply-patches.sh")
@@ -22,6 +25,21 @@ def fragment_lines(path):
 
 
 class AndroidKernelConfigTests(unittest.TestCase):
+    def test_nfr5_the_debug_fragment_has_the_memory_checks_and_only_an_opt_in_merges_it(self):
+        debug = fragment_lines(DEBUG_CONFIG)
+        for option in ["CONFIG_DEBUG_VM=y", "CONFIG_KFENCE=y", "CONFIG_PAGE_OWNER=y", "CONFIG_DEBUG_LIST=y"]:
+            self.assertIn(option, debug)
+        # The shipped kernel's fragments carry none of it.
+        for shipped in [CONFIG, ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
+            for option in debug:
+                self.assertNotIn(option, fragment_lines(shipped), shipped.name)
+        # build.sh merges it only for --debug, into a build and an output of their own.
+        build = BUILD.read_text()
+        self.assertIn('--debug) extra+=("$kernel_dir/android-debug.config")', build)
+        self.assertNotRegex(build, r'fragments=\([^)]*android-debug\.config')
+        self.assertIn('build="$build-extra"', build)
+        self.assertIn('default_out="$default_out-extra"', build)
+
     def test_fr1_ashmem_is_off_and_memfd_is_on(self):
         config = CONFIG.read_text()
         self.assertNotIn("CONFIG_ASHMEM", config)
@@ -57,9 +75,10 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for option in ["CONFIG_IP_NF_NAT=y", "CONFIG_IP6_NF_NAT=y", "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
             self.assertIn(option, config)
 
-    def test_fr32_listed_apps_see_the_computers_memory_in_meminfo_and_sysinfo(self):
-        # Google Play reads the device's memory from /proc/meminfo and sysinfo(); the apps the
-        # guest lists see the computer's memory there, every other process the VM's own.
+    def test_fr32_apps_see_the_memory_the_guest_may_grow_to_in_meminfo_and_sysinfo(self):
+        # Apps read the device's memory from /proc/meminfo and sysinfo() and refuse to run on a
+        # VM that has not grown yet. Every app process sees the memory the guest may grow to,
+        # the app store the computer's, and system processes the VM's own.
         self.assertIn("CONFIG_DSA_HOST_MEMORY=y", CONFIG.read_text())
         patch = (PATCHES / "dsa-host-memory.patch").read_text()
         self.assertIn("+++ b/fs/proc/dsa_host_memory.c", patch)
@@ -67,17 +86,33 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for path in ("fs/proc/meminfo.c", "kernel/sys.c"):
             hunk = patch[patch.index(f"+++ b/{path}"):]
             hunk = hunk[:hunk.find("diff --git", 1)] if "diff --git" in hunk[1:] else hunk
-            self.assertIn("+\tdsa_host_memory_adjust(", hunk, path)
+            self.assertRegex(hunk, r"\n\+\t(dsa_headroom = )?dsa_host_memory_adjust\(", path)
+        # MemAvailable gains what the guest may still grow, as free memory does.
+        self.assertIn("+\tavailable = si_mem_available() + dsa_headroom;", patch)
+        self.assertIn("+\tinfo->freeram += headroom;", patch)
         # Keyed on the calling process's own uid, never on anything a binder peer says.
-        self.assertIn("dsa_app_listed(current_uid())", patch)
+        self.assertIn("from_kuid(&init_user_ns, current_uid())", patch)
         self.assertNotIn("drivers/android/binder.c", patch)
-        # Only the total changes, and only upwards; free and available memory stay the VM's.
-        self.assertIn("+\tif (pages > info->totalram)\n+\t\tinfo->totalram = pages;", patch)
-        self.assertNotIn("freeram =", patch)
-        # Parameters the bootconfig's kernel.dsa_host_memory.* reach.
+
+    def test_fr32_only_app_uids_see_the_grown_size(self):
+        # App IDs from 10000 are installed apps; root, system_server, lmkd and the other system
+        # uids keep the VM's real size, so memory management in the guest is unchanged.
+        patch = (PATCHES / "dsa-host-memory.patch").read_text()
+        self.assertIn("+#define DSA_ANDROID_FIRST_APPLICATION_UID 10000", patch)
+        self.assertIn("+\tif (app < DSA_ANDROID_FIRST_APPLICATION_UID || "
+                      "dsa_app_listed(&dsa_real_uids, app))\n+\t\treturn 0;", patch)
+        # The total only grows, never shrinks below what the VM has.
+        self.assertIn("+\tif (pages > own) {", patch)
+        self.assertIn("+\t\tif (pages > shown)\n+\t\t\tshown = pages;", patch)
+
+    def test_fr32_the_parameters_are_the_ones_the_host_and_init_write(self):
+        # Parameters the bootconfig's kernel.dsa_host_memory.* reach, and the lists init writes.
+        patch = (PATCHES / "dsa-host-memory.patch").read_text()
         self.assertIn('+#define MODULE_PARAM_PREFIX "dsa_host_memory."', patch)
         self.assertIn("+module_param_named(total_kb, dsa_total_kb, ulong, 0444);", patch)
-        self.assertIn("+module_param_cb(uids, &dsa_uids_ops, NULL, 0644);", patch)
+        self.assertIn("+module_param_named(store_total_kb, dsa_store_total_kb, ulong, 0444);", patch)
+        self.assertIn("+module_param_cb(uids, &dsa_uids_ops, &dsa_store_uids, 0644);", patch)
+        self.assertIn("+module_param_cb(real_uids, &dsa_uids_ops, &dsa_real_uids, 0644);", patch)
 
     def test_pr7_the_codec_hal_maps_the_hosts_picture_memory_read_only(self):
         # The host writes decoded pictures into memory it shares with the VM; the driver maps
@@ -261,6 +296,45 @@ class AndroidKernelConfigTests(unittest.TestCase):
         # What Android's storage does use stays built in.
         for option in ["CONFIG_EROFS_FS=y", "CONFIG_F2FS_FS=y"]:
             self.assertIn(option, lines)
+
+    def test_nfr1_the_kernel_is_sized_for_a_small_vm_not_any_machine(self):
+        # Processor and node counts bound static cpumasks and per-node arrays in every slab
+        # cache; config-wsl's 512 CPUs and 1024 nodes cost memory a 4-processor VM never uses.
+        lines = fragment_lines(CONFIG)
+        self.assertIn("CONFIG_NR_CPUS=64", lines)
+        self.assertIn("# CONFIG_NUMA is not set", lines)
+        # Slab: merged caches and no per-CPU partial lists hold fewer partly used slabs.
+        self.assertIn("CONFIG_SLAB_MERGE_DEFAULT=y", lines)
+        self.assertIn("# CONFIG_SLUB_CPU_PARTIAL is not set", lines)
+        # The function tracer's records, the VTs and the framebuffer layer (vkms's fbdev
+        # buffer) are resident and unused.
+        for option in ["FUNCTION_TRACER", "VT", "FB"]:
+            self.assertIn(f"# CONFIG_{option} is not set", lines)
+        self.assertIn("# CONFIG_KVM is not set", fragment_lines(ARM64_CONFIG))
+        # What Android's tracing, netd and gralloc use stays.
+        self.assertNotIn("# CONFIG_FTRACE is not set", lines)
+        self.assertNotIn("# CONFIG_DEBUG_INFO_BTF is not set", lines)
+        for option in ["CONFIG_DRM=y", "CONFIG_DRM_VKMS=y", "CONFIG_ANDROID_BINDER_IPC=y",
+                       "CONFIG_MEMFD_CREATE=y", "CONFIG_SLUB_DEBUG=y"]:
+            self.assertIn(option, lines)
+        # The host gives the VM 4 processors unless the user sets more; NR_CPUS covers that.
+        core = (Path(__file__).parents[1] / "host" / "core" / "src" / "host_config.rs").read_text()
+        default = re.search(r"fn default_processors\(\) -> u32 \{\s*(\d+)", core)
+        self.assertIsNotNone(default)
+        self.assertLessEqual(int(default.group(1)), 64)
+
+    def test_nfr1_allocation_profiling_is_opt_in_and_the_report_can_read_it(self):
+        profile = fragment_lines(PROFILE_CONFIG)
+        self.assertIn("CONFIG_MEM_ALLOC_PROFILING=y", profile)
+        for shipped in [CONFIG, ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
+            self.assertNotIn("MEM_ALLOC_PROFILING", shipped.read_text(), shipped.name)
+        build = BUILD.read_text()
+        self.assertIn('--memory-profile) extra+=("$kernel_dir/android-memory-profile.config")', build)
+        self.assertNotRegex(build, r'fragments=\([^)]*android-memory-profile\.config')
+        image = Path(__file__).parents[1] / "guest"
+        self.assertIn('"/proc/allocinfo"', (image / "channeld" / "src" / "memory_report.rs").read_text())
+        self.assertIn("(allow dsa_memory_report proc_allocinfo (file (read open getattr)))",
+                      (image / "image" / "sepolicy" / "channeld.cil").read_text())
 
     def test_nfr1_zram_has_zstd_as_a_second_compressor_for_cold_pages(self):
         # The idle reclaim compresses what stays in zram again with zstd; without
@@ -892,6 +966,27 @@ class AndroidKernelConfigTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(source.read_text(), patched)
 
+    def test_pr3_the_paravirtualized_gpu_driver_is_built_in_for_both_architectures(self):
+        # The dxg graphics path needs /dev/dxg in the guest. The VM loads no modules, so the
+        # WSL tree's dxgkrnl is built in, with the VMBus, dma-buf, sync file and virtual PCI
+        # pieces it uses, and the fragment is merged for both kernels.
+        config = DXG_CONFIG.read_text().splitlines()
+        for option in ["CONFIG_DXGKRNL=y", "CONFIG_HYPERV=y", "CONFIG_HYPERV_VMBUS=y",
+                       "CONFIG_DMA_SHARED_BUFFER=y", "CONFIG_SYNC_FILE=y", "CONFIG_PCI_HYPERV=y"]:
+            self.assertIn(option, config)
+        script = BUILD.read_text()
+        self.assertEqual(script.count('"$kernel_dir/dxg.config"'), 2)
+        self.assertNotIn("CONFIG_DXGKRNL", CONFIG.read_text())
+        self.assertNotIn("CONFIG_DXGKRNL", ARM64_CONFIG.read_text())
+
+    def test_pr3_the_dxg_fragment_does_not_contradict_the_other_fragments(self):
+        others = "\n".join(path.read_text() for path in (CONFIG, ARM64_CONFIG, VIRTIO_CONFIG))
+        for line in fragment_lines(DXG_CONFIG):
+            name = line.split("=")[0].removeprefix("# ").split(" ")[0]
+            for other in others.splitlines():
+                if re.match(rf"^(# )?{name}[= ]", other):
+                    self.assertEqual(other, line, name)
+
     def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.
         for patch in PATCHES.glob("*.patch"):
@@ -918,10 +1013,28 @@ class AndroidKernelConfigTests(unittest.TestCase):
         named = os.environ.get("DSA_KERNEL_ARCH")
         if named:
             self.assertEqual(arch, named, f"{merged} is a {built} configuration, not {named}")
-        fragments = [CONFIG] + ([ARM64_CONFIG] if arch == "arm64" else []) + [VIRTIO_CONFIG]
-        for fragment in fragments:
+        fragments = ([CONFIG] + ([ARM64_CONFIG] if arch == "arm64" else [])
+                     + [VIRTIO_CONFIG, DXG_CONFIG])
+        # A kernel built with extra fragments (build.sh --debug, DSA_KERNEL_EXTRA_CONFIG) keeps
+        # their lines too, and an option an extra fragment sets is theirs to decide.
+        extras = [Path(path) for path in os.environ.get("DSA_KERNEL_EXTRA_CONFIG", "").split()]
+        extra_names = {re.split(r"[= ]", line.removeprefix("# "))[0]
+                       for extra in extras for line in fragment_lines(extra)}
+        kept = set(lines)
+        for fragment in fragments + extras:
             for line in fragment_lines(fragment):
-                self.assertIn(line, lines, f"{fragment.name} for {arch}")
+                name = re.split(r"[= ]", line.removeprefix("# "))[0]
+                if fragment not in extras and name in extra_names:
+                    continue
+                # The line alone, not the whole merged file, so a CI log shows what is missing.
+                # In a kernel with extra fragments an option the base turns off may vanish
+                # from the menu altogether; it is still off as long as nothing turns it on.
+                if (extras and fragment not in extras and line.endswith(" is not set")
+                        and not any(other.startswith(f"{name}=") for other in kept)):
+                    continue
+                if line not in kept:
+                    self.fail(f"{line!r} from {fragment.name} is not in the merged {arch} "
+                              f"configuration {merged}")
         self.assertFalse(any(line.startswith("CONFIG_ASHMEM=") for line in lines))
         if arch == "arm64":
             self.assertIn("CONFIG_ARM64=y", lines)

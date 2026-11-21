@@ -37,6 +37,7 @@ namespace {
 
 static std::atomic<bool> s_initialized{false};
 static std::atomic<uint64_t> s_next_puid{1};
+static std::atomic<int> s_live_processes{0};
 static std::mutex s_post_cb_mutex;
 static dsa_color_buffer_post_fn s_color_buffer_post_cb = nullptr;
 static void* s_color_buffer_post_ctx = nullptr;
@@ -404,6 +405,7 @@ extern "C" DSA_GFX_EXPORT void dsa_gfx_teardown(void) {
 
 extern "C" DSA_GFX_EXPORT uint64_t dsa_gfx_on_process_create(void) {
     uint64_t puid = s_next_puid.fetch_add(1, std::memory_order_relaxed);
+    s_live_processes.fetch_add(1, std::memory_order_relaxed);
     const auto& renderer = android_getOpenglesRenderer();
     if (renderer) {
         renderer->onGuestGraphicsProcessCreate(puid);
@@ -415,6 +417,14 @@ extern "C" DSA_GFX_EXPORT void dsa_gfx_on_process_destroy(uint64_t puid) {
     const auto& renderer = android_getOpenglesRenderer();
     if (renderer) {
         renderer->cleanupProcGLObjects(puid);
+    }
+    /* The guest numbers its gralloc buffers from 1 each time Android starts, and this renderer
+     * outlives the guest. With no process left the guest is gone, and the buffers it shared would
+     * otherwise be opened again under a new buffer's number, at the old size. */
+    if (s_live_processes.fetch_sub(1, std::memory_order_relaxed) == 1) {
+        if (gfxstream::FrameBuffer* fb = gfxstream::FrameBuffer::getFB()) {
+            fb->dropSharedColorBuffers();
+        }
     }
     /* What the process was granted of the shared graphics memory: its Vulkan objects are gone
      * with it, and the granules come back once its file in the guest has closed. */
@@ -452,10 +462,12 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_process_pipe(dsa_stream_read_fn read_cb,
      * reading it, and that stream looks the process up when its first call arrives, after the
      * registration below. */
     const uint64_t puid = s_next_puid.fetch_add(1, std::memory_order_relaxed);
+    s_live_processes.fetch_add(1, std::memory_order_relaxed);
     size_t sent = 0;
     while (sent < sizeof(puid)) {
         int n = write_cb(user_data, reinterpret_cast<const char*>(&puid) + sent, sizeof(puid) - sent);
         if (n <= 0) {
+            s_live_processes.fetch_sub(1, std::memory_order_relaxed);
             return -3;
         }
         sent += static_cast<size_t>(n);

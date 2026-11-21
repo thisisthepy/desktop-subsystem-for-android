@@ -114,7 +114,7 @@ fn fr14_an_image_from_a_folder_is_installed_on_trial_through_the_update_checks()
     // Until it has booted nothing else goes on top of it.
     let next = image_folder("17.0.0-16373615-15-dev.4", 1637361515, &project_key());
     let why = install(&store, &next).unwrap_err();
-    assert!(why.to_string().contains("first boot"), "{why}");
+    assert!(why.to_string().contains("still on trial"), "{why}");
 }
 
 #[test]

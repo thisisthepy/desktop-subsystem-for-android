@@ -26,13 +26,22 @@
 //! manager's memory goes. The graphics renderer runs in its own process (`dsa-gfx`): it is asked
 //! to give back what it does not use at the same moment, and its own line says what it holds.
 //!
+//! Once Android has stopped (not dozing: [`SharedPresence`] says when), the window manager
+//! holds nothing for it: the renderer process has ended, and the Direct3D device the task
+//! windows' textures were made on goes too ([`Gpu::park`]), with the driver's memory for it.
+//! The heap's free memory and the working set go back after it. The next app that opens
+//! starts Android, the renderer starts with it, and the device is made again when the first
+//! window or frame needs it.
+//!
 //! [`IdleTrim`]: dsa_host_core::memory::IdleTrim
+//! [`SharedPresence`]: dsa_host_core::android_presence::SharedPresence
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::android_presence::SharedPresence;
 use dsa_host_core::memory::{committed_line, held_line, HeldMemory, IdleTrim};
 use dsa_host_core::renderer::renderer_line;
 use dsa_host_core::video_slots::{give_back_unused_pictures, PicturesGivenBack};
@@ -136,6 +145,16 @@ pub fn give_back(
     renderer: Option<&dyn DisplayPresenter>,
     logger: Option<&CompositorLogger>,
 ) {
+    give_back_because(gpu, renderer, logger, "no task window is shown");
+}
+
+/// [`give_back`], saying `why` in the log.
+fn give_back_because(
+    gpu: Option<&Gpu>,
+    renderer: Option<&dyn DisplayPresenter>,
+    logger: Option<&CompositorLogger>,
+    why: &str,
+) {
     let before = held(gpu);
     if let Some(gpu) = gpu {
         gpu.trim();
@@ -147,13 +166,13 @@ pub fn give_back(
     let after = held(gpu);
     let message = if emptied {
         format!(
-            "no task window is shown: gave back memory not in use{}; {}",
+            "{why}: gave back memory not in use{}; {}",
             pictures_line(pictures),
             held_line(&before, &after)
         )
     } else {
         format!(
-            "no task window is shown, but the working set could not be emptied: {}; {}",
+            "{why}, but the working set could not be emptied: {}; {}",
             std::io::Error::last_os_error(),
             held_line(&before, &after)
         )
@@ -196,6 +215,38 @@ fn give_back_spare(
     }
 }
 
+/// Lets go of what the window manager holds only for a running Android, once `presence` says
+/// it has stopped: the Direct3D device (when no window holds it), then the heap's free memory
+/// and the working set. Done once for each stop, and again whenever a device made meanwhile
+/// could be let go of.
+fn release_while_stopped(
+    presence: &SharedPresence,
+    gpu: Option<&Gpu>,
+    renderer: Option<&dyn DisplayPresenter>,
+    logger: Option<&CompositorLogger>,
+) {
+    if !presence.settled_stopped() {
+        return;
+    }
+    let parked = gpu.is_some_and(Gpu::park);
+    if presence.release_due() || parked {
+        let why = if parked {
+            "Android is stopped; let go of the task windows' Direct3D device"
+        } else {
+            "Android is stopped"
+        };
+        give_back_because(gpu, renderer, logger, why);
+    }
+}
+
+/// What the trim gives back memory of: the task windows' devices, the renderer process, and
+/// whether Android runs (`None` where the window manager does not follow it).
+pub struct Holdings {
+    pub gpu: Option<Arc<Gpu>>,
+    pub renderer: Option<Arc<dyn DisplayPresenter>>,
+    pub presence: Option<Arc<SharedPresence>>,
+}
+
 /// Checks `idle` every second until `stop` is set, and gives memory back when it says so.
 /// `quiet_for` says how long ago the last frame arrived: while windows are shown but still,
 /// only the GPU driver's spare memory goes back, and the working set stays, so the next frame
@@ -204,15 +255,27 @@ fn give_back_spare(
 /// seconds later, whether or not windows are shown.
 pub fn run(
     idle: Arc<Mutex<IdleTrim>>,
-    gpu: Option<Arc<Gpu>>,
-    renderer: Option<Arc<dyn DisplayPresenter>>,
+    held: Holdings,
     quiet_for: Box<dyn Fn() -> Duration + Send>,
     let_go: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
+    let Holdings {
+        gpu,
+        renderer,
+        presence,
+    } = held;
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(POLL);
+        if let Some(presence) = &presence {
+            release_while_stopped(
+                presence,
+                gpu.as_deref(),
+                renderer.as_deref(),
+                logger.as_deref(),
+            );
+        }
         let (due, quiet_due, spare_due) = {
             let mut idle = idle.lock().unwrap_or_else(|e| e.into_inner());
             let now = Instant::now();

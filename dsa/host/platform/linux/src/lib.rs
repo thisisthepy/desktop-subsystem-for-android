@@ -71,7 +71,6 @@ pub mod network;
 pub mod package_updates;
 #[cfg(target_os = "linux")]
 pub mod performance;
-pub mod pstore;
 #[cfg(target_os = "linux")]
 pub mod renderer;
 pub mod root_approval;
@@ -81,7 +80,6 @@ pub mod secret_service;
 #[cfg(target_os = "linux")]
 pub mod service;
 pub mod shell;
-pub mod signs;
 pub mod tpm2;
 #[cfg(target_os = "linux")]
 pub mod users;

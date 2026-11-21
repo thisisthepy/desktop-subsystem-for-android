@@ -8,7 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
-use dsa_host_windows::compositor::links::{follow, openable, LinkOpener};
+use dsa_host_core::links::web_url as openable;
+use dsa_host_windows::compositor::links::{follow, LinkOpener};
 use dsa_transport::local;
 
 const WAIT: Duration = Duration::from_secs(10);

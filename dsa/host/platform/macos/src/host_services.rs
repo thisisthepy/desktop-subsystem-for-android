@@ -52,7 +52,7 @@ pub const KEYCHAIN: &str = "your login keychain";
 
 /// The folder the user's sealed keys are kept in, beside their settings folder.
 pub fn keys_dir(settings_dir: &Path) -> PathBuf {
-    settings_dir.with_file_name("keys")
+    dsa_host_core::host_paths::keys_dir_beside(settings_dir)
 }
 
 /// Gives `session` the user's backup, the passkey check and KeyMint's root key. `home` is the

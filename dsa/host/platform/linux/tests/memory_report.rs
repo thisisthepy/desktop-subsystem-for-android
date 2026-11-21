@@ -369,6 +369,8 @@ const KERNEL_LOG: &str = "\
 11-11 10:01:00.109     0     0 I dsa-channeld: memory report: page-tables system_server 2400\n\
 11-11 10:01:00.110     0     0 I dsa-channeld: memory report: cgroups 212 37\n\
 11-11 10:01:00.111     0     0 I dsa-channeld: memory report: bufio 41943040\n\
+11-11 10:01:00.111     0     0 I dsa-channeld: memory report: allocinfo-total 5200 286720\n\
+11-11 10:01:00.111     0     0 I dsa-channeld: memory report: allocinfo mm/sparse-vmemmap.c:85 vmemmap_alloc_block 57344 14336\n\
 11-11 10:01:00.112     0     0 I dsa-channeld: memory report: missing nothing else\n\
 11-11 10:01:00.113     0     0 I dsa-channeld: memory report: end\n";
 
@@ -424,6 +426,15 @@ fn nfr1_the_kernel_memory_report_shows_slab_vmalloc_threads_and_page_tables() {
         "{md}"
     );
     assert!(md.contains("Not read: nothing else."), "{md}");
+    // A kernel built with allocation profiling says where the rest was allocated.
+    assert!(
+        md.contains("**Allocation sites: 5200, 280.0 MiB.**"),
+        "{md}"
+    );
+    assert!(
+        md.contains("| mm/sparse-vmemmap.c:85 | vmemmap_alloc_block | 56.0 | 14336 |"),
+        "{md}"
+    );
 }
 
 /// system_server's `dumpsys meminfo <pid>`, cut to the parts the report reads.

@@ -372,6 +372,35 @@
                     <ui:HyperlinkButton Content="{l:Text GappsRegisterLink.Content}" Click="OnOpenGappsRegistration" />
                 </ui:CardControl>
 
+                <TextBlock Text="{l:Text AltStoresHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <TextBlock Text="{l:Text AltStoresCard.Description}" Style="{StaticResource CardDescription}" Margin="0,0,0,8" />
+                <ItemsControl ItemsSource="{Binding AltStores, Mode=OneWay}" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <ui:CardControl Icon="{ui:SymbolIcon ShoppingBag24}" Margin="0,0,0,4">
+                                <ui:CardControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name, Mode=OneWay}" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Text="{Binding Status, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                                    </StackPanel>
+                                </ui:CardControl.Header>
+                                <StackPanel Style="{StaticResource CardControls}">
+                                    <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                                     Visibility="{Binding IsInstalling, Converter={StaticResource Visible}}"
+                                                     AutomationProperties.Name="{Binding Name, Mode=OneWay}" />
+                                    <ui:Button Content="{l:Text AltStoreInstallButton.Content}" Click="OnInstallStore" Tag="{Binding Id}"
+                                               IsEnabled="{Binding CanInstall, Mode=OneWay}"
+                                               AutomationProperties.HelpText="{Binding Name, Mode=OneWay}" />
+                                    <ui:Button Content="{l:Text AltStoreOpenButton.Content}" Click="OnOpenStore" Tag="{Binding Id}" Margin="8,0,0,0"
+                                               IsEnabled="{Binding CanOpen, Mode=OneWay}"
+                                               Visibility="{Binding IsInstalled, Converter={StaticResource Visible}}"
+                                               AutomationProperties.HelpText="{Binding Name, Mode=OneWay}" />
+                                </StackPanel>
+                            </ui:CardControl>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
                 <TextBlock Text="{l:Text WidevineHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ui:CardControl Icon="{ui:SymbolIcon VideoClip24}">
                     <ui:CardControl.Header>

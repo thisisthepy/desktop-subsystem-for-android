@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::UserAndroid;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
+use dsa_host_core::start_failure::{host_problem_reason, FailureSide};
 use dsa_host_core::ui_language::UiLanguage;
 use dsa_host_core::update::manifest::{self, FileEntry, ImageEntry, Manifest, FORMAT};
 use dsa_host_core::update::policy::InstalledImage;
@@ -175,6 +176,8 @@ struct StoreLauncher {
     broken: Vec<String>,
     /// What its console shows: the agent was refused because of the disk's signing keys.
     other_keys: bool,
+    /// Its failed starts are the host's: the guest never ran.
+    host_refuses: bool,
     /// The running boot's secret, which the agent answers the host's challenge with.
     secret: Arc<Mutex<Option<BootSecret>>>,
     /// The images it started, in order.
@@ -205,12 +208,28 @@ impl GuestLauncher for StoreLauncher {
     fn agent_refused_for_keys(&mut self) -> bool {
         self.other_keys
     }
+    fn failure_side(&mut self) -> FailureSide {
+        if self.host_refuses {
+            FailureSide::Host
+        } else {
+            FailureSide::Guest
+        }
+    }
 }
 
 /// A session over the store, with an agent that connects whenever the guest is up.
 fn updating_android(
     store: &Arc<ImageStore>,
     broken: &[&str],
+) -> (UpdatingAndroid, Arc<AtomicBool>) {
+    updating_android_on(store, broken, false)
+}
+
+/// [`updating_android`] on a host that refuses to run the broken images when `host_refuses`.
+fn updating_android_on(
+    store: &Arc<ImageStore>,
+    broken: &[&str],
+    host_refuses: bool,
 ) -> (UpdatingAndroid, Arc<AtomicBool>) {
     let (listener, connector) = memory::pair();
     let secret = Arc::new(Mutex::new(None));
@@ -219,6 +238,7 @@ fn updating_android(
             store: Arc::clone(store),
             broken: broken.iter().map(|b| b.to_string()).collect(),
             other_keys: false,
+            host_refuses,
             secret: Arc::clone(&secret),
             boots: Default::default(),
         },
@@ -342,6 +362,34 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_and_the_session_started_again()
 }
 
 #[test]
+fn fr14_a_host_side_start_failure_does_not_blame_the_image() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, done) = updating_android_on(&store, &["16.0.2"], true);
+    android.start();
+    let notice = wait_for_notice(&android);
+    assert!(notice.contains("16.0.2 is kept on trial"), "{notice}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2", "not rolled back");
+    assert!(state.on_trial, "still on trial");
+    assert!(state.failed.is_empty(), "not marked as failed");
+    assert_eq!(android.session.state(), SessionState::Stopped);
+    let reason = UserAndroid::last_reason(&android).unwrap();
+    assert_eq!(
+        host_problem_reason(&reason),
+        Some("16.0.2 does not boot"),
+        "the status says it is a host problem, with its reason: {reason}"
+    );
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
 fn fr14_a_stop_asked_for_during_the_rollback_does_not_cancel_it() {
     let store = fresh_store();
     check(
@@ -405,6 +453,7 @@ fn fr14_a_new_image_whose_agent_never_connects_is_given_up_within_bounded_time()
             store: Arc::clone(&store),
             broken: Vec::new(),
             other_keys: false,
+            host_refuses: false,
             secret: Arc::clone(&secret),
             boots: Default::default(),
         },
@@ -503,6 +552,7 @@ fn fr14_a_new_image_on_a_disk_from_other_keys_is_neither_blamed_nor_kept() {
             store: Arc::clone(&store),
             broken: Vec::new(),
             other_keys: true,
+            host_refuses: false,
             secret: Arc::clone(&secret),
             boots: Default::default(),
         },
@@ -583,6 +633,7 @@ fn undecided_android(
             store: Arc::clone(store),
             broken: Vec::new(),
             other_keys: true,
+            host_refuses: false,
             secret: Arc::clone(&secret),
             boots: Default::default(),
         },
@@ -1206,6 +1257,7 @@ fn dozing_android(
             store: Arc::clone(store),
             broken: Vec::new(),
             other_keys: false,
+            host_refuses: false,
             secret: Arc::clone(&secret),
             boots: Arc::clone(&boots),
         },
@@ -1447,4 +1499,69 @@ fn fr14_a_downloaded_image_is_applied_without_the_user_restarting() {
         wait_applied(&store, &boots);
         done.store(true, Ordering::Relaxed);
     }
+}
+
+#[test]
+fn fr14_a_pinned_install_takes_updates_within_its_major_only() {
+    let store = fresh_store();
+    assert_eq!(store.apply_preset(16).unwrap(), None);
+    let fetch = server(&[16, 17], &[("16.0.2", 16, 2), ("17.0.1", 17, 1)], &key());
+    check(&store, &fetch, "mem://list.json", &trusted()).unwrap();
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2");
+    assert_eq!(state.pinned_major(), Some(16));
+    assert_eq!(store.report(None).unwrap().target_major, 16);
+}
+
+#[test]
+fn fr14_a_pinned_major_that_loses_support_stays() {
+    let store = fresh_store();
+    store.apply_preset(16).unwrap();
+    let fetch = server(&[17, 18], &[("17.0.1", 17, 1)], &key());
+    let notice = check(&store, &fetch, "mem://list.json", &trusted())
+        .unwrap()
+        .unwrap();
+    assert!(notice.contains("fixed to it"), "{notice}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current, first());
+    assert_eq!(state.pinned_major(), Some(16));
+    assert!(!store.switch_pending());
+}
+
+#[test]
+fn fr14_the_installer_pin_is_applied_once() {
+    use dsa_host_core::update::versions::Channel;
+    let store = fresh_store();
+    store.apply_preset(16).unwrap();
+    store.choose(Channel::Latest, false).unwrap();
+    // The same preset installer run again (a repair, or an update to the same preset) leaves
+    // the user's later choice as it is.
+    assert_eq!(store.apply_preset(16).unwrap(), None);
+    let state = store.state().unwrap();
+    assert_eq!(state.channel, Channel::Latest);
+    assert_eq!(state.pinned_major(), None);
+}
+
+#[test]
+fn fr14_a_pin_below_the_running_major_erases_nothing() {
+    use dsa_host_core::update::versions::Channel;
+    let store = fresh_store();
+    store.choose(Channel::Major(17), false).unwrap();
+    let fetch = server(&[16, 17], &[("17.0.1", 17, 1)], &key());
+    check(&store, &fetch, "mem://list.json", &trusted()).unwrap();
+    store.confirm().unwrap();
+    let notice = store.apply_preset(16).unwrap().unwrap();
+    assert!(notice.contains("Android 17 is kept"), "{notice}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current.android_major, 17);
+    assert_eq!(state.channel, Channel::Major(17));
+    assert!(!state.older_allowed);
+}
+
+#[test]
+fn fr14_a_default_install_writes_no_pin() {
+    let store = fresh_store();
+    let state = store.state().unwrap();
+    assert_eq!(state.preset_major, None);
+    assert_eq!(state.pinned_major(), None);
 }

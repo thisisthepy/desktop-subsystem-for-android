@@ -36,7 +36,8 @@ public final class DsaService {
             lastReason: json.optionalString("last_reason"),
             updateNotice: json.optionalString("update_notice"),
             problem: json.optionalString("problem"),
-            programUpdate: readProgramUpdate(json["program_update"]))
+            programUpdate: readProgramUpdate(json["program_update"]),
+            startButton: StartButtonKind.parse(json.optionalString("start_button")))
     }
 
     static func readProgramUpdate(_ json: Json) -> ProgramUpdateProgress? {
@@ -55,6 +56,13 @@ public final class DsaService {
     /// Starts Android and waits until it has started or failed.
     public func start() async throws -> StatusInfo {
         DsaService.readStatus(try await runJson(["start", "--wait", "--timeout", "360"]))
+    }
+
+    /// Restarts Android, as `dsa android restart` does, and waits until it runs again: into a
+    /// downloaded image if one waits, and otherwise by stopping and starting it. Its app
+    /// windows close.
+    public func restart() async throws -> StatusInfo {
+        DsaService.readStatus(try await runJson(["android", "restart", "--wait", "--timeout", "360"]))
     }
 
     /// Stops Android and waits until it has stopped.

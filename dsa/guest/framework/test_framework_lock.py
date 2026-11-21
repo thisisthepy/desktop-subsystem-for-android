@@ -223,6 +223,27 @@ class LockTests(unittest.TestCase):
                         self.assertTrue(any(path.startswith(c + "/") for c in cone),
                                         f"{version['android']} {project}: {path} is outside {cone}")
 
+    def test_nfr5_frameworks_base_patches_change_only_sources_of_files_the_image_takes(self):
+        # The image takes a few of the framework build's files and keeps the published build's
+        # copy of every other one. A patch to frameworks/base outside the folders those files
+        # are built from changes nothing the image ships, or worse ships half of a change:
+        # libandroid_runtime once registered a native for a Process method that the published
+        # framework.jar does not declare, and zygote aborted at every start.
+        taken = set(framework_lock.OUTPUTS) | set(framework_lock.JAVA_OUTPUTS)
+        self.assertTrue(set(framework_lock.FRAMEWORKS_BASE_SOURCES) <= taken,
+                        set(framework_lock.FRAMEWORKS_BASE_SOURCES) - taken)
+        folders = [folder for sources in framework_lock.FRAMEWORKS_BASE_SOURCES.values()
+                   for folder in sources]
+        for android in ("android16", "android17"):
+            found = [patch for project, patch in framework_lock.patch_files(android)
+                     if project == "frameworks/base"]
+            self.assertTrue(found, android)
+            for patch in found:
+                for path in framework_lock.patch_paths(patch):
+                    self.assertTrue(any(path.startswith(folder + "/") for folder in folders),
+                                    f"{android} {patch.name} changes {path}, which no file the "
+                                    f"image takes is built from (only {folders} are)")
+
     def test_nfr5_both_versions_patch_renderengine_surfaceflinger_libegl_and_hwui(self):
         for android in ("android16", "android17"):
             changed = {(project, "/".join(path.split("/")[:2]))
@@ -734,8 +755,9 @@ def removed_lines(patch):
 
 class ServicesTests(unittest.TestCase):
     """services.jar, built from the published build's source with DSA's patches to the window
-    manager (a dialog gets no caption bar inset), the package manager, the WebView service and
-    the display manager (Google Play is shown a phone's density)."""
+    manager (a dialog gets no caption bar inset), the package manager, the WebView service, the
+    display manager (Google Play is shown a phone's density) and the activity manager (Google
+    Play is given the computer's installed memory as advertisedMem)."""
 
     def test_fr32_google_play_is_shown_a_phones_density_by_the_display_manager(self):
         for android in ("android16", "android17"):
@@ -790,7 +812,7 @@ class ServicesTests(unittest.TestCase):
     def test_fr22_the_native_build_leaves_the_java_patches_to_the_services_build(self):
         for android in ("android16", "android17"):
             java = [p for _, p in framework_lock.patch_files(android) if framework_lock.java_only(p)]
-            self.assertEqual(len(java), 4, android)
+            self.assertEqual(len(java), 5, android)
             native = [p for _, p in framework_lock.patch_files(android) if not framework_lock.java_only(p)]
             self.assertTrue(native, android)
         with tempfile.TemporaryDirectory() as tmp:
@@ -943,6 +965,32 @@ class ServicesTests(unittest.TestCase):
         self.assertLess(script.index('build "the analysis of the tree"'), script.index('sudo swapoff "$DSA_ANALYSIS_SWAP"'))
         self.assertLess(script.index('sudo rm -f "$DSA_ANALYSIS_SWAP"'), script.index('build "the services.jar build"'))
 
+    def test_fr42_the_services_tree_builds_the_patched_documentsui_apk(self):
+        # DocumentsUI builds only in an Android tree; the services build's tree is the published
+        # build's own, so it is patched there before the analysis and its APK built after
+        # services.jar.
+        apk = "out/soong/.intermediates/packages/apps/DocumentsUI/DocumentsUI/android_common/DocumentsUI.apk"
+        query = (
+            "out/target/product/vsoc_x86_64_only/system/priv-app/DocumentsUI/DocumentsUI.apk:\n"
+            "  input: g.android.Cp\n"
+            f"    {apk}\n"
+            "    | out/host/linux-x86/bin/cp_helper\n"
+            "  outputs:\n"
+            "    out/target/product/vsoc_x86_64_only/system/priv-app/DocumentsUI/DocumentsUI.apk.installed\n")
+        self.assertEqual(framework_lock.install_source(query, ".apk"), apk)
+        with self.assertRaisesRegex(framework_lock.LockError, "not of one APK"):
+            framework_lock.install_source(query.replace(apk, apk + ".zip"), ".apk")
+        with self.assertRaisesRegex(framework_lock.LockError, "not of one jar"):
+            framework_lock.install_source(query)
+        script = (REPO / ".github/scripts/framework/build-services.sh").read_text()
+        patched = script.index('apps.py" patch-tree documentsui')
+        self.assertLess(patched, script.index('build "the analysis of the tree" nothing'))
+        self.assertIn('install-source --apk', script)
+        self.assertLess(script.index('build "the services.jar build"'), script.index('build "the DocumentsUI build"'))
+        self.assertIn('apps.py" record documentsui', script)
+        workflow = (REPO / ".github/workflows/framework.yml").read_text()
+        self.assertIn("name: default-app-documentsui-${{ matrix.android }}-${{ steps.pins.outputs.version }}", workflow)
+
     def test_fr22_a_services_build_failure_says_whether_disk_memory_or_time(self):
         script = (REPO / ".github/scripts/framework/build-services.sh").read_text()
         for cause in ("ran out of time", "ran out of disk", "ran out of memory"):
@@ -994,6 +1042,38 @@ class ServicesTests(unittest.TestCase):
         self.assertIn('echo -1000 | sudo tee "/proc/$pid/oom_score_adj"', guard)
         # Before the fetch and the build, which it protects the runner from.
         self.assertLess(job.index("Keep the runner responsive"), job.index("- name: Build services.jar"))
+
+    def test_fr22_the_services_build_runs_in_a_memory_cgroup_of_its_own(self):
+        # android17 lost its runner 58 to 62 minutes into the build in about half its attempts
+        # (runs 43763452008, 43815264913 and 44797323515). Its analysis holds 19 to 20 GiB, and
+        # while it ran in the runner's own cgroup the runner had 0.5 GiB available and waited
+        # for memory up to 96 % of the time (run 44677247350).
+        workflow = (REPO / ".github/workflows/framework.yml").read_text()
+        job = workflow[workflow.index("  services:\n"):workflow.index("  framework:\n")]
+        guard = job[job.index("- name: Keep the runner responsive under memory pressure"):
+                    job.index("- name: Install the build tools")]
+        self.assertIn("cgroup=/sys/fs/cgroup/dsa-build", guard)
+        self.assertIn('echo "$high" | sudo tee "$cgroup/memory.high"', guard)
+        self.assertIn('echo "DSA_BUILD_CGROUP=$cgroup" >> "$GITHUB_ENV"', guard)
+        # What the build may hold is the runner's memory less what the runner keeps: 2.5 GiB.
+        self.assertIn("high=$(( (total_kib - 2621440) * 1024 ))", guard)
+        # Held back, not killed: no memory.max, so the build waits and its own bounds stop it.
+        self.assertNotIn('"$cgroup/memory.max"', guard)
+        # A runner without the memory controller fails here, not 60 minutes into the build.
+        self.assertIn("this runner has no cgroup v2 memory controller", guard)
+        script = (REPO / ".github/scripts/framework/build-services.sh").read_text()
+        mover = script[script.index("in_build_cgroup() {"):script.index("\nbuild() {")]
+        # The subshell's own process, read outside the pipeline whose sides are processes of
+        # their own, joins the cgroup and becomes the build, so everything the build starts is
+        # in it, and the script and its per-minute report are not.
+        self.assertIn('self=$BASHPID\n    echo "$self" | sudo tee "$DSA_BUILD_CGROUP/cgroup.procs"', mover)
+        self.assertIn('exec "$@"', mover)
+        self.assertNotIn("in_build_cgroup watch_room", script)
+        self.assertEqual(script.count("in_build_cgroup timeout"), 1)
+        # The report says what the build holds of its share and whether the runner waits.
+        self.assertIn('"$DSA_BUILD_CGROUP/memory.current"', script)
+        self.assertIn('"$runner_cgroup/memory.pressure"', script)
+        self.assertIn("$(cgroup_line || true)", script)
 
     def test_fr22_the_services_analysis_is_not_incremental(self):
         # android17's analysis never finished on a standard runner (run 43644988414): its
@@ -1084,18 +1164,22 @@ class ServicesTests(unittest.TestCase):
 
     def test_fr22_an_analysis_that_does_not_fit_is_stopped_while_the_runner_answers(self):
         script = (REPO / ".github/scripts/framework/build-services.sh").read_text()
-        self.assertIn('analysis_minutes="${DSA_ANALYSIS_MINUTES:-45}"', script)
+        self.assertIn('analysis_minutes="${DSA_ANALYSIS_MINUTES:-90}"', script)
         self.assertIn('step_minutes="$analysis_minutes"\nbuild "the analysis of the tree" nothing\nstep_minutes=0\n',
                       script)
         self.assertIn("$what ran out of time: it was stopped after $stopped_after", script)
         workflow = (REPO / ".github/workflows/framework.yml").read_text()
         job = workflow[workflow.index("  services:\n"):workflow.index("  framework:\n")]
         bound = int(re.search(r"DSA_ANALYSIS_MINUTES: (\d+)", job).group(1))
-        # Longer than android16's 9 minutes several times over, and sooner than the 50 and 58
-        # minutes after which GitHub gave the two android17 runs up.
-        self.assertGreaterEqual(bound, 30)
-        self.assertLess(bound, 50)
-        self.assertLess(bound, int(re.search(r"DSA_BUILD_MINUTES: (\d+)", job).group(1)))
+        budget = int(re.search(r"DSA_BUILD_MINUTES: (\d+)", job).group(1))
+        # Several times android17's 19 to 23 minutes, since the build's cgroup gives the analysis
+        # less memory than it had and keeps the runner answering however long it takes. And
+        # with the longest Java build after it so far (92 minutes, run 43815264913), within the
+        # time the job gives the whole build.
+        self.assertGreaterEqual(bound, 60)
+        self.assertLessEqual(bound + 92, budget)
+        # The runner answers only because the build runs in its own cgroup.
+        self.assertIn('in_build_cgroup timeout --signal=TERM --kill-after=120 "$left"', script)
 
     def test_fr22_the_services_tree_takes_one_version_of_the_musl_rust_toolchain(self):
         # 6 GB for three versions, of the 17 GB the fetch leaves android17 (run 43644988414).
@@ -1297,11 +1381,12 @@ class WorkflowTests(unittest.TestCase):
     def test_nfr5_a_development_build_waits_only_for_the_job_it_takes_files_from(self):
         find = self._step(self.release, "Find the Framework build run with the pinned files")
         dev = find[find.index('if [[ "$DEV_BUILD" == true ]]'):find.index("wanted=()")]
-        # The newest supported Android's x86_64 files, from the job framework.yml names so.
+        # The newest supported Android's files of the architecture asked for, from the job
+        # framework.yml names so.
         self.assertIn('android="android$(jq \'.supported_majors | max\' dsa/android-versions.json)"', dev)
-        self.assertIn('name="framework-$android-x86_64-', dev)
+        self.assertIn('name="framework-$android-$DEV_ARCH-', dev)
         # The job that keeps the artifact once services.jar has joined the native files.
-        self.assertIn('job="Pack the framework files (ubuntu-24.04, $android, x86_64)"', dev)
+        self.assertIn('job="Pack the framework files (ubuntu-24.04, $android, $DEV_ARCH)"', dev)
         pack = self.framework[self.framework.index("  framework:\n"):]
         self.assertIn("name: Pack the framework files (ubuntu-24.04, ${{ matrix.android }}, ${{ matrix.arch }})",
                       pack)

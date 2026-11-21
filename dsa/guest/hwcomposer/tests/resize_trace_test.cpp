@@ -74,3 +74,34 @@ TEST(fr4_summaries_are_rate_limited_during_a_drag) {
 }
 
 int main() { return ::dsa::test::runAll(); }
+
+TEST(fr4_the_first_buffer_of_the_new_size_the_app_queued_is_a_stage_of_its_own) {
+    ResizeTrace trace(true);
+    trace.boundsChanged(7, 800, 600, 1000.0, kWall);
+    // A buffer of another size is the old picture, not the app drawing at the new size.
+    EXPECT_TRUE(trace.appBuffer(7, 800, 600, 640, 480, 1010.0, kWall).empty());
+    const auto lines = trace.appBuffer(7, 800, 600, 800, 600, 1060.0, kWall);
+    EXPECT_EQ(lines.size(), 1u);
+    EXPECT_EQ(lines[0], std::string("resize-trace task=7 size=800x600 stage=hwc.appbuffer "
+                                    "utc=2026-10-26T06:23:03.123Z mono=1060.000 "
+                                    "since_bounds=60.0"));
+    // Once per size.
+    EXPECT_TRUE(trace.appBuffer(7, 800, 600, 800, 600, 1070.0, kWall).empty());
+}
+
+TEST(fr4_the_app_buffer_stage_comes_only_when_detail_is_on) {
+    ResizeTrace trace(false);
+    trace.boundsChanged(7, 800, 600, 1000.0, kWall);
+    EXPECT_TRUE(trace.appBuffer(7, 800, 600, 800, 600, 1060.0, kWall).empty());
+}
+
+TEST(fr4_creating_a_color_buffer_says_its_size_and_how_long_the_host_took) {
+    ResizeTrace on(true);
+    EXPECT_EQ(on.colorBuffer(7, 800, 600, "create", 41.26, 2000.0, kWall).size(), 1u);
+    EXPECT_EQ(on.colorBuffer(7, 800, 600, "create", 41.26, 2000.0, kWall)[0],
+              std::string("resize-trace task=7 size=800x600 stage=hwc.colorbuffer "
+                          "utc=2026-10-26T06:23:03.123Z mono=2000.000 kind=create took=41.3"));
+    // Every creation is a line: two buffers of one size cost two round trips.
+    ResizeTrace off(false);
+    EXPECT_TRUE(off.colorBuffer(7, 800, 600, "create", 41.26, 2000.0, kWall).empty());
+}

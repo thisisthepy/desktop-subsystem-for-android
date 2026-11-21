@@ -15,7 +15,7 @@ public partial class GeneralPage : Page
     {
         InitializeComponent();
         DataContext = ViewModel;
-        _timer.Tick += async (_, _) => await ViewModel.PollAsync();
+        _timer.Tick += PollingTimers.Once(ViewModel.PollAsync);
         PollingTimers.Attach(this, _timer);
         Loaded += async (_, _) =>
         {
@@ -23,7 +23,17 @@ public partial class GeneralPage : Page
         };
     }
 
-    private async void OnStart(object sender, RoutedEventArgs e) => await ViewModel.StartAsync();
+    /// <summary>Starts a stopped Android, or restarts a running one once the user agrees that
+    /// its app windows close.</summary>
+    private async void OnStart(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.StartConfirms && !await Shell.Confirm(App.Text.Get("AndroidRestartConfirm.Title"),
+                App.Text.Get("RestartConfirm.Body"), App.Text.Get("RestartButton.Content")))
+        {
+            return;
+        }
+        await ViewModel.PressStartAsync();
+    }
 
     private async void OnStop(object sender, RoutedEventArgs e) => await ViewModel.StopAsync();
 

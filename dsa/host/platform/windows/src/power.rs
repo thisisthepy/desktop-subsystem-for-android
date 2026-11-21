@@ -63,6 +63,33 @@ pub fn read() -> Option<PowerState> {
     ))
 }
 
+/// What this computer says about itself, as Windows reports it.
+pub struct ComputerFacts;
+
+impl dsa_host_core::host_facts::HostFacts for ComputerFacts {
+    fn physical_memory_kb(&self) -> Option<u64> {
+        #[cfg(windows)]
+        {
+            read_memory().map(|(total_kb, _)| total_kb)
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    fn installed_memory_kb(&self) -> Option<u64> {
+        #[cfg(windows)]
+        {
+            read_installed_memory_kb()
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+}
+
 /// The computer's physical memory, total and available, in KiB, or `None` when Windows
 /// cannot say.
 #[cfg(windows)]
@@ -76,6 +103,19 @@ pub fn read_memory() -> Option<(u64, u64)> {
         return None;
     }
     Some((status.ullTotalPhys / 1024, status.ullAvailPhys / 1024))
+}
+
+/// The memory the computer is installed with, in KiB, as its firmware reports the modules
+/// (`GetPhysicallyInstalledSystemMemory`): 32 GiB on a "32 GB" PC, where [`read_memory`] says
+/// less, as the firmware and the graphics hardware keep some. `None` when Windows cannot say
+/// (some virtual machines).
+#[cfg(windows)]
+pub fn read_installed_memory_kb() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::GetPhysicallyInstalledSystemMemory;
+    let mut kb: u64 = 0;
+    // SAFETY: a valid pointer to the 64-bit figure Windows fills in.
+    let read = unsafe { GetPhysicallyInstalledSystemMemory(&mut kb) };
+    (read != 0 && kb > 0).then_some(kb)
 }
 
 /// How often [`follow`] reads the computer's memory. A guest that hears of a change some
@@ -98,17 +138,7 @@ pub fn follow(
     let mut pressure = dsa_host_core::power::MemoryPressure::new();
     while !stop.load(Ordering::Relaxed) {
         if let Some((total_kb, available_kb)) = read_memory() {
-            let was_low = pressure.low();
-            let low = pressure.update(total_kb, available_kb);
-            if low != was_low {
-                eprintln!(
-                    "host memory: {} MiB of {} MiB available, {}",
-                    available_kb / 1024,
-                    total_kb / 1024,
-                    if low { "short" } else { "no longer short" }
-                );
-            }
-            hub.update_memory(low);
+            pressure.observe(&hub, total_kb, available_kb);
         }
         let mut waited = std::time::Duration::ZERO;
         while waited < POLL && !stop.load(Ordering::Relaxed) {

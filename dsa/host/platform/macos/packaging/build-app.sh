@@ -12,6 +12,12 @@
 # built it and is ready to be signed for distribution. DSA_INSTALLER_IDENTITY signs the
 # package the same way.
 #
+# DSA_PRESET_MAJORS names Android majors (such as "17 16") to build preset packages for, beside
+# the default ones: DSA-<version>-a<major>.pkg and .dmg. Each is the same signed programs with
+# Contents/Resources/installer-preset.json added, which fixes the computer to that major; only
+# the bundle's outer signature is made again. The release names them
+# DSA-v<version>-a<major>-macos-arm64.pkg and .dmg.
+#
 # The address data (the administrative boundaries the device lender turns Android's positions
 # into addresses with) goes into Contents/Resources/geodata: from DSA_GEODATA_DIR, a folder
 # dsa/host/core/geodata/build-geodata.py filled, or made here by that script, which downloads
@@ -62,11 +68,53 @@ plutil -lint "$helper/Contents/Info.plist"
 printf 'APPL????' > "$helper/Contents/PkgInfo"
 cp "$programs/dsa-app-window" "$helper/Contents/MacOS/"
 # The others are taken when they were built.
-for program in dsa dsa-hostd dsa-wm dsa-gfx dsa-devices; do
+for program in dsa dsa-hostd dsa-gfx; do
     if [[ -f "$programs/$program" ]]; then
         cp "$programs/$program" "$app/Contents/MacOS/"
     fi
 done
+# The window manager and the device lender run all session long and talk to the window
+# server, so each gets a helper bundle of its own, with its own bundle identifier, like the
+# window host. Run from DSA.app's Contents/MacOS, either would make macOS take DSA.app for
+# running, and opening DSA.app would only reactivate it instead of starting the settings app.
+# make_helper <bundle name> <program> <Info.plist>: the helper's path is printed.
+make_helper() {
+    local bundle="$app/Contents/Helpers/$1"
+    mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+    sed "s/@VERSION@/$version/g" "$here/$3" > "$bundle/Contents/Info.plist"
+    plutil -lint "$bundle/Contents/Info.plist" >&2
+    printf 'APPL????' > "$bundle/Contents/PkgInfo"
+    cp "$programs/$2" "$bundle/Contents/MacOS/"
+    cp "$here/icon/DSA.icns" "$bundle/Contents/Resources/DSA.icns"
+    printf '%s\n' "$bundle"
+}
+wm_helper=""
+if [[ -f "$programs/dsa-wm" ]]; then
+    wm_helper="$(make_helper "DSA Window Manager.app" dsa-wm dsa-wm-Info.plist)"
+fi
+devices_helper=""
+if [[ -f "$programs/dsa-devices" ]]; then
+    devices_helper="$(make_helper "DSA Devices.app" dsa-devices dsa-devices-Info.plist)"
+fi
+# The agents DSA.app registers through SMAppService (dsa-hostd install-agent), so macOS names
+# them DSA in its background item notices and Login Items settings. Each property list names
+# its program relative to the bundle and is sealed by the app's signature below. One whose
+# program was not built is left out, and install-agent then falls back to legacy agents.
+agents="$app/Contents/Library/LaunchAgents"
+mkdir -p "$agents"
+add_agent() {
+    sed "s/@VERSION@/$version/g" "$here/launch-agents/$1.plist" > "$agents/$1.plist"
+    plutil -lint "$agents/$1.plist"
+}
+if [[ -f "$app/Contents/MacOS/dsa-hostd" ]]; then
+    add_agent io.github.thisisthepy.dsa.hostd
+fi
+if [[ -n "$wm_helper" ]]; then
+    add_agent io.github.thisisthepy.dsa.wm
+fi
+if [[ -n "$devices_helper" ]]; then
+    add_agent io.github.thisisthepy.dsa.devices
+fi
 if [[ -n "$renderer" ]]; then
     frameworks="$app/Contents/Frameworks"
     cp "$renderer" "$frameworks/libgfxstream_backend.dylib"
@@ -84,6 +132,17 @@ if [[ -n "$renderer" ]]; then
         install_name_tool -change "$dependency" "@loader_path/$name" \
             "$frameworks/libgfxstream_backend.dylib"
     done < <(otool -L "$renderer" | tail -n +2 | awk '{print $1}')
+    # The renderer opens the Vulkan loader by name when it runs, so nothing above listed it.
+    loader="${DSA_VULKAN_LOADER:-}"
+    if [[ -z "$loader" ]] && command -v brew >/dev/null; then
+        loader="$(brew --prefix vulkan-loader 2>/dev/null)/lib/libvulkan.dylib"
+    fi
+    if [[ -n "$loader" && -f "$loader" ]]; then
+        bash "$here/bundle-vulkan-loader.sh" "$loader" "$frameworks"
+    else
+        echo "the Vulkan loader was not found (set DSA_VULKAN_LOADER); the renderer needs it" >&2
+        exit 1
+    fi
     # MoltenVK is the Vulkan driver the loader opens; its description sits in Resources,
     # where the window manager points the loader (VK_ICD_FILENAMES).
     moltenvk="${DSA_MOLTENVK:-}"
@@ -172,7 +231,12 @@ sign() {
 # Android is told the Mac's passkeys are unavailable.
 devices_entitlements="$here/dsa.entitlements"
 if [[ -n "${DSA_PASSKEY_PROFILE:-}" ]]; then
-    cp "$DSA_PASSKEY_PROFILE" "$app/Contents/embedded.provisionprofile"
+    if [[ -z "$devices_helper" ]]; then
+        echo "DSA_PASSKEY_PROFILE is set but dsa-devices was not built" >&2
+        exit 1
+    fi
+    # The profile belongs to the bundle that holds dsa-devices, its helper bundle.
+    cp "$DSA_PASSKEY_PROFILE" "$devices_helper/Contents/embedded.provisionprofile"
     devices_entitlements="$out/dsa-devices.entitlements"
     cp "$here/dsa-devices-passkeys.entitlements" "$devices_entitlements"
     granted="$out/profile-entitlements.plist"
@@ -185,7 +249,7 @@ if [[ -n "${DSA_PASSKEY_PROFILE:-}" ]]; then
     done
     rm -f "$out/profile.plist" "$granted"
 fi
-# Inside out: libraries and helper programs first, the bundle last.
+# Inside out: libraries and programs first, then the helper bundles, the app last.
 for library in "$app/Contents/Frameworks"/*.dylib; do
     [[ -e "$library" ]] || continue
     codesign --force --timestamp=none --sign "$identity" "$library"
@@ -193,39 +257,111 @@ done
 for program in "$app/Contents/MacOS"/*; do
     case "$(basename "$program")" in
         dsa-settings) continue ;;
-        dsa-devices)
-            codesign --force --timestamp=none --options runtime \
-                --entitlements "$devices_entitlements" --sign "$identity" "$program"
-            ;;
         *) sign "$program" ;;
     esac
 done
+# Each helper bundle is signed whole (its program and its Info.plist), before the outer app.
+if [[ -n "$devices_helper" ]]; then
+    codesign --force --timestamp=none --options runtime \
+        --entitlements "$devices_entitlements" --sign "$identity" "$devices_helper"
+fi
 if [[ "$devices_entitlements" == "$out/"* ]]; then
     rm -f "$devices_entitlements"
+fi
+if [[ -n "$wm_helper" ]]; then
+    sign "$wm_helper"
 fi
 sign "$helper"
 sign "$app"
 codesign --verify --strict --verbose=2 "$app"
 
-package="$out/DSA-$version.pkg"
 installer_identity=()
 if [[ -n "${DSA_INSTALLER_IDENTITY:-}" ]]; then
     installer_identity=(--sign "$DSA_INSTALLER_IDENTITY")
 fi
-pkgbuild --component "$app" --install-location /Applications \
-    --scripts "$here/scripts" \
-    --identifier org.thisisthepy.dsa --version "$version" \
-    ${installer_identity[@]+"${installer_identity[@]}"} "$package"
+# make_package <app> <package>: the component package (the app and its postinstall) goes
+# inside a product archive that carries the installer's design: the artwork, the welcome and
+# conclusion pages in every language the Windows installer speaks, and the licence. Only the
+# product archive is signed. The component always replaces /Applications/DSA.app, also over a
+# higher version (a development build over a release, or an older Android preset), and never
+# goes into a copy of DSA.app found elsewhere on the disk.
+make_package() {
+    local bundle="$1" target="$2"
+    local work="$out/pkg"
+    rm -rf "$work"
+    mkdir -p "$work/root"
+    cp -R "$bundle" "$work/root/"
+    pkgbuild --analyze --root "$work/root" "$work/component.plist"
+    plutil -replace 0.BundleIsVersionChecked -bool NO "$work/component.plist"
+    plutil -replace 0.BundleIsRelocatable -bool NO "$work/component.plist"
+    plutil -replace 0.BundleOverwriteAction -string upgrade "$work/component.plist"
+    pkgbuild --root "$work/root" --component-plist "$work/component.plist" \
+        --install-location /Applications \
+        --scripts "$here/scripts" \
+        --identifier org.thisisthepy.dsa --version "$version" "$work/DSA-component.pkg"
+    cp -R "$here/installer/resources" "$work/resources"
+    cp "$root/LICENSE" "$work/resources/LICENSE.txt"
+    sed "s/@VERSION@/$version/" "$here/installer/Distribution.xml" > "$work/Distribution.xml"
+    productbuild --distribution "$work/Distribution.xml" --resources "$work/resources" \
+        --package-path "$work" \
+        ${installer_identity[@]+"${installer_identity[@]}"} "$target"
+    rm -rf "$work"
+}
 
+# make_image <app> <image> <volume name>: the disk image with the window's design: one TIFF
+# holding the 1x and 2x background, and a .DS_Store that make-dmg-store.swift writes on the
+# mounted read-write image (no Finder involved), because the background's alias names the
+# volume's creation date and the file's catalog ID. A placeholder of the store's size keeps
+# room for it on the tightly sized image.
+make_image() {
+    local bundle="$1" target="$2" volume="$3"
+    local staging="$out/dmg"
+    local writable="${target%.dmg}-rw.dmg"
+    rm -rf "$staging" "$target" "$writable"
+    mkdir -p "$staging/.background"
+    cp -R "$bundle" "$staging/"
+    ln -s /Applications "$staging/Applications"
+    tiffutil -cathidpicheck "$here/installer/dmg/dmg-background.png" \
+        "$here/installer/dmg/dmg-background@2x.png" -out "$staging/.background/background.tiff"
+    head -c 8196 /dev/zero > "$staging/.DS_Store"
+    hdiutil create -volname "$volume" -srcfolder "$staging" -fs HFS+ -format UDRW "$writable"
+    rm -rf "$staging"
+    local mount
+    mount="$(hdiutil attach -nobrowse -noautoopen "$writable" | awk -F '\t' '/^\/dev\/.*Apple_HFS/ { print $NF }')"
+    [[ -d "$mount" ]] || { echo "could not mount $writable" >&2; exit 1; }
+    swift "$here/installer/make-dmg-store.swift" "$mount" || { hdiutil detach "$mount"; exit 1; }
+    hdiutil detach "$mount"
+    hdiutil convert "$writable" -format UDZO -o "$target"
+    rm -f "$writable"
+}
+
+package="$out/DSA-$version.pkg"
+make_package "$app" "$package"
 image="$out/DSA-$version.dmg"
-staging="$out/dmg"
-rm -rf "$staging" "$image"
-mkdir -p "$staging"
-cp -R "$app" "$staging/"
-ln -s /Applications "$staging/Applications"
-hdiutil create -volname "DSA $version" -srcfolder "$staging" -fs HFS+ -format UDZO "$image"
-rm -rf "$staging"
+make_image "$app" "$image" "DSA $version"
 
 echo "Built $app"
 echo "Built $package"
 echo "Built $image"
+
+for major in ${DSA_PRESET_MAJORS:-}; do
+    if [[ ! "$major" =~ ^[1-9][0-9]*$ ]]; then
+        echo "DSA_PRESET_MAJORS names $major, which is no Android major" >&2
+        exit 1
+    fi
+    preset_root="$out/preset-a$major"
+    rm -rf "$preset_root"
+    mkdir -p "$preset_root"
+    cp -R "$app" "$preset_root/"
+    preset_app="$preset_root/DSA.app"
+    printf '{\n  "android_major": %s\n}\n' "$major" > "$preset_app/Contents/Resources/installer-preset.json"
+    sign "$preset_app"
+    codesign --verify --strict --verbose=2 "$preset_app"
+    preset_package="$out/DSA-$version-a$major.pkg"
+    make_package "$preset_app" "$preset_package"
+    preset_image="$out/DSA-$version-a$major.dmg"
+    make_image "$preset_app" "$preset_image" "DSA $version (Android $major)"
+    rm -rf "$preset_root"
+    echo "Built $preset_package"
+    echo "Built $preset_image"
+done

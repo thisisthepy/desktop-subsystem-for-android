@@ -63,6 +63,9 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
             if !skipped {
                 sources(&path, out);
             }
+        } else if name == "tests.rs" {
+            // A module's tests kept in their own file (`#[cfg(test)] mod tests;`) build
+            // nothing the service runs.
         } else if name.ends_with(".rs") || name.ends_with(".cs") {
             out.push(path);
         }

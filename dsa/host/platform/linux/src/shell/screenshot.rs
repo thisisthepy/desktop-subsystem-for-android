@@ -11,71 +11,30 @@
 
 use std::path::{Path, PathBuf};
 
+use dsa_host_core::screenshot::PixelOrder;
+
 use super::png::Rgba;
 
 /// The app's content of a frame of `XRGB8888` rows (blue, green, red, unused in memory),
 /// `width` x `height`: the rows under the title bar's `band`, as opaque RGBA. `None` when
 /// nothing is left under the band.
 pub fn app_content(pixels: &[u8], width: u32, height: u32, band: u32) -> Option<Rgba> {
-    let row = width as usize * 4;
-    let band = band.min(height);
-    let rows = height - band;
-    if width == 0 || rows == 0 || pixels.len() < row * height as usize {
-        return None;
-    }
-    let start = band as usize * row;
-    let mut out = Vec::with_capacity(row * rows as usize);
-    for pixel in pixels[start..start + row * rows as usize].chunks_exact(4) {
-        out.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 0xff]);
-    }
+    let stride = width as usize * 4;
+    let shot = dsa_host_core::screenshot::app_content(
+        pixels,
+        stride,
+        (width, height),
+        band,
+        PixelOrder::Bgra,
+    )?;
     Some(Rgba {
-        width,
-        height: rows,
-        pixels: out,
+        width: shot.width,
+        height: shot.height,
+        pixels: shot.rgba,
     })
 }
 
-/// A local date and time, to the second.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LocalTime {
-    pub year: i32,
-    pub month: u32,
-    pub day: u32,
-    pub hour: u32,
-    pub minute: u32,
-    pub second: u32,
-}
-
-/// The file name of the `copy`th screenshot taken at `time` (1 for the first), starting with
-/// `prefix`: "Screenshot 2026-11-08 143022.png", then "Screenshot 2026-11-08 143022 (2).png".
-pub fn file_name(prefix: &str, time: &LocalTime, copy: u32) -> String {
-    let stem = format!(
-        "{prefix} {:04}-{:02}-{:02} {:02}{:02}{:02}",
-        time.year, time.month, time.day, time.hour, time.minute, time.second
-    );
-    if copy <= 1 {
-        format!("{stem}.png")
-    } else {
-        format!("{stem} ({copy}).png")
-    }
-}
-
-/// The first path in `folder` named for a screenshot at `time` that `exists` says is free.
-pub fn free_path(
-    folder: &Path,
-    prefix: &str,
-    time: &LocalTime,
-    exists: impl Fn(&Path) -> bool,
-) -> PathBuf {
-    let mut copy = 1;
-    loop {
-        let path = folder.join(file_name(prefix, time, copy));
-        if !exists(&path) || copy >= 10_000 {
-            return path;
-        }
-        copy += 1;
-    }
-}
+pub use dsa_host_core::screenshot::{file_name, free_path, LocalTime};
 
 /// The Pictures folder `user-dirs.dirs` (its text `dirs`) names for the user whose home is
 /// `home`: `XDG_PICTURES_DIR="$HOME/Pictures"`, with `$HOME` at the start replaced. `None`
@@ -153,35 +112,11 @@ pub fn local_time() -> LocalTime {
 /// `prefix`. Returns the file's path.
 #[cfg(unix)]
 pub fn save(png: &[u8], prefix: &str) -> Result<PathBuf, String> {
-    use std::io::Write;
     let pictures = pictures_folder().ok_or("the home folder is not known")?;
     let folder = screenshots_folder(&pictures);
     std::fs::create_dir_all(&folder)
         .map_err(|e| format!("could not make {}: {e}", folder.display()))?;
-    let time = local_time();
-    // A file made between the look and the write is never written over: the write makes a
-    // new file or fails, and the next name is tried.
-    for _ in 0..3 {
-        let path = free_path(&folder, prefix, &time, Path::exists);
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                return file
-                    .write_all(png)
-                    .map(|()| path.clone())
-                    .map_err(|e| format!("could not write {}: {e}", path.display()));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("could not make {}: {e}", path.display())),
-        }
-    }
-    Err(format!(
-        "every screenshot name in {} is taken",
-        folder.display()
-    ))
+    dsa_host_core::screenshot::save_new(&folder, prefix, &local_time(), png)
 }
 
 #[cfg(test)]
@@ -212,31 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn fr22_a_screenshot_goes_to_the_pictures_folder_under_a_free_name() {
-        let time = LocalTime {
-            year: 2026,
-            month: 11,
-            day: 8,
-            hour: 9,
-            minute: 5,
-            second: 3,
-        };
-        assert_eq!(
-            file_name("Screenshot", &time, 1),
-            "Screenshot 2026-11-08 090503.png"
-        );
-        assert_eq!(
-            file_name("스크린샷", &time, 2),
-            "스크린샷 2026-11-08 090503 (2).png"
-        );
-        let folder = Path::new("/home/user/Pictures/Screenshots");
-        let taken = [folder.join("Screenshot 2026-11-08 090503.png")];
-        assert_eq!(
-            free_path(folder, "Screenshot", &time, |path| taken
-                .iter()
-                .any(|t| t == path)),
-            folder.join("Screenshot 2026-11-08 090503 (2).png")
-        );
+    fn fr22_the_pictures_folder_comes_from_the_users_dirs_file() {
         let home = Path::new("/home/user");
         let dirs = "# written by xdg-user-dirs-update\nXDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_PICTURES_DIR=\"$HOME/사진\"\n";
         assert_eq!(pictures_from_user_dirs(dirs, home), Some(home.join("사진")));

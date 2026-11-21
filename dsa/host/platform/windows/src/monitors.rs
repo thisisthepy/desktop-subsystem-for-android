@@ -63,13 +63,11 @@ pub fn recorded_display(local_app_data: &Path) -> Option<(u32, u32)> {
 
 /// Writes the record whole, so the service never reads half of one.
 pub fn write_record(local_app_data: &Path, monitors: &[Monitor]) -> std::io::Result<()> {
-    let path = record_path(local_app_data);
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let partial = path.with_extension("txt.new");
-    std::fs::write(&partial, record_text(monitors))?;
-    std::fs::rename(&partial, &path)
+    dsa_host_core::file_write::replace_in_new_folder(
+        &record_path(local_app_data),
+        record_text(monitors).as_bytes(),
+        "txt.new",
+    )
 }
 
 /// Where the fastest monitor's refresh rate is recorded, below a user's local application

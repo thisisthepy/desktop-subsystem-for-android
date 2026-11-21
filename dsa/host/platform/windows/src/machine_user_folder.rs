@@ -163,7 +163,7 @@ fn move_pstore_disk(old: &Path, new: &Path) -> Option<String> {
         Err(why) => return Some(format!("the pstore disk stays where it is: {why}")),
     };
     let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
-    if !new.exists() && size == crate::pstore_disk::FILE_BYTES {
+    if !new.exists() && size == dsa_host_core::disk::pstore::FILE_BYTES {
         let mut data = Vec::with_capacity(size as usize);
         let copied = (&mut file)
             .take(size)
@@ -252,7 +252,7 @@ mod tests {
             )
             .unwrap();
         fs::write(beside(&user.old_addon_disk(), ".part"), b"half").unwrap();
-        crate::pstore_disk::ensure(&user.old_pstore_disk()).unwrap();
+        dsa_host_core::disk::pstore::ensure(&user.old_pstore_disk()).unwrap();
 
         let notes = migrate_disks(&machine, &user, &sid);
         assert_eq!(notes.len(), 3, "{notes:?}");

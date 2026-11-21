@@ -88,22 +88,13 @@ pub fn tray_guid(package: &str) -> u128 {
     u128::from_be_bytes(bytes)
 }
 
-/// The name an app goes by: its label, or its package when it has none.
-pub fn app_name(app: &BackgroundApp) -> &str {
-    if app.app_label.trim().is_empty() {
-        &app.package_name
-    } else {
-        &app.app_label
-    }
-}
-
 /// The tooltip of `app`'s icon: its name, then the notification's title and text on lines of
 /// their own, cut to what the notification area shows.
 pub fn tooltip(app: &BackgroundApp) -> String {
-    let mut lines = vec![app_name(app).to_string()];
+    let mut lines = vec![app.display_name().to_string()];
     for line in [&app.title, &app.text] {
         let line = line.trim();
-        if !line.is_empty() && line != app_name(app) {
+        if !line.is_empty() && line != app.display_name() {
             lines.push(line.to_string());
         }
     }
@@ -833,8 +824,8 @@ mod win {
     };
 
     use super::{
-        app_name, chosen, menu_entries, opened_by_keyboard, stop_answer, stop_chosen, tooltip,
-        tray_anchor, tray_guid, Texts, TrayCommand, TrayReport,
+        chosen, menu_entries, opened_by_keyboard, stop_answer, stop_chosen, tooltip, tray_anchor,
+        tray_guid, Texts, TrayCommand, TrayReport,
     };
     use crate::compositor::log::{note, CompositorLogger};
 
@@ -1436,7 +1427,7 @@ mod win {
                 owner: hwnd as isize,
                 anchor: tray_anchor(x, y),
                 entries: &entries,
-                name: app_name(&app),
+                name: app.display_name(),
                 keyboard,
             });
         let Some(picked) = picked else {
@@ -1448,7 +1439,7 @@ mod win {
                 // runs this thread's messages while it is open.
                 let mut ask = with_state(|s| s.ask_before_stop).unwrap_or(true);
                 let reports = stop_chosen(package, &mut ask, || {
-                    let text = texts.stop_dialog(app_name(&app));
+                    let text = texts.stop_dialog(app.display_name());
                     stop_answer(crate::compositor::fluent_dialog::show(
                         crate::compositor::fluent_dialog::Request {
                             text: &text,

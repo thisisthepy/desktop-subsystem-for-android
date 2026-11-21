@@ -49,7 +49,8 @@ use std::time::Duration;
 pub const RECLAIM_PROPERTY: &str = "vendor.dsa.memory.reclaim";
 
 /// The property init watches for the working set trim: set to `1`, init asks the kernel to
-/// reclaim [`TRIM_SIZE_PROPERTY`] MiB of the coldest page cache (cgroup `memory.reclaim`) and
+/// reclaim [`TRIM_SIZE_PROPERTY`] MiB of the coldest pages, mostly page cache (cgroup
+/// `memory.reclaim`), and
 /// sets it back to `0`.
 pub const TRIM_PROPERTY: &str = "vendor.dsa.memory.trim";
 
@@ -302,10 +303,16 @@ pub struct ReclaimPolicy {
     pub trim_gap: Duration,
     /// The least page cache the working set trim leaves alone, in KiB: warm files of the open
     /// apps. It is where the working set target starts and the lowest it goes.
+    ///
+    /// 160 MiB: in a memory audit of 1.0.1-dev.7, idle after one app had been open, the guest
+    /// held 236 MiB of page cache, of which some 110 MiB was on the inactive list, the files
+    /// the kernel itself judged cold. What stays is the active part that the framework,
+    /// system_server and SurfaceFlinger read back. The 256 MiB this was before kept the cold
+    /// part too.
     pub keep_cache_kb: u64,
     /// The most the working set target rises to, in KiB, however often evicted files are read
-    /// back and however many tasks are in use. 768 MiB is the floor and the allowance of nearly
-    /// three shown tasks ([`ReclaimPolicy::task_cache_kb`]): beyond that, an app's files are
+    /// back and however many tasks are in use. 768 MiB is the floor and the allowance of six
+    /// shown tasks ([`ReclaimPolicy::task_cache_kb`]): beyond that, an app's files are
     /// cheaper to read again than to keep from the host.
     pub keep_cache_max_kb: u64,
     /// The least cache above the working set target worth a trim, in KiB.
@@ -335,9 +342,14 @@ pub struct ReclaimPolicy {
     /// within 20 s, so the Play Store's steady working set sat some 60 MiB above the floor. The
     /// 768 MiB this was before let launch-time reads keep 800 MiB of page cache for one window
     /// (0.2.4-dev.11), where 0.2.4-dev.3 had worked with 414 MiB.
+    ///
+    /// 96 MiB is about one and a half times that 60 MiB. An app that reads back more than its
+    /// allowance raises the floor through the refaults up to the allowance and no further, and
+    /// what it reads beyond comes from the host's own cache of the image, not from disk. With
+    /// one app shown the cache now stays at 256 MiB, where it stayed at 448 MiB before.
     pub task_cache_kb: u64,
     /// The same for a task in use whose window is minimized, in KiB. It draws nothing and reads
-    /// little, so it keeps a third of a shown task's allowance; when it is shown again, what it
+    /// little, so it keeps a third of a shown task's allowance (32 MiB); when it is shown again, what it
     /// reads back raises the target again.
     pub minimized_task_cache_kb: u64,
     /// How long after a task appears the refaults are not counted toward the working set. A
@@ -366,15 +378,15 @@ impl Default for ReclaimPolicy {
             idle_repeat: Duration::ZERO,
             idle_growth_kb: 64 * 1024,
             trim_gap: Duration::ZERO,
-            keep_cache_kb: 256 * 1024,
+            keep_cache_kb: 160 * 1024,
             keep_cache_max_kb: 768 * 1024,
             min_trim_kb: 64 * 1024,
             max_trim_kb: u64::MAX,
             settle_after: Duration::from_secs(30),
             refault_limit_kb: 16 * 1024,
             host_short_gap: Duration::from_secs(60),
-            task_cache_kb: 192 * 1024,
-            minimized_task_cache_kb: 64 * 1024,
+            task_cache_kb: 96 * 1024,
+            minimized_task_cache_kb: 32 * 1024,
             launch_settle: Duration::from_secs(60),
             refault_hold_looks: 6,
         }

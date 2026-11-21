@@ -14,15 +14,13 @@
 //! every host.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use dsa_host_core::host_config::{
     default_connect_timeout_secs, default_control_port, default_data_disk_size_gb,
     default_doze_delay_secs, default_log_port, default_processors, default_ready_timeout_secs,
-    default_stop_timeout_secs, default_true, UpdateSettings,
+    default_stop_timeout_secs, default_true, HostConfigFile, UpdateSettings,
 };
 use dsa_host_core::root_approval::FolderApprover;
-use dsa_host_core::session::SessionConfig;
 use dsa_host_core::update::policy::InstalledImage;
 use serde::Deserialize;
 
@@ -269,18 +267,32 @@ impl HostConfig {
         let resolved = test_approver_folder_is_private(dir)?;
         Ok(Some(FolderApprover::new(&resolved)))
     }
+}
 
-    pub fn session_config(&self) -> SessionConfig {
-        SessionConfig {
-            connect_timeout: Duration::from_secs(self.connect_timeout_secs),
-            ready_timeout: Duration::from_secs(self.ready_timeout_secs),
-            stop_timeout: Duration::from_secs(self.stop_timeout_secs),
-            doze_delay: Duration::from_secs(self.doze_delay_secs),
-            freeze_after: self
-                .freeze_after_minutes
-                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
-            ..SessionConfig::default()
-        }
+impl HostConfigFile for HostConfig {
+    fn images_dir(&self) -> Option<&Path> {
+        self.images_dir.as_deref()
+    }
+    fn first_image(&self) -> Option<&InstalledImage> {
+        self.first_image.as_ref()
+    }
+    fn update(&self) -> Option<&UpdateSettings> {
+        self.update.as_ref()
+    }
+    fn connect_timeout_secs(&self) -> u64 {
+        self.connect_timeout_secs
+    }
+    fn ready_timeout_secs(&self) -> u64 {
+        self.ready_timeout_secs
+    }
+    fn stop_timeout_secs(&self) -> u64 {
+        self.stop_timeout_secs
+    }
+    fn doze_delay_secs(&self) -> u64 {
+        self.doze_delay_secs
+    }
+    fn freeze_after_minutes(&self) -> Option<u64> {
+        self.freeze_after_minutes
     }
 }
 
@@ -288,6 +300,7 @@ impl HostConfig {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn fr14_an_update_store_configuration_is_read_with_the_defaults() {
@@ -312,6 +325,25 @@ mod tests {
             config.session_config().stop_timeout,
             Duration::from_secs(30)
         );
+    }
+
+    #[test]
+    fn fr15_the_update_store_is_the_files_own_and_bundles_no_image() {
+        let config = HostConfig::parse(
+            r#"{
+                "images_dir": "/var/lib/dsa",
+                "first_image": { "version": "16.0.0-1", "android_major": 16, "build": 1 },
+                "update": { "list_url": "https://example.invalid/images.json",
+                            "trusted_keys": [], "boot_timeout_secs": 90 }
+            }"#,
+        )
+        .unwrap();
+        let store = dsa_host_core::host_config::updates_config(&config);
+        assert_eq!(store.images_dir, Some(Path::new("/var/lib/dsa")));
+        assert_eq!(store.first_image.map(|i| i.build), Some(1));
+        assert!(store.bundled_image.is_none());
+        assert_eq!(store.boot_timeout_secs, Some(90));
+        assert!(config.image_updates_available());
     }
 
     #[test]

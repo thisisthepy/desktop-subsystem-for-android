@@ -92,6 +92,17 @@ std::shared_ptr<GrallocHandle> GrallocHandle::from(
     return owned;
 }
 
+bool CpuUploads::holdsPicture(HostRenderer& host, const BufferRef& buffer) const {
+    if (!buffer.cpuWritten()) {
+        return true;
+    }
+    if (!dsa::uploadLayout(buffer.format, buffer.width, buffer.height, host.hostHasYuv()).valid()) {
+        // Never copied up at all (upload() leaves it alone), as before.
+        return true;
+    }
+    return mTracker.holds(buffer.id);
+}
+
 bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRef& buffer,
                         bool fresh) {
     if (!buffer.cpuWritten() || colorBuffer == 0) {
@@ -106,6 +117,7 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
     }
     const NativeWindow& calls = NativeWindow::get();
     if (!calls.ok()) {
+        mTracker.forget(buffer.id);
         return false;
     }
 
@@ -139,6 +151,7 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
                      "wrote: %d (%u in a row); its layer shows what the host held before",
                      buffer.id, buffer.width, buffer.height, buffer.format, result, failures);
         }
+        mTracker.forget(buffer.id);
         return false;
     }
 
@@ -183,6 +196,7 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
                      "wrote: lock %d (%u in a row)",
                      buffer.id, buffer.width, buffer.height, buffer.format, result, failures);
         }
+        mTracker.forget(buffer.id);
         return false;
     }
     if (!send) {
@@ -202,6 +216,7 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
                      "format %#x) (%u in a row)",
                      buffer.id, buffer.width, buffer.height, buffer.format, failures);
         }
+        mTracker.forget(buffer.id);
         return false;
     }
     mFailures.reset();

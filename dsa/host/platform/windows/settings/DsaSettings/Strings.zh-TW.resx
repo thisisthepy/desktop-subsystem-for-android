@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>啟動</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>重新啟動</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android 會停止並重新啟動。
+
+它的應用程式視窗會關閉。啟動完成後，請重新開啟應用程式。</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>停止</value>
   </data>
@@ -87,6 +95,9 @@
   </data>
   <data name="LastReason_General" xml:space="preserve">
     <value>無法啟動 Android。請再試一次，若持續失敗，請查看詳細資料。</value>
+  </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>這台電腦無法執行 Android。這是電腦的問題，不是 Android 的問題，正在使用的 Android 版本會保留。原因請查看詳細資料。</value>
   </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>詳細資料</value>
@@ -262,6 +273,9 @@ Android {2} 尚未完成啟動 ({3})。請再次啟動 Android 以將其開機�
   <data name="Memory_Shared" xml:space="preserve">
     <value>共用記憶體</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>多個程序共用的記憶體，例如視窗畫面和圖形緩衝區。使用它的應用程式關閉後即釋放。</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>壓縮記憶體</value>
   </data>
@@ -270,6 +284,9 @@ Android {2} 尚未完成啟動 ({3})。請再次啟動 Android 以將其開機�
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>可用</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>目前沒有任何東西在用的記憶體。Android 會把它還給電腦，因此不佔用電腦的記憶體。</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>處理程序 {0}</value>
@@ -747,7 +764,10 @@ DSA 不會散布它們。只有在您要求時，才會下載公開的 LiteGapps
     <value>Android ID：{0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>安裝 Google Play 且 Android 以它啟動後，Android ID 會顯示在這裡。</value>
+    <value>Android ID 目前無法使用。Google Play 服務會在此裝置首次向 Google 簽到時產生它。
+這需要已安裝 Google Play、Android 以它啟動，且已連上網路。
+若幾分鐘後仍為空，請重新啟動 Android。
+此 ID 是十進位數字，是 Google 註冊頁面接受的格式。</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>開發人員</value>
@@ -850,14 +870,26 @@ DSA 不會散布它們。只有在您要求時，才會下載公開的 LiteGapps
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>執行緒堆疊</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>核心為每個執行中的執行緒保留的工作空間。關閉應用程式後會減少。</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>分頁表</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>告訴處理器每個應用程式的記憶體位於 RAM 何處的對應表。關閉應用程式後會減少。</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>核心對應 (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>核心及其驅動程式預留的大型緩衝區，用於圖形等。不再需要時釋放。</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>個別 CPU 資料</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>核心為每個處理器核心各保留一份的資料。大小在 Android 啟動時確定。</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>驅動程式</value>
@@ -2303,7 +2335,7 @@ Android 會立即停止，下次啟動時會回到初次安裝時的狀態。And
     <value>支援的最新版本 (目前為 Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} 及其安全性更新</value>
+    <value>固定為 Android {0}：只接收其安全性更新和映像更新，不會自動換成更新的 Android</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android 更新</value>
@@ -2604,5 +2636,32 @@ Android 會拒絕安裝。</value>
   </data>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>所有檔案</value>
+  </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>其他應用程式商店</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA 會從官方網站下載應用程式商店，確認簽署者後，像其他應用程式一樣安裝。DSA 不隨附這些商店，各名稱為其所有者的商標。請在應用程式清單中移除商店。</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>未安裝</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>已安裝</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>已安裝，版本 {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>正在下載並安裝…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>未安裝：{0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>安裝</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>開啟</value>
   </data>
 </root>
