@@ -1150,11 +1150,19 @@ impl TaskWindows {
         if !self.has_window(task_id) {
             return Vec::new();
         }
-        self.sizes
-            .get_mut(&task_id)
-            .and_then(|sizing| sizing.view_resized(view, now))
-            .into_iter()
-            .collect()
+        let Some(sizing) = self.sizes.get_mut(&task_id) else {
+            return Vec::new();
+        };
+        let request = sizing.view_resized(view, now);
+        if let Some(late) = sizing.take_late_echo() {
+            self.notes.push(format!(
+                "task {task_id}: its window reported {}x{}, a size the drag passed, after the \
+                 drag ended at another; Android is not asked for it, and keeps the size the \
+                 user let go at",
+                late.0, late.1,
+            ));
+        }
+        request.into_iter().collect()
     }
 
     /// The task's window is on a monitor of `dpi` now. Returns what the window must hear (the
@@ -3423,5 +3431,71 @@ mod tests {
         let again = windows.reopen(LYRICS);
         assert!(matches!(again[0], WindowChange::Open { width: 508, .. }));
         assert_eq!(again[2], placed(158, 82, false, true));
+    }
+
+    #[test]
+    fn fr4_the_flo_drag_ends_at_the_size_the_user_let_go_at() {
+        // The trace of FLO (task 134) dragged to 677x987, 16:47:51.767 to 52.375.
+        let live = |width, height| TaskRequest::Resize {
+            task_id: 1,
+            width,
+            height,
+            live: true,
+        };
+        let end = TaskRequest::Resize {
+            task_id: 1,
+            width: 677,
+            height: 987,
+            live: false,
+        };
+        let resizes = |changes: &[WindowChange]| {
+            changes
+                .iter()
+                .any(|change| matches!(change, WindowChange::Resize { .. }))
+        };
+        let mut windows = TaskWindows::new();
+        windows.apply(&updated(1, "FLO"));
+        let now = Instant::now();
+        assert_eq!(windows.window_dragging(1, true, now), vec![]);
+        // 51.767: 670x977 asked, and drawn.
+        assert_eq!(
+            windows.window_resized(1, (670, 977), now),
+            vec![live(670, 977)]
+        );
+        assert!(!resizes(
+            &windows.apply(&TaskEvent::Updated(task(1, "FLO", 670, 977)))
+        ));
+        // 51.927 and 52.065: 676x986 and 677x987 asked; the app draws both.
+        assert_eq!(
+            windows.window_resized(1, (676, 986), now),
+            vec![live(676, 986)]
+        );
+        assert_eq!(
+            windows.window_resized(1, (677, 987), now),
+            vec![live(677, 987)]
+        );
+        for (width, height) in [(676, 986), (677, 987)] {
+            assert!(!resizes(
+                &windows.apply(&TaskEvent::Updated(task(1, "FLO", width, height)))
+            ));
+        }
+        // The user lets go: the task is reconfigured at the size it was let go at.
+        let released = windows.window_dragging(1, false, now);
+        assert_eq!(released, vec![end.clone()]);
+        // 52.374: a late frame of 670x977 had the window report that size. Android is not
+        // asked for it.
+        assert_eq!(windows.window_resized(1, (670, 977), now), vec![]);
+        // A late report of 670x977 does not resize the window either.
+        assert!(!resizes(
+            &windows.apply(&TaskEvent::Updated(task(1, "FLO", 670, 977)))
+        ));
+        assert_eq!(windows.task_size(1), Some((677, 987)));
+        // Even had the echo been asked, the drag's end goes out last, with the released size.
+        let mut queued = released;
+        queued.push(live(670, 977));
+        assert_eq!(crate::tasks::coalesce(queued), vec![end]);
+        assert!(!resizes(
+            &windows.tick(now + super::super::window_sizing::SETTLE * 2)
+        ));
     }
 }

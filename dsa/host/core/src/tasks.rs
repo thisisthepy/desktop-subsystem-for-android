@@ -565,10 +565,20 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
         requests[index + 1..]
             .iter()
             .any(|later| match (request, later) {
+                // The size that ends a drag (not live) is the user's final choice: a live size
+                // queued after it never replaces it.
                 (
-                    TaskRequest::Resize { task_id: a, .. },
-                    TaskRequest::Resize { task_id: b, .. },
-                ) => a == b,
+                    TaskRequest::Resize {
+                        task_id: a,
+                        live: first_live,
+                        ..
+                    },
+                    TaskRequest::Resize {
+                        task_id: b,
+                        live: later_live,
+                        ..
+                    },
+                ) => a == b && (*first_live || !*later_live),
                 (
                     TaskRequest::SetDensity { task_id: a, .. },
                     TaskRequest::SetDensity { task_id: b, .. },
@@ -587,10 +597,25 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                 _ => false,
             })
     };
+    // A live size queued after the size that ended a drag is a late echo of the drag: it is
+    // dropped, so the drag's end goes out last.
+    let after_drag_end = |index: usize, request: &TaskRequest| {
+        match request {
+        TaskRequest::Resize {
+            task_id: a,
+            live: true,
+            ..
+        } => requests[..index].iter().any(|earlier| {
+            matches!(earlier, TaskRequest::Resize { task_id: b, live: false, .. } if b == a)
+        }),
+        _ => false,
+    }
+    };
     requests
         .iter()
         .enumerate()
         .filter(|(index, request)| !superseded(*index, request))
+        .filter(|(index, request)| !after_drag_end(*index, request))
         .map(|(_, request)| request.clone())
         .collect()
 }

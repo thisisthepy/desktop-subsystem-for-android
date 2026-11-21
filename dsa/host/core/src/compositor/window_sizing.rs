@@ -622,6 +622,10 @@ pub struct WindowSizing {
     stale: Option<((u32, u32), (u32, u32))>,
     /// The size of the last report left aside as late: a second report of it is taken.
     ignored: Option<(u32, u32)>,
+    /// A size the window reported after a drag, of a size the drag passed, that was not asked
+    /// of the guest, until the window manager takes it to log
+    /// ([`take_late_echo`](Self::take_late_echo)).
+    late_echo: Option<(u32, u32)>,
 }
 
 /// How many sizes of a drag are remembered to tell a late report from a new one.
@@ -665,6 +669,7 @@ impl WindowSizing {
             drag_ended: None,
             stale: None,
             ignored: None,
+            late_echo: None,
         }
     }
 
@@ -885,8 +890,19 @@ impl WindowSizing {
         if view.0 == 0 || view.1 == 0 {
             return None;
         }
-        self.view = view;
         let size = clamp_size(to_task_size(view, self.asking_scale()), self.max);
+        if !self.dragging
+            && self.drag_ended.is_some()
+            && self.passed.last() != Some(&size)
+            && self.passed.contains(&size)
+        {
+            // A size the drag passed, after the drag ended at another: a late echo of an old
+            // frame, never the user's choice. The size the user let go at stays the last one
+            // Android is asked for.
+            self.late_echo = Some(size);
+            return None;
+        }
+        self.view = view;
         if self.dragging {
             self.pass(size);
         }
@@ -1066,6 +1082,12 @@ impl WindowSizing {
     /// manager logs it.
     pub fn take_stale(&mut self) -> Option<((u32, u32), (u32, u32))> {
         self.stale.take()
+    }
+
+    /// A window size of a size the last drag passed, reported after the drag ended and not
+    /// asked of the guest ([`view_resized`](Self::view_resized)), once. The window manager logs it.
+    pub fn take_late_echo(&mut self) -> Option<(u32, u32)> {
+        self.late_echo.take()
     }
 
     /// Remembers `size` as the newest size asked during the drag.

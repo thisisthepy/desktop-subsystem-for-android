@@ -55,11 +55,6 @@ pub enum Arrival {
 /// past from a new one.
 const PROPOSALS_KEPT: usize = 256;
 
-/// How many frames in a row of a size dragged past are kept out of sight before the window
-/// takes that size after all: an app that goes on drawing it has settled there, and a window
-/// that never followed would show its last frame for good.
-pub const SUPERSEDED_FRAMES: u32 = 30;
-
 /// One window's frames and size.
 #[derive(Debug, Clone, Default)]
 pub struct FrameFollow {
@@ -78,8 +73,6 @@ pub struct FrameFollow {
     held: bool,
     /// The sizes proposed for the window, oldest first, each once at its latest place.
     proposals: Vec<(u32, u32)>,
-    /// The size of the last frames kept out of sight as dragged past, and how many in a row.
-    superseded: Option<((u32, u32), u32)>,
 }
 
 impl FrameFollow {
@@ -131,7 +124,6 @@ impl FrameFollow {
         self.claimed = false;
         self.stale = None;
         self.proposals.clear();
-        self.superseded = None;
         if !held {
             self.shown = Some(self.view);
         }
@@ -151,28 +143,17 @@ impl FrameFollow {
             self.shown = Some(size);
             self.kept = None;
             self.stale = None;
-            self.superseded = None;
             Arrival::Show
         } else if self.stale == Some(size) {
             Arrival::Stale
         } else if self.dragged_past(size) {
             // A late frame of a size the user dragged past: the window has a newer size, whose
             // frame the app drew or is drawing. Following it would shrink or grow the window
-            // back to that older size after the user let go.
-            let count = match self.superseded {
-                Some((last, count)) if last == size => count + 1,
-                _ => 1,
-            };
-            if count < SUPERSEDED_FRAMES {
-                self.superseded = Some((size, count));
-                return Arrival::Stale;
-            }
-            // The app goes on drawing it: that is the size it settled at.
-            self.superseded = None;
-            self.kept = Some(size);
-            Arrival::Keep
+            // back to that older size after the user let go. Only Android refusing the size
+            // the user let go at moves the window there: the window manager then resizes the
+            // window to the task's size, and frames of it are of the window's size.
+            Arrival::Stale
         } else {
-            self.superseded = None;
             self.kept = Some(size);
             Arrival::Keep
         }
@@ -241,7 +222,6 @@ impl FrameFollow {
         self.kept = None;
         // Sizes of the old scale say nothing about the order of the new scale's frames.
         self.proposals.clear();
-        self.superseded = None;
         // A window that holds its size shows every frame anyway.
         self.stale = self.shown.filter(|shown| !self.held && *shown != proposed);
         proposed
@@ -657,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn fr4_an_app_that_keeps_drawing_a_size_dragged_past_is_followed_in_the_end() {
+    fn fr4_frames_of_a_size_dragged_past_move_the_window_only_once_android_refused_the_size() {
         let mut follow = FrameFollow::new((644, 949));
         follow.frame_arrived((644, 949));
         follow.size_for((670, 977));
@@ -665,10 +645,15 @@ mod tests {
         assert_eq!(follow.frame_arrived((677, 987)), Arrival::Keep);
         follow.size_for((677, 987));
         assert!(follow.view_taken((677, 987)));
-        for _ in 1..SUPERSEDED_FRAMES {
+        // However many late frames come, the window keeps the size the user let go at.
+        for _ in 0..200 {
             assert_eq!(follow.frame_arrived((670, 977)), Arrival::Stale);
         }
-        assert_eq!(follow.frame_arrived((670, 977)), Arrival::Keep);
+        assert_eq!(follow.view(), (677, 987));
+        // Android kept the task at 670x977 although asked again: the window manager resizes
+        // the window to it, and its frames are shown.
+        assert!(!follow.view_taken((670, 977)));
+        assert_eq!(follow.frame_arrived((670, 977)), Arrival::Show);
     }
 
     #[test]
