@@ -44,12 +44,16 @@
 #     hand the variable on.
 # So that the next failure says why, a line a minute gives the memory, the swap, the pressure,
 # the disk and the largest processes while the build runs, and the analysis is stopped after
-# DSA_ANALYSIS_MINUTES (45 by default), while the runner still answers, not after an hour of
-# silence.
+# DSA_ANALYSIS_MINUTES (90 by default), within the time the job gives the build.
 #
 # The runner has 4 processors and 16 GiB, and its own agent must keep answering GitHub while the
 # build runs: when the build took every processor and swapped hard, the agent went silent and
 # GitHub gave the job up. So the build leaves it room:
+#   - Its own memory cgroup (DSA_BUILD_CGROUP, which the workflow makes with a memory.high 2.5
+#     GiB under the runner's memory). android17's analysis holds 19 to 20 GiB at its peak, so it
+#     swaps however it runs; in the cgroup it swaps its own pages, and the agent's stay in
+#     memory. Before, the two shared one cgroup, the agent had 0.5 GiB available for most of the
+#     analysis, and android17 lost its runner in about half its attempts.
 #   - DSA_SERVICES_JOBS (2 by default) ninja jobs, not one per processor. The Java steps are the
 #     large ones: javac runs with a heap of up to 4 GiB, and R8 and metalava, which Soong puts
 #     in its high memory pool, with as much or more, so four at once ask for more than the
@@ -58,8 +62,9 @@
 #     and metalava never run beside each other.
 #   - GOMEMLIMIT=10GiB for Soong's analysis, which is Go: by default its heap grows to twice what
 #     is live before it collects, and the limit makes it collect sooner instead of growing into
-#     swap. It leaves 6 GiB for the runner and the page cache the ninja files are written
-#     through. Should more than the limit be live, Go spends at most half its time collecting
+#     swap. Of the build's cgroup it leaves about 3 GiB for the page cache the ninja files are
+#     written through and the compressed swap pool. Should more than the limit be live (android17's
+#     analysis reaches about twice the limit), Go spends at most half its time collecting
 #     and lets the heap pass the limit, so the limit slows the analysis and never stops it.
 #   - The lowest processor and disk priority (nice 19, ionice best effort 7), so the agent runs
 #     first whenever it needs to.
@@ -77,7 +82,7 @@ lock="$repo/dsa/guest/framework/framework-lock.json"
 minutes="${DSA_BUILD_MINUTES:-280}"
 deadline=$(( SECONDS + minutes * 60 ))
 jobs="${DSA_SERVICES_JOBS:-2}"
-analysis_minutes="${DSA_ANALYSIS_MINUTES:-45}"
+analysis_minutes="${DSA_ANALYSIS_MINUTES:-90}"
 # A bound on the next build step alone, in minutes (0: only the script's own), and what a step
 # stopped for its time was given.
 step_minutes=0
@@ -95,14 +100,36 @@ room() {
   df -h / /mnt 2>/dev/null || df -h /
   free -h
   swapon --show || true
+  if [[ -n "${DSA_BUILD_CGROUP:-}" ]]; then
+    echo "the build's cgroup ($DSA_BUILD_CGROUP): $(cat "$DSA_BUILD_CGROUP/memory.current" 2>/dev/null || echo ?) bytes of $(cat "$DSA_BUILD_CGROUP/memory.high" 2>/dev/null || echo ?)"
+    cat "$DSA_BUILD_CGROUP/memory.events" "$DSA_BUILD_CGROUP/memory.pressure" 2>/dev/null || true
+  fi
   echo "::endgroup::"
+}
+
+# The build's cgroup and the runner's side of it: what the build holds of its memory.high, how
+# many times it went over and was held back, and the share of the last 10 seconds some task
+# (and every task) of the runner's own cgroup, the one this script runs in, waited for memory.
+# Empty when the build has no cgroup of its own.
+cgroup_line() {
+  [[ -n "${DSA_BUILD_CGROUP:-}" && -r "$DSA_BUILD_CGROUP/memory.current" ]] || return 0
+  local current high over runner_cgroup runner_waits
+  current="$(cat "$DSA_BUILD_CGROUP/memory.current")"
+  high="$(cat "$DSA_BUILD_CGROUP/memory.high")"
+  over="$(awk '$1 == "high" { print $2 }' "$DSA_BUILD_CGROUP/memory.events" 2>/dev/null || true)"
+  runner_cgroup="/sys/fs/cgroup$(cut -d: -f3- /proc/self/cgroup 2>/dev/null || true)"
+  runner_waits="$(awk '{ split($2, avg, "="); share[$1] = avg[2] }
+    END { printf "%s/%s %%", share["some"], share["full"] }' "$runner_cgroup/memory.pressure" 2>/dev/null || echo "?")"
+  awk -v current="$current" -v high="$high" -v over="${over:-?}" -v waits="$runner_waits" 'BEGIN {
+    printf "; the build holds %.1f of its %.1f GiB (held back %s times), the runner waits for memory %s",
+      current / 1073741824, high / 1073741824, over, waits }'
 }
 
 # One line of what the build has of the runner now: the memory still available, the swap in use
 # and how much of it zswap holds compressed in memory, the pages waiting to be written, the
 # share of the last 10 seconds some task (and every task) waited for memory and for the disk,
-# the disk left, the load, and the three largest processes with what each has in memory and in
-# swap.
+# the disk left, the load, the three largest processes with what each has in memory and in
+# swap, and cgroup_line.
 room_line() {
   local memory pressure disk largest
   memory="$(awk '
@@ -123,7 +150,7 @@ room_line() {
       close(status)
       printf "%s%s %.1f GiB (and %.1f in swap)", (NR > 1 ? ", " : ""), $3, $1 / 1048576, swapped / 1048576
     }' || true)"
-  echo "[room $(date -u +%H:%M:%S)] $memory; waiting for ${pressure% }; disk ${disk:-?} MiB free; load $(cut -d' ' -f1 /proc/loadavg); largest: $largest"
+  echo "[room $(date -u +%H:%M:%S)] $memory; waiting for ${pressure% }; disk ${disk:-?} MiB free; load $(cut -d' ' -f1 /proc/loadavg); largest: $largest$(cgroup_line || true)"
 }
 
 # room_line every DSA_ROOM_SECONDS (60 by default) until the script ends. It runs at the
@@ -164,6 +191,23 @@ explain() {
   exit "$status"
 }
 
+# Runs its arguments in the build's cgroup (DSA_BUILD_CGROUP) when the workflow made one: a
+# subshell moves itself there and becomes the command, so the command and everything it starts
+# are held to the cgroup's memory.high, and the script around it is not.
+in_build_cgroup() {
+  if [[ -z "${DSA_BUILD_CGROUP:-}" ]]; then
+    "$@"
+    return
+  fi
+  (
+    # Read here, not in the pipeline: each side of a pipeline is a process of its own.
+    self=$BASHPID
+    echo "$self" | sudo tee "$DSA_BUILD_CGROUP/cgroup.procs" >/dev/null \
+      || { echo "::error::the build could not join its cgroup ($DSA_BUILD_CGROUP), so it would take the runner's memory"; exit 1; }
+    exec "$@"
+  )
+}
+
 # soong_ui, as m runs it, within what is left of the time, with the room the notes above give the
 # runner. choom, nice and ionice each run the next command in their own process, so timeout's
 # signal reaches soong_ui. step_minutes, when set, bounds this one step sooner.
@@ -178,7 +222,7 @@ build() {
   fi
   stop_at=$(( SECONDS + left ))
   (( left > 60 )) || { explain 124 "$what"; }
-  timeout --signal=TERM --kill-after=120 "$left" \
+  in_build_cgroup timeout --signal=TERM --kill-after=120 "$left" \
     choom -n 1000 -- nice -n 19 ionice -c 2 -n 7 \
     build/soong/soong_ui.bash --make-mode --skip-soong-tests -j"$jobs" "$@" || status=$?
   (( status == 0 )) || explain "$status" "$what"

@@ -305,6 +305,22 @@ jobs:
   # memory limit never reached the analysis in either version. It also prints the memory, the
   # swap and the disk every minute, and stops an analysis that takes longer than
   # DSA_ANALYSIS_MINUTES itself, so that a build that does not fit says what it was short of.
+  #
+  # Even then android17 lost its runner in about half its attempts (runs 43763452008,
+  # 43815264913 and 44797323515), each time 58 to 62 minutes into "Build services.jar", with no
+  # log left. The runs that passed say where: android17's analysis holds 19 to 20 GiB at its
+  # peak (soong_build about 10 GiB in memory and 8 to 10 in swap), against android16's 13. For
+  # most of its 19 to 23 minutes the runner has 0.5 to 0.9 GiB available, and in the worst
+  # minute every task on it, the runner's own included, waited for memory 96 % of the time and
+  # for the disk 91 % (run 44677247350). The build that follows never has less than 4 GiB
+  # available. The runner's processes ran in the same memory as the build and in the same
+  # cgroup (the step's environment names system.slice/hosted-compute-agent.service), so the
+  # OOM score that guards them from being killed never kept their pages from being reclaimed:
+  # a page the agent needed back waited behind the build's swapping, on the one disk the tree
+  # and the swap share (/dev/mapper/cow-root; these runners have no /mnt), and an analysis that
+  # swapped harder than in the runs that passed kept the agent waiting until GitHub gave up. So
+  # the build now runs in a cgroup of its own whose memory.high leaves the runner a share the
+  # build's reclaim never touches.
   services:
     name: Build services.jar (ubuntu-24.04, ${{ matrix.android }})
     needs: versions
@@ -340,13 +356,17 @@ jobs:
       # The headroom that keeps the runner answering while the build swaps.
       - name: Keep the runner responsive under memory pressure
         run: |
-          # zswap keeps pages on their way to swap compressed in memory, in at most 20 % of it
-          # (about 3 GiB), and writes them to the disk only when that pool is full. Heaps of
-          # small objects, as Soong's and the Java tools' are, compress well, so much of the
-          # swapping never waits for the disk, whose queue is what stalls every other process.
+          # zswap keeps pages on their way to swap compressed in memory, in at most 35 % of it
+          # (about 5.4 GiB), and writes them to the disk only when that pool is full. Heaps of
+          # small objects, as Soong's and the Java tools' are, compress well (lzo held 7.6 GiB
+          # in 1.7 during android17's analysis, run 44677247350), so much of the swapping never
+          # waits for the disk, whose queue is what stalls every other process. The pool was 20 %
+          # (about 3 GiB) when the build could take the whole memory; held to about 1 GiB less by
+          # its cgroup below, the analysis swaps that much more, and 35 % keeps it in memory too.
+          # The pool is charged to the build's cgroup, so it never takes from the runner's share.
           zswap=/sys/module/zswap/parameters
           if [[ -e "$zswap/enabled" ]]; then
-            echo 20 | sudo tee "$zswap/max_pool_percent" >/dev/null || true
+            echo 35 | sudo tee "$zswap/max_pool_percent" >/dev/null || true
             echo 1 | sudo tee "$zswap/enabled" >/dev/null || true
             echo "zswap: enabled $(cat "$zswap/enabled"), pool $(cat "$zswap/max_pool_percent") %, $(cat "$zswap/compressor")"
           fi
@@ -358,6 +378,34 @@ jobs:
           # makes the build the first.
           for pid in $(pgrep -f 'Runner\.(Listener|Worker)|hosted-compute-agent|provjobd' || true); do
             echo -1000 | sudo tee "/proc/$pid/oom_score_adj" >/dev/null && echo "protected $(ps -o comm= -p "$pid") ($pid)" || true
+          done
+          # Services the job never uses, whose memory the runner's share below would carry.
+          sudo systemctl stop docker.socket docker.service containerd.service 'php*-fpm.service' 2>/dev/null || true
+          # The build's own cgroup. Its memory.high is the runner's memory less 2.5 GiB: above
+          # it, the kernel reclaims and swaps the build's own pages and slows the build down,
+          # and never reaches for the runner's. The runner and the system need about 0.9 GiB
+          # (free, after free-disk.sh), so the agent keeps more than 1 GiB to spare however hard
+          # the build swaps. The build's kernel memory, page cache and zswap pool count toward
+          # it too. There is no memory.max: past memory.high the build waits, it is not killed,
+          # and build-services.sh stops an analysis that waits too long. build-services.sh moves
+          # soong_ui into it (DSA_BUILD_CGROUP), and nothing else: its per-minute report and the
+          # step's own shell stay in the runner's share, so they still print when the build is
+          # held back.
+          cgroup=/sys/fs/cgroup/dsa-build
+          grep -qw memory /sys/fs/cgroup/cgroup.controllers \
+            || { echo "::error::this runner has no cgroup v2 memory controller, so the build cannot be kept off the runner's memory"; exit 1; }
+          grep -qw memory /sys/fs/cgroup/cgroup.subtree_control \
+            || echo +memory | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null
+          sudo mkdir -p "$cgroup"
+          total_kib="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
+          high=$(( (total_kib - 2621440) * 1024 ))
+          echo "$high" | sudo tee "$cgroup/memory.high" >/dev/null
+          echo "DSA_BUILD_CGROUP=$cgroup" >> "$GITHUB_ENV"
+          echo "the build runs in $cgroup, held to $(( high >> 20 )) MiB of $(( total_kib >> 10 )) MiB"
+          # Where the runner itself runs, and what limits that cgroup has, for the next failure.
+          for pid in $(pgrep -f 'Runner\.Listener' || true); do
+            runner_cgroup="/sys/fs/cgroup$(cut -d: -f3- "/proc/$pid/cgroup" 2>/dev/null || true)"
+            echo "Runner.Listener ($pid) runs in $runner_cgroup: memory.high $(cat "$runner_cgroup/memory.high" 2>/dev/null || echo ?), memory.max $(cat "$runner_cgroup/memory.max" 2>/dev/null || echo ?)"
           done
 
       - name: Install the build tools
@@ -403,13 +451,16 @@ jobs:
       # build-services.sh stops itself after DSA_BUILD_MINUTES, before the step's limit, so that
       # a build out of time says so; it also says when it ran out of disk or memory.
       # DSA_SERVICES_JOBS is ninja's job count: build-services.sh says why 2 and not the runner's 4.
-      # DSA_ANALYSIS_MINUTES bounds the analysis alone: android16's takes 9 minutes, and the two
-      # that lost their runner had been silent for 50 and 58.
+      # DSA_ANALYSIS_MINUTES bounds the analysis alone: android16's takes 8 to 11 minutes and
+      # android17's 19 to 23. It was 45, to stop the analysis while the runner still answered;
+      # with the build in its own cgroup the runner answers however long the analysis takes, so
+      # the bound now only keeps a slower analysis (it has less memory than before) and the
+      # Java build after it (up to 92 minutes so far) within DSA_BUILD_MINUTES.
       - name: Build services.jar
         timeout-minutes: 300
         env:
           DSA_BUILD_MINUTES: 285
-          DSA_ANALYSIS_MINUTES: 45
+          DSA_ANALYSIS_MINUTES: 90
           DSA_SERVICES_JOBS: 2
         run: |
           start=$SECONDS
