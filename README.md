@@ -23,6 +23,11 @@
 
 ## What it is
 
+<p align="center">
+  <img src=".github/assets/dsa-concept.png" alt="DSA concept image: Android apps in their own windows on the Windows desktop" width="860"><br>
+  <sub>DSA concept image</sub>
+</p>
+
 DSA runs Android in a lightweight VM of its own and shows each Android task in a native
 desktop window. Each app has its own taskbar button, Start menu entry, notifications and
 entry in the list of installed apps, as it did with the Windows Subsystem for Android
@@ -37,9 +42,7 @@ what you find. Linux and macOS are in progress and not released (see
 [Supported platforms](#supported-platforms)).
 
 **DSA 1.0 is here.** The first stable release brings Android apps back to the Windows
-desktop, each in a window of its own. Watch the launch film:
-
-[![DSA 1.0 launch film](https://img.youtube.com/vi/4VgRY6QKiwM/maxresdefault.jpg)](https://www.youtube.com/watch?v=4VgRY6QKiwM)
+desktop. [Watch the launch film](https://www.youtube.com/watch?v=4VgRY6QKiwM).
 
 ## Supported platforms
 

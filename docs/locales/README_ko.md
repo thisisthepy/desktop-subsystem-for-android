@@ -22,6 +22,11 @@
 
 ## 무엇인가
 
+<p align="center">
+  <img src="../../.github/assets/dsa-concept.png" alt="DSA 컨셉 이미지: Windows 데스크톱에서 각자의 창으로 열린 Android 앱" width="860"><br>
+  <sub>DSA 컨셉 이미지</sub>
+</p>
+
 DSA는 Android를 전용 경량 VM에서 실행하고, Android 태스크마다 네이티브 데스크톱 창을
 하나씩 보여 줍니다. 앱마다 작업 표시줄 단추, 시작 메뉴 항목, 알림, 설치된 앱 목록의 항목이
 따로 있습니다. Microsoft가 2025년 3월 5일에 지원을 끝낸 Windows Subsystem for Android(WSA)와
@@ -33,10 +38,8 @@ DSA는 Android를 전용 경량 VM에서 실행하고, Android 태스크마다 �
 하드웨어에서 손으로 하는 확인은 릴리스마다 이어집니다. 발견한 것이 있으면 알려 주세요.
 Linux와 macOS는 진행 중이며 아직 배포하지 않았습니다([지원 플랫폼](#지원-플랫폼) 참고).
 
-**DSA 1.0이 나왔습니다.** 첫 정식 릴리스로, Android 앱이 다시 Windows 데스크톱에서 앱마다
-자기 창으로 열립니다. 출시 영상을 보세요.
-
-[![DSA 1.0 launch film](https://img.youtube.com/vi/4VgRY6QKiwM/maxresdefault.jpg)](https://www.youtube.com/watch?v=4VgRY6QKiwM)
+**DSA 1.0이 나왔습니다.** 첫 정식 릴리스로, Android 앱이 다시 Windows 데스크톱에서
+열립니다. [출시 영상 보기](https://www.youtube.com/watch?v=4VgRY6QKiwM).
 
 ## 지원 플랫폼
 
