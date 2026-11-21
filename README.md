@@ -193,13 +193,15 @@ DSA exposes the user interface inside each Android app window to Windows UI Auto
 clients see an Android app's buttons, lists and text fields as elements of its window,
 rather than one picture.
 
-**How it works.** When a UIA client first asks a DSA app window for its tree, the window
-asks DSA's agent in Android to watch that task. The agent reads Android's accessibility
-nodes for that task only and sends them to the host: first the whole tree, then the
-changes. The host keeps the tree in the window process, so every property read and every
-navigation call is answered locally, without a round trip to the VM. When no UIA client
-has listened for 30 seconds, the watch stops, and Android stops reading nodes. Users who
-use no UIA client pay nothing for it.
+**How it works.** While a screen reader is on, or a UIA client listens for focus changes,
+the window asks DSA's agent in Android to watch its task. The agent reads Android's
+accessibility nodes for that task only and sends them to the host: first the whole tree,
+then the changes, with focus changes sent at once. The host keeps the tree in the window
+process, so every property read and every navigation call is answered locally, without a
+round trip to the VM. Any other UIA client gets the tree read once when it asks, at most
+every 5 seconds, because a continuous watch makes apps stutter. When no client is left, the
+watch stops, and Android stops reading nodes. Users who use no UIA client pay nothing for
+it.
 
 **What each element carries.**
 
@@ -225,8 +227,14 @@ use no UIA client pay nothing for it.
 | Value (`SetValue`) | `ACTION_SET_TEXT`, which replaces the field's whole text |
 | Toggle | `ACTION_CLICK` |
 | SelectionItem (`Select`) | `ACTION_SELECT`, or `ACTION_CLICK` when the node has no select action |
-| Scroll | `ACTION_SCROLL_FORWARD` and `ACTION_SCROLL_BACKWARD`, by page; no scroll percentage |
+| Scroll | `ACTION_SCROLL_FORWARD` and `ACTION_SCROLL_BACKWARD`, by page, with the scroll percentage |
 | `SetFocus` | `ACTION_FOCUS`, or `ACTION_ACCESSIBILITY_FOCUS` when the node cannot take input focus |
+| Text (edit fields) | ranges by character, word and line; `Select` moves the cursor |
+| RangeValue (sliders) | `ACTION_SET_PROGRESS` |
+| ExpandCollapse | `ACTION_EXPAND` and `ACTION_COLLAPSE` |
+| Grid, Table, GridItem, TableItem | lists and grids and their items |
+| ScrollItem | `ACTION_SHOW_ON_SCREEN`, or `ACTION_SCROLL_TO_POSITION` for an item off the screen |
+| Context menu, LegacyIAccessible | `ACTION_LONG_CLICK` for the context menu |
 
 These actions go to the node directly. They do not move the mouse or inject touches.
 
@@ -246,11 +254,10 @@ Insights for Windows, or libraries such as FlaUI. Find the app's window by its n
 its elements by AutomationId, name or control type. For scripts that need to press a point
 rather than an element, `dsa tap <package> <x> <y>` presses inside the app's task.
 
-**Not there yet.** There is no Text pattern, no RangeValue or ExpandCollapse pattern, no
-long press through UIA, no heading level, and no notification or live region events.
-Android's accessibility focus is not exported; only input focus is. Improvements are tracked
-in issue [#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744)
-(open).
+Headings carry their heading level, dialogs and pop-ups are windows that raise a window
+opened event, and live regions and the app's announcements and toasts are raised as
+notifications. The focus a client sees is whichever of Android's input focus and
+accessibility focus moved last.
 
 ## Accessibility
 
@@ -259,18 +266,16 @@ above: controls have names and roles, focus follows the keyboard, and buttons, s
 lists and text fields can be used without a mouse. JAWS uses the same tree; the project has
 not checked it yet, so reports are welcome.
 
-**What is being improved.** These come from a screen reader user's report, issue
-[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744). Each is
-open, tracked there:
+**What changed after a screen reader user's report.** Issue
+[#744](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/744) found three
+gaps. The code for each is in, and the issue stays open until screen reader users confirm
+it:
 
-- **Faster focus.** Today a focus change waits in Android before it reaches Windows, about
-  250 to 450 ms after a key press, and holding an arrow key moves at about four steps a
-  second. The plan is to send focus changes at once, read only the task an event came from,
-  and keep the short timings to times when a UIA client listens.
-- **Accessibility focus.** Only input focus is exported today, so moves of Android's
-  accessibility focus raise no focus event.
-- **Text pattern.** Edit fields have no Text pattern yet, which NVDA uses to read and review
-  text by character, word and line. Their value can be read and set.
+- **Faster focus.** While a screen reader listens, a focus change goes to Windows at once
+  instead of waiting 250 to 450 ms in Android, and Android reads only the node that changed.
+- **Accessibility focus.** Moves of Android's accessibility focus raise a focus event.
+- **Text pattern.** Edit fields have the Text pattern, which NVDA uses to read and review
+  text by character, word and line.
 
 **DSA's own windows.**
 
@@ -359,13 +364,11 @@ host only while something reads it. Attach `diag.zip` to a problem report.
 These are true today:
 
 - Only Windows is released. Linux and macOS are in progress.
-- DSA Settings shows in English and Korean only.
 - Only 64-bit apps run: `arm64-v8a` and, on x64, `x86_64`. 32-bit apps do not run.
 - Widevine is L3, so protected streams play in standard definition at most.
 - Google Play is not Google-certified on DSA; Google may ask you to register the device.
 - The clipboard shares text only.
 - The **System (forced)** scaling choice is not available yet and works like **System**.
-- The UI Automation export has the gaps listed under [UI Automation](#ui-automation).
 - Address lookups without Google Play give the area (country down to city, or district in
   Korea), not street addresses.
 
