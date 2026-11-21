@@ -24,29 +24,33 @@ internal static class WorkingSetTrim
         {
             if (window.WindowState == WindowState.Minimized)
             {
-                Later(window, WindowChange.Minimized);
+                Later(window.Dispatcher, WindowChange.Minimized);
             }
         };
         window.IsVisibleChanged += (_, e) =>
         {
             if (e.NewValue is false)
             {
-                Later(window, WindowChange.Hidden);
+                Later(window.Dispatcher, WindowChange.Hidden);
             }
         };
     }
 
-    public static void PageLeft(Window window) => Later(window, WindowChange.PageLeft);
+    public static void PageLeft(Window window) => Later(window.Dispatcher, WindowChange.PageLeft);
+
+    /// <summary>A page that stays open has polled long enough to be due a compaction
+    /// (<see cref="PollCompaction"/>).</summary>
+    public static void Polled(Dispatcher dispatcher) => Later(dispatcher, WindowChange.Polled);
 
     // One trim waits at a time: a burst of window changes folds into it rather than queueing
     // a full garbage collection for each change.
     private static readonly TrimQueue Queue = new();
 
-    private static void Later(Window window, WindowChange change)
+    private static void Later(Dispatcher dispatcher, WindowChange change)
     {
         if (Queue.Request(change))
         {
-            window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => Apply(Queue.Take()));
+            dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => Apply(Queue.Take()));
         }
     }
 

@@ -36,14 +36,42 @@ public enum WindowChange
     Minimized,
     Hidden,
     Restored,
+    /// <summary>A page has polled <see cref="PollCompaction.Every"/> times since the last
+    /// compaction.</summary>
+    Polled,
 }
 
 public readonly record struct MemoryTrim(bool CompactHeap, bool EmptyWorkingSet)
 {
     public static MemoryTrim After(WindowChange change) => change switch
     {
-        WindowChange.PageLeft => new(CompactHeap: true, EmptyWorkingSet: false),
+        WindowChange.PageLeft or WindowChange.Polled => new(CompactHeap: true, EmptyWorkingSet: false),
         WindowChange.Minimized or WindowChange.Hidden => new(CompactHeap: true, EmptyWorkingSet: true),
         _ => new(CompactHeap: false, EmptyWorkingSet: false),
     };
+}
+
+/// <summary>When a page that stays open compacts the heap. Each poll allocates its answer and
+/// the rows built from it; what outlives a young collection reaches the oldest generation,
+/// which a window that stays on one page never collects. A dump of a window left on one page
+/// for an hour held 10 MB of dead objects in a 23 MB heap. A compaction after every
+/// <see cref="Every"/> polls (a minute at the Memory page's five seconds) takes a few
+/// milliseconds on a heap this small.</summary>
+public sealed class PollCompaction
+{
+    public const int Every = 12;
+
+    private int _polls;
+
+    /// <summary>Counts a finished poll. True when the heap is due a compaction now.</summary>
+    public bool Polled()
+    {
+        _polls++;
+        if (_polls < Every)
+        {
+            return false;
+        }
+        _polls = 0;
+        return true;
+    }
 }

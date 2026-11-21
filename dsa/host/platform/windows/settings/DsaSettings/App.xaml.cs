@@ -44,14 +44,19 @@ public partial class App : Application
     /// Android app in Windows' list of installed apps runs the app with it.</summary>
     internal const string UninstallAppArgument = "--uninstall-app";
 
+    static App()
+    {
+        // The app draws in software, set before anything of WPF's media layer runs: before the
+        // application's resources load and before its first window exists. Hardware rendering
+        // creates a Direct3D 9 device in the graphics driver's user mode part, which keeps its
+        // own heaps and a back buffer for every window: tens of MiB of private memory for a
+        // window of text, switches and lists, which software rendering draws as fast as anyone
+        // can see.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
-        // The app draws in software, before its first window exists. Hardware rendering loads
-        // Direct3D 9, the shader compiler and the graphics driver's user mode part into the
-        // process, and the driver keeps its own heaps and a back buffer for every window: tens
-        // of MiB of private memory for a window of text, switches and lists, which software
-        // rendering draws as fast as anyone can see.
-        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         General.Updating = () => ProgramUpdate.InProgress;
         // Each app's "Follow the default" says where the Display page's choice takes it now.

@@ -84,6 +84,57 @@ public class Nfr1SettingsAppMemoryTests
     }
 
     [Fact]
+    public void Nfr1_software_rendering_is_set_before_the_application_resources_load()
+    {
+        var app = File.ReadAllText(Find("DsaSettings", "App.xaml.cs"));
+        var staticCtor = app.IndexOf("static App()", StringComparison.Ordinal);
+        Assert.True(staticCtor >= 0, "the software mode is not set in the static constructor");
+        var software = app.IndexOf("RenderMode.SoftwareOnly", staticCtor, StringComparison.Ordinal);
+        Assert.True(software > staticCtor && software < app.IndexOf("OnStartup(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Nfr1_tool_tips_draw_no_shadow_effect()
+    {
+        var xaml = XDocument.Load(Find("DsaSettings", "App.xaml"));
+        XNamespace p = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var toolTip = xaml.Descendants(p + "Style").Single(s => (string?)s.Attribute("TargetType") == "ToolTip");
+        Assert.Contains(toolTip.Elements(p + "Setter"), s => (string?)s.Attribute("Property") == "Template");
+        Assert.Contains(toolTip.Elements(p + "Setter"),
+            s => (string?)s.Attribute("Property") == "Effect" && (string?)s.Attribute("Value") == "{x:Null}");
+        Assert.DoesNotContain(xaml.Descendants(), e => e.Name.LocalName.EndsWith("Effect", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Nfr1_a_page_that_stays_open_compacts_the_heap_every_dozen_polls()
+    {
+        var compaction = new PollCompaction();
+        for (var round = 0; round < 2; round++)
+        {
+            for (var i = 1; i < PollCompaction.Every; i++)
+            {
+                Assert.False(compaction.Polled());
+            }
+            Assert.True(compaction.Polled());
+        }
+        Assert.Equal(new MemoryTrim(true, false), MemoryTrim.After(WindowChange.Polled));
+        var timers = File.ReadAllText(Find("DsaSettings", "PollingTimers.cs"));
+        Assert.Contains("WorkingSetTrim.Polled(", timers);
+    }
+
+    [Fact]
+    public void Nfr1_the_settings_app_loads_neither_icu_nor_the_tablet_input_stack()
+    {
+        var project = XDocument.Load(Find("DsaSettings", "DsaSettings.csproj"));
+        string? Option(string name) => project.Descendants("RuntimeHostConfigurationOption")
+            .Where(o => (string?)o.Attribute("Include") == name)
+            .Select(o => (string?)o.Attribute("Value")).SingleOrDefault();
+        Assert.Equal("true", Option("System.Globalization.UseNls"));
+        Assert.Equal("true", Option("Switch.System.Windows.Input.Stylus.EnablePointerSupport"));
+        Assert.Equal("false", (string?)project.Descendants("TieredCompilation").SingleOrDefault());
+    }
+
+    [Fact]
     public void Nfr1_a_minimised_or_hidden_window_gives_its_memory_back()
     {
         Assert.Equal(new MemoryTrim(true, true), MemoryTrim.After(WindowChange.Minimized));
