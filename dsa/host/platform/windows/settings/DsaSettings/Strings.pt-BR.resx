@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Iniciar</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Reiniciar</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>O Android para e inicia novamente.
+
+As janelas dos apps são fechadas. Abra os apps novamente quando ele tiver iniciado.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Parar</value>
   </data>

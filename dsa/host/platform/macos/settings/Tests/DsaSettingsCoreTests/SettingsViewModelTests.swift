@@ -36,7 +36,7 @@ final class SettingsViewModelTests: XCTestCase {
     func test_fr17_start_and_stop_wait_for_the_service() async {
         let (cli, service) = make()
         cli.answer("start --wait --timeout 360 --json", #"{"state":"Active"}"#)
-        cli.answer("stop --wait --timeout 120 --json", #"{"state":"Stopped"}"#)
+        cli.answer("stop --wait --timeout 120 --json", #"{"state":"Stopped","start_button":"start"}"#)
         let general = GeneralViewModel(service: service, text: KeyText())
         await general.start()
         XCTAssertEqual(general.state, .active)

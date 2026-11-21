@@ -45928,6 +45928,184 @@
         }
       }
     },
+    "RestartButton.Content": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neu starten"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reiniciar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redémarrer"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mulai ulang"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riavvia"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再起動"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "다시 시작"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reiniciar"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перезапустить"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yeniden başlat"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Khởi động lại"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新启动"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新啟動"
+          }
+        }
+      }
+    },
+    "RestartConfirm.Body": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android wird beendet und neu gestartet.\n\nSeine App-Fenster werden geschlossen. Öffnen Sie die Apps wieder, sobald es gestartet ist."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android se detiene y vuelve a iniciarse.\n\nSus ventanas de aplicaciones se cierran. Vuelve a abrir las aplicaciones cuando haya iniciado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android s'arrête puis redémarre.\n\nSes fenêtres d'applications se ferment. Rouvrez les applications une fois qu'il a démarré."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android berhenti lalu dimulai lagi.\n\nJendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android si arresta e si avvia di nuovo.\n\nLe finestre delle sue app si chiudono. Riapri le app quando si è avviato."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android を停止してから、もう一度起動します。\n\nアプリのウィンドウは閉じます。起動が終わったら、アプリをもう一度開いてください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android를 멈췄다가 다시 시작합니다.\n\n앱 창이 닫힙니다. 시작이 끝나면 앱을 다시 여세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Android para e inicia novamente.\n\nAs janelas dos apps são fechadas. Abra os apps novamente quando ele tiver iniciado."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android остановится и запустится снова.\n\nОкна его приложений закроются. Откройте приложения снова, когда он запустится."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android durur ve yeniden başlar.\n\nUygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android dừng rồi khởi động lại.\n\nCác cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng khi nó đã khởi động xong."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android 会停止并重新启动。\n\n它的应用窗口会关闭。启动完成后，请重新打开应用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Android 會停止並重新啟動。\n\n它的應用程式視窗會關閉。啟動完成後，請重新開啟應用程式。"
+          }
+        }
+      }
+    },
     "RestartWindowManagerAction": {
       "extractionState": "manual",
       "localizations": {

@@ -1838,3 +1838,6 @@ msgstr "Dem Standard folgen (auf dem ganzen Bildschirm)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Dem Standard folgen (im Fenster)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android wird beendet und neu gestartet.\n\nSeine App-Fenster werden geschlossen. Öffnen Sie die Apps wieder, sobald es gestartet ist."

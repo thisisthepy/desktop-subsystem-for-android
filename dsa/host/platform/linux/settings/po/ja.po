@@ -1838,3 +1838,6 @@ msgstr "既定に従う (画面全体)"
 
 msgid "Follow the default (inside the window)"
 msgstr "既定に従う (ウィンドウ内)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android を停止してから、もう一度起動します。\n\nアプリのウィンドウは閉じます。起動が終わったら、アプリをもう一度開いてください。"

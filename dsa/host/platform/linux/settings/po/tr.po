@@ -1838,3 +1838,6 @@ msgstr "Varsayılanı izle (tüm ekranda)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Varsayılanı izle (pencerenin içinde)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android durur ve yeniden başlar.\n\nUygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın."

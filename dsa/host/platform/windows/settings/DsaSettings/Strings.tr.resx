@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Başlat</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Yeniden başlat</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android durur ve yeniden başlar.
+
+Uygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Durdur</value>
   </data>

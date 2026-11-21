@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Запустить</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Перезапустить</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android остановится и запустится снова.
+
+Окна его приложений закроются. Откройте приложения снова, когда он запустится.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Остановить</value>
   </data>

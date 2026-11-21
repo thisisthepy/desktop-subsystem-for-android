@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>啟動</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>重新啟動</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android 會停止並重新啟動。
+
+它的應用程式視窗會關閉。啟動完成後，請重新開啟應用程式。</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>停止</value>
   </data>

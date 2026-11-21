@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Start</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Restart</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android stops and starts again.
+
+Its app windows close. Open the apps again once it has started.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Stop</value>
   </data>

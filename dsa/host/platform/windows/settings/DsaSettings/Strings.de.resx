@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Starten</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Neu starten</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android wird beendet und neu gestartet.
+
+Seine App-Fenster werden geschlossen. Öffnen Sie die Apps wieder, sobald es gestartet ist.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Beenden</value>
   </data>

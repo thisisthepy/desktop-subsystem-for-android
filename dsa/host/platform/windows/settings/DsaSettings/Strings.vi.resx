@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Khởi động</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Khởi động lại</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android dừng rồi khởi động lại.
+
+Các cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng khi nó đã khởi động xong.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Dừng</value>
   </data>

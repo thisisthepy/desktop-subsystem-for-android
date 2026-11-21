@@ -2,6 +2,19 @@ import AppKit
 import DsaSettingsCore
 import SwiftUI
 
+/// Presses the status card's first button: starts a stopped Android, or restarts a running
+/// one once the user agrees that its app windows close. The page and the menu bar both use it.
+@MainActor
+func pressStart(_ vm: GeneralViewModel) {
+    if vm.startConfirms {
+        guard Shell.confirm(T("AndroidRestartConfirm.Title"), T("RestartConfirm.Body"),
+                            T("RestartButton.Content"), destructive: false) else {
+            return
+        }
+    }
+    Task { await vm.pressStart() }
+}
+
 /// General: Android's state, starting, stopping and freezing it, and the log folders.
 struct GeneralPage: View {
     @ObservedObject var vm: GeneralViewModel
@@ -14,12 +27,12 @@ struct GeneralPage: View {
                 HStack {
                     RowLabel(title: T("GeneralStateCard.Header"), detail: T("GeneralStateCard.Description"))
                     Spacer()
-                    if vm.isBusy {
+                    if vm.showsProgress {
                         ProgressView().controlSize(.small)
                             .accessibilityLabel(T("GeneralStateCard.Header"))
                     }
                     Text(vm.stateText).foregroundStyle(.secondary)
-                    Button(T("StartButton.Content")) { Task { await vm.start() } }.disabled(!vm.canStart)
+                    Button(vm.startButtonText) { pressStart(vm) }.disabled(!vm.canPressStart)
                     Button(T("StopButton.Content")) { Task { await vm.stop() } }.disabled(!vm.canStop)
                 }
                 if vm.hasProblem {

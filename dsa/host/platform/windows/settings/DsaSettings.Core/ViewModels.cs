@@ -82,7 +82,31 @@ public sealed partial class GeneralViewModel : ObservableObject
     public string UpdateNotice => HasUpdateNotice ? UpdateNoticeText.Localize(_text, _status!.UpdateNotice!) : "";
     public bool HasUpdateNotice => !string.IsNullOrEmpty(_status?.UpdateNotice);
     public bool IsBusy => _busy;
-    public bool CanStart => !_busy && State == SessionState.Stopped;
+    public bool CanStart => StartButton == StartButtonKind.Start;
+
+    /// <summary>The status card's first button. The service decides it from the state; while
+    /// this app starts or restarts Android, the button stays locked with the label of what it
+    /// does, as the state passes through stopping and starting.</summary>
+    public StartButtonKind StartButton => _action switch
+    {
+        StartButtonKind.Start => StartButtonKind.Starting,
+        StartButtonKind.Restart => StartButtonKind.Restarting,
+        _ when _busy => StartButtonKind.None,
+        _ => _status?.StartButton ?? StartButtonKind.None,
+    };
+    /// <summary>Whether the first button reads [Restart] rather than [Start].</summary>
+    public bool IsRestart => StartButton is StartButtonKind.Restart or StartButtonKind.Restarting;
+    public string StartButtonText => _text.Get(IsRestart ? "RestartButton.Content" : "StartButton.Content");
+    /// <summary>Whether pressing the first button does something now.</summary>
+    public bool CanPressStart => StartButton is StartButtonKind.Start or StartButtonKind.Restart;
+    /// <summary>Whether the first button is locked while a start, a restart or a stop runs, and
+    /// progress shows.</summary>
+    public bool StartInProgress => StartButton is StartButtonKind.Starting or StartButtonKind.Restarting
+        or StartButtonKind.Stopping;
+    /// <summary>Whether progress shows beside the state.</summary>
+    public bool ShowsProgress => _busy || StartInProgress;
+    /// <summary>Whether pressing it first asks, since a restart closes every app window.</summary>
+    public bool StartConfirms => StartButton == StartButtonKind.Restart;
     public bool CanStop => !_busy && State is SessionState.Starting or SessionState.Stalled or SessionState.Active
         or SessionState.Dozing or SessionState.Frozen;
     public string Error => _error ?? "";
@@ -142,8 +166,37 @@ public sealed partial class GeneralViewModel : ObservableObject
         ChangedAll();
     }
 
-    public Task StartAsync() => RunAsync(_service.StartAsync);
+    public Task StartAsync() => PressAsync(StartButtonKind.Start, _service.StartAsync);
     public Task StopAsync() => RunAsync(_service.StopAsync);
+
+    /// <summary>Restarts Android, as <c>dsa android restart</c> does. The page asks the user
+    /// first, since its app windows close.</summary>
+    public Task RestartAsync() => PressAsync(StartButtonKind.Restart, _service.RestartAsync);
+
+    /// <summary>What the first button does when pressed: start a stopped Android or restart a
+    /// running one. Nothing while it is locked.</summary>
+    public Task PressStartAsync() => StartButton switch
+    {
+        StartButtonKind.Start => StartAsync(),
+        StartButtonKind.Restart => RestartAsync(),
+        _ => Task.CompletedTask,
+    };
+
+    private StartButtonKind _action = StartButtonKind.None;
+
+    private async Task PressAsync(StartButtonKind action, Func<Task<StatusInfo>> run)
+    {
+        _action = action;
+        try
+        {
+            await RunAsync(run).ConfigureAwait(true);
+        }
+        finally
+        {
+            _action = StartButtonKind.None;
+            ChangedAll();
+        }
+    }
 }
 
 /// <summary>One choice of render GPU: what the list shows and the value the setting keeps.</summary>

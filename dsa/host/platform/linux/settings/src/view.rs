@@ -77,10 +77,49 @@ pub struct Controls {
     pub can_freeze: bool,
 }
 
+/// The status card's first button, as core decides it from the state and from what this app
+/// is doing (`action`). `None` while the state is unknown: the button is locked and reads
+/// "Start", or "Restart" while this app restarts Android.
+pub fn start_button(
+    status: Option<&Status>,
+    action: Option<dsa_host_core::start_button::StartAction>,
+) -> Option<dsa_host_core::start_button::StartButton> {
+    use dsa_host_core::session::SessionState;
+    let state = match status.map(|s| s.state).unwrap_or(State::Unknown) {
+        State::Unknown => None,
+        State::Stopped => Some(SessionState::Stopped),
+        State::Starting => Some(SessionState::Starting),
+        State::Active => Some(SessionState::Active),
+        State::Dozing => Some(SessionState::Dozing),
+        State::Frozen => Some(SessionState::Frozen),
+        State::Stopping => Some(SessionState::Stopping),
+        State::Stalled => Some(SessionState::Stalled),
+    };
+    match (state, action) {
+        (Some(state), action) => Some(dsa_host_core::start_button::start_button(state, action)),
+        // An action under way decides the button whatever the state.
+        (None, Some(action)) => Some(dsa_host_core::start_button::start_button(
+            SessionState::Stopped,
+            Some(action),
+        )),
+        (None, None) => None,
+    }
+}
+
+/// What the first button reads.
+pub fn start_button_text(button: Option<dsa_host_core::start_button::StartButton>) -> String {
+    if button.is_some_and(|b| b.is_restart()) {
+        tr("Restart")
+    } else {
+        tr("Start")
+    }
+}
+
 pub fn controls(status: Option<&Status>) -> Controls {
     let state = status.map(|s| s.state).unwrap_or(State::Unknown);
     Controls {
-        can_start: matches!(state, State::Stopped | State::Stalled),
+        can_start: start_button(status, None)
+            == Some(dsa_host_core::start_button::StartButton::Start),
         can_stop: matches!(
             state,
             State::Starting | State::Active | State::Dozing | State::Frozen | State::Stalled

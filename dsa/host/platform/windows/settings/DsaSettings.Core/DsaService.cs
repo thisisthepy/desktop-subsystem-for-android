@@ -81,7 +81,20 @@ public sealed partial class DsaService
         OptionalString(json, "problem"),
         json.TryGetProperty("program_update", out var update) && update.ValueKind == JsonValueKind.Object
             ? ReadProgramUpdate(update)
-            : null);
+            : null,
+        ParseStartButton(OptionalString(json, "start_button")));
+
+    /// <summary>The button a <c>start_button</c> name stands for. A missing or unknown name is
+    /// none, and the button stays locked.</summary>
+    public static StartButtonKind ParseStartButton(string? name) => name switch
+    {
+        "start" => StartButtonKind.Start,
+        "restart" => StartButtonKind.Restart,
+        "starting" => StartButtonKind.Starting,
+        "restarting" => StartButtonKind.Restarting,
+        "stopping" => StartButtonKind.Stopping,
+        _ => StartButtonKind.None,
+    };
 
     /// <summary>The phase a name of <c>dsa status --json</c> stands for. An unknown name, as
     /// a newer service may give, is none.</summary>
@@ -111,6 +124,12 @@ public sealed partial class DsaService
     /// <summary>Starts Android and waits until it has started or failed.</summary>
     public async Task<StatusInfo> StartAsync() =>
         ReadStatus(await RunJsonAsync("start", "--wait", "--timeout", "360").ConfigureAwait(true));
+
+    /// <summary>Restarts Android, as <c>dsa android restart</c> does, and waits until it runs
+    /// again: into a downloaded image if one waits, and otherwise by stopping and starting it.
+    /// Its app windows close.</summary>
+    public async Task<StatusInfo> RestartAsync() =>
+        ReadStatus(await RunJsonAsync("android", "restart", "--wait", "--timeout", "360").ConfigureAwait(true));
 
     /// <summary>Stops Android and waits until it has stopped.</summary>
     public async Task<StatusInfo> StopAsync() =>

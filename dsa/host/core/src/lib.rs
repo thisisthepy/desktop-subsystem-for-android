@@ -168,6 +168,7 @@ pub mod sensors;
 pub mod session;
 pub mod settings;
 pub mod share;
+pub mod start_button;
 pub mod start_failure;
 pub mod system_settings;
 pub mod tasks;

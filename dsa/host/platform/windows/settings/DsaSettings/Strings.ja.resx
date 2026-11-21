@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>開始</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>再起動</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android を停止してから、もう一度起動します。
+
+アプリのウィンドウは閉じます。起動が終わったら、アプリをもう一度開いてください。</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>停止</value>
   </data>

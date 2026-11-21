@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Mulai</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Mulai ulang</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android berhenti lalu dimulai lagi.
+
+Jendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Hentikan</value>
   </data>

@@ -96,8 +96,8 @@ public class ViewModelTests
     public async Task Fr17_general_page_shows_the_state_and_the_last_error()
     {
         var cli = new FakeCli()
-            .Answer("status --json", "{\"state\":\"Stopped\",\"last_reason\":\"the VM exited\",\"update_notice\":null}")
-            .Answer("start --wait --timeout 360 --json", "{\"state\":\"Active\",\"last_reason\":null,\"update_notice\":null}");
+            .Answer("status --json", "{\"state\":\"Stopped\",\"start_button\":\"start\",\"last_reason\":\"the VM exited\",\"update_notice\":null}")
+            .Answer("start --wait --timeout 360 --json", "{\"state\":\"Active\",\"start_button\":\"restart\",\"last_reason\":null,\"update_notice\":null}");
         var vm = new GeneralViewModel(new DsaService(cli), new KeyText());
         await vm.RefreshAsync();
         Assert.Equal(SessionState.Stopped, vm.State);
@@ -113,6 +113,82 @@ public class ViewModelTests
         Assert.False(vm.CanStart);
         Assert.True(vm.CanStop);
         Assert.False(vm.HasLastReason);
+    }
+
+    /// <summary>A CLI whose restart waits until the test lets it finish, so the test sees the
+    /// button while the restart runs.</summary>
+    private sealed class GatedRestartCli : IDsaCli
+    {
+        public readonly TaskCompletionSource<CliResult> Restart = new();
+        public List<string> Calls { get; } = new();
+        public string Status = "";
+
+        public Task<CliResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancel = default)
+        {
+            var line = string.Join(" ", args);
+            Calls.Add(line);
+            return line switch
+            {
+                "status --json" => Task.FromResult(new CliResult(0, Status, "")),
+                "android restart --wait --timeout 360 --json" => Restart.Task,
+                _ => Task.FromResult(new CliResult(2, "", $"dsa: the test has no answer for {line}")),
+            };
+        }
+    }
+
+    [Fact]
+    public async Task Fr17_the_start_button_becomes_restart_while_android_runs()
+    {
+        var cli = new GatedRestartCli
+        {
+            Status = "{\"state\":\"Stopped\",\"start_button\":\"start\"}",
+        };
+        var vm = new GeneralViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        Assert.Equal(StartButtonKind.Start, vm.StartButton);
+        Assert.Equal("StartButton.Content", vm.StartButtonText);
+        Assert.True(vm.CanPressStart);
+        Assert.False(vm.StartConfirms);
+        Assert.False(vm.ShowsProgress);
+
+        foreach (var state in new[] { "Active", "Dozing", "Frozen", "Stalled" })
+        {
+            cli.Status = $"{{\"state\":\"{state}\",\"start_button\":\"restart\"}}";
+            await vm.RefreshAsync();
+            Assert.Equal(StartButtonKind.Restart, vm.StartButton);
+            Assert.Equal("RestartButton.Content", vm.StartButtonText);
+            Assert.True(vm.CanPressStart);
+            Assert.True(vm.StartConfirms);
+            Assert.False(vm.CanStart);
+        }
+
+        // A start another program made: locked, with progress.
+        cli.Status = "{\"state\":\"Starting\",\"start_button\":\"starting\"}";
+        await vm.RefreshAsync();
+        Assert.False(vm.CanPressStart);
+        Assert.True(vm.ShowsProgress);
+        Assert.Equal("StartButton.Content", vm.StartButtonText);
+
+        // Pressing Restart runs dsa android restart and keeps the button locked until it ends.
+        cli.Status = "{\"state\":\"Active\",\"start_button\":\"restart\"}";
+        await vm.RefreshAsync();
+        var restart = vm.PressStartAsync();
+        Assert.Contains("android restart --wait --timeout 360 --json", cli.Calls);
+        Assert.Equal(StartButtonKind.Restarting, vm.StartButton);
+        Assert.Equal("RestartButton.Content", vm.StartButtonText);
+        Assert.False(vm.CanPressStart);
+        Assert.True(vm.ShowsProgress);
+        await vm.PressStartAsync();
+        Assert.Single(cli.Calls, "android restart --wait --timeout 360 --json");
+        cli.Restart.SetResult(new CliResult(0, "{\"state\":\"Active\",\"start_button\":\"restart\",\"restarting\":null}", ""));
+        await restart;
+        Assert.Equal(StartButtonKind.Restart, vm.StartButton);
+        Assert.True(vm.CanPressStart);
+        Assert.False(vm.ShowsProgress);
+
+        // A service that does not say leaves the button locked.
+        Assert.Equal(StartButtonKind.None, DsaService.ParseStartButton(null));
+        Assert.Equal(StartButtonKind.None, DsaService.ParseStartButton("later"));
     }
 
     [Fact]

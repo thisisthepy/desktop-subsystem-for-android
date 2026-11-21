@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Démarrer</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Redémarrer</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android s&apos;arrête puis redémarre.
+
+Ses fenêtres d&apos;applications se ferment. Rouvrez les applications une fois qu&apos;il a démarré.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Arrêter</value>
   </data>

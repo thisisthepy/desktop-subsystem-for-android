@@ -26,7 +26,7 @@ public class TextLengthTests
         "ArmGoogle_Notice", "Widevine_Notice", "Backup_DeleteQuestion", "Backup_RestoreWarning",
         "ResetData_Warning", "AppsRunAsArmEraseBody", "AppsUninstallConfirmBody", "IdentityResetConfirmBody",
         "RestartWindowManagerBody", "AndroidRestartConfirm.Body", "Android_DownWarning", "AndroidUpConfirm.Body",
-        "UpdateNowBody", "FolderMissingBody",
+        "UpdateNowBody", "FolderMissingBody", "RestartConfirm.Body",
     };
 
     private static Dictionary<string, string> Strings(string file) => StringTables.Load(file);

@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Iniciar</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Reiniciar</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android se detiene y vuelve a iniciarse.
+
+Sus ventanas de aplicaciones se cierran. Vuelve a abrir las aplicaciones cuando haya iniciado.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Detener</value>
   </data>

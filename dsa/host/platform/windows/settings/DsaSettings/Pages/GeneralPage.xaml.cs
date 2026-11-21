@@ -23,7 +23,17 @@ public partial class GeneralPage : Page
         };
     }
 
-    private async void OnStart(object sender, RoutedEventArgs e) => await ViewModel.StartAsync();
+    /// <summary>Starts a stopped Android, or restarts a running one once the user agrees that
+    /// its app windows close.</summary>
+    private async void OnStart(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.StartConfirms && !await Shell.Confirm(App.Text.Get("AndroidRestartConfirm.Title"),
+                App.Text.Get("RestartConfirm.Body"), App.Text.Get("RestartButton.Content")))
+        {
+            return;
+        }
+        await ViewModel.PressStartAsync();
+    }
 
     private async void OnStop(object sender, RoutedEventArgs e) => await ViewModel.StopAsync();
 

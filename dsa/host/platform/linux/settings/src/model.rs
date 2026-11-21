@@ -1932,6 +1932,19 @@ impl Client {
         ])?))
     }
 
+    /// Restarts Android, as `dsa android restart` does, and waits until it runs again: into a
+    /// downloaded image if one waits, and otherwise by stopping and starting it. Its app
+    /// windows close.
+    pub fn restart(&self) -> Result<Status, Failure> {
+        Ok(Status::read(&self.json(&[
+            "android",
+            "restart",
+            "--wait",
+            "--timeout",
+            "360",
+        ])?))
+    }
+
     /// Stops Android and waits until it has stopped.
     pub fn stop(&self) -> Result<Status, Failure> {
         Ok(Status::read(&self.json(&[

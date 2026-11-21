@@ -1838,3 +1838,6 @@ msgstr "Seguir el valor predeterminado (en toda la pantalla)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Seguir el valor predeterminado (dentro de la ventana)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android se detiene y vuelve a iniciarse.\n\nSus ventanas de aplicaciones se cierran. Vuelve a abrir las aplicaciones cuando haya iniciado."

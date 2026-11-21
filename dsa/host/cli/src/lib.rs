@@ -302,7 +302,11 @@
 //! off, the image is used the next time the user starts Android. `dsa android restart`
 //! restarts Android into the waiting image now, whatever the setting, and `dsa android
 //! version` says when one waits (`restart_pending` in its JSON; `dsa android restart --json`
-//! prints `restarting`, the image or null, and `detail`).
+//! prints `restarting`, the image or null, and `detail`). `dsa android restart --wait`
+//! restarts a running Android even when no image waits, by stopping and starting it, and
+//! returns once it runs again; the settings apps' Restart button runs it. `dsa status --json`
+//! prints `start_button`, the status card's first button for the state: `start`, `restart`,
+//! `starting`, `restarting` or `stopping`.
 //! `dsa android install-image <folder>` installs the Android image in a folder on this
 //! computer, such as a development build's: its signed `images.json` and the files it names.
 //! It runs as administrator, and the image passes the same signature, rule and hash checks as
@@ -1650,11 +1654,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     Ok(Invocation {
         command,
         wait,
-        timeout: timeout.unwrap_or(if matches!(command, Command::Start | Command::Install) {
-            START_TIMEOUT
-        } else {
-            DEFAULT_TIMEOUT
-        }),
+        timeout: timeout.unwrap_or(
+            if matches!(
+                command,
+                Command::Start | Command::Install | Command::AndroidRestart
+            ) {
+                START_TIMEOUT
+            } else {
+                DEFAULT_TIMEOUT
+            },
+        ),
         endpoint,
         package,
         file,
@@ -2572,6 +2581,8 @@ pub fn describe_background(apps: &[BackgroundApp], media: &[MediaSession]) -> St
 pub fn status_json(status: &Status) -> Value {
     json!({
         "state": status.state.to_string(),
+        // The settings apps' first status card button, decided once in core.
+        "start_button": dsa_host_core::start_button::start_button(status.state, None).as_str(),
         "last_reason": status.last_reason,
         "update_notice": status.update_notice,
         "problem": status.problem,
@@ -3069,12 +3080,85 @@ pub fn android_versions_text(report: &VersionReport) -> String {
 }
 
 /// `dsa android restart`: restarts Android now into the downloaded image that waits for it.
+///
+/// With `--wait` it restarts Android whether or not an image waits, as the settings apps'
+/// Restart button does: into the waiting image if there is one, and otherwise by stopping it
+/// and starting it again (a start boots the newest image anyway). It returns once Android runs
+/// again, and its JSON is the status, as `dsa start --wait --json` prints, with `restarting`
+/// and `detail` added. A stopped Android is started.
 fn android_restart(invocation: &Invocation, client: &mut HostApiClient) -> Result<String, String> {
     let (version, detail) = client.restart_for_update().map_err(|e| e.to_string())?;
-    Ok(if invocation.json {
-        json!({ "restarting": version, "detail": detail }).to_string()
-    } else {
+    if !invocation.wait {
+        return Ok(if invocation.json {
+            json!({ "restarting": version, "detail": detail }).to_string()
+        } else {
+            detail
+        });
+    }
+    let deadline = Instant::now() + invocation.timeout;
+    let running = [SessionState::Active, SessionState::Dozing];
+    let late = |status: &Status, goal: &str| {
+        format!(
+            "Android has not {goal} after {} seconds: {}",
+            invocation.timeout.as_secs(),
+            describe(status)
+        )
+    };
+    let mut status = client.status().map_err(|e| e.to_string())?;
+    let detail = if version.is_some() {
+        // The service restarts it within a moment: wait for it to go down and come back.
+        let mut went_down = false;
+        loop {
+            went_down |= !running.contains(&status.state);
+            if went_down && running.contains(&status.state) {
+                break;
+            }
+            if went_down && status.state == SessionState::Stalled {
+                return Err(format!("Android did not start: {}", describe(&status)));
+            }
+            if Instant::now() >= deadline {
+                return Err(late(&status, "restarted"));
+            }
+            thread::sleep(Duration::from_millis(250));
+            status = client.status().map_err(|e| e.to_string())?;
+        }
         detail
+    } else {
+        if status.state != SessionState::Stopped {
+            status = client.stop().map_err(|e| e.to_string())?;
+            while status.state != SessionState::Stopped {
+                if Instant::now() >= deadline {
+                    return Err(late(&status, "stopped"));
+                }
+                thread::sleep(Duration::from_millis(250));
+                status = client.status().map_err(|e| e.to_string())?;
+            }
+        }
+        status = client.start().map_err(|e| e.to_string())?;
+        loop {
+            if running.contains(&status.state) {
+                break;
+            }
+            // The service answers a start once the session has moved on, so a Stopped
+            // answer means the start has already failed.
+            if matches!(status.state, SessionState::Stopped | SessionState::Stalled) {
+                return Err(format!("Android did not start: {}", describe(&status)));
+            }
+            if Instant::now() >= deadline {
+                return Err(late(&status, "started"));
+            }
+            thread::sleep(Duration::from_millis(250));
+            status = client.status().map_err(|e| e.to_string())?;
+        }
+        "Android restarted. Its app windows closed; open the apps again".to_string()
+    };
+    Ok(if invocation.json {
+        let mut value = status_json(&status);
+        value["restarting"] = version.into();
+        value["detail"] = detail.into();
+        value.to_string()
+    } else {
+        format!("{detail}\n{}", describe(&status))
     })
 }
 

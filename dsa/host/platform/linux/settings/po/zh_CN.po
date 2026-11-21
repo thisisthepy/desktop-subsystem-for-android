@@ -1838,3 +1838,6 @@ msgstr "跟随默认设置（整个屏幕）"
 
 msgid "Follow the default (inside the window)"
 msgstr "跟随默认设置（在窗口内）"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android 会停止并重新启动。\n\n它的应用窗口会关闭。启动完成后，请重新打开应用。"

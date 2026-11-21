@@ -1838,3 +1838,6 @@ msgstr "Как по умолчанию (на весь экран)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Как по умолчанию (внутри окна)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android остановится и запустится снова.\n\nОкна его приложений закроются. Откройте приложения снова, когда он запустится."

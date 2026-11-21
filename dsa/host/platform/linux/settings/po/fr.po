@@ -1838,3 +1838,6 @@ msgstr "Suivre le paramètre par défaut (sur tout l'écran)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Suivre le paramètre par défaut (dans la fenêtre)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android s'arrête puis redémarre.\n\nSes fenêtres d'applications se ferment. Rouvrez les applications une fois qu'il a démarré."

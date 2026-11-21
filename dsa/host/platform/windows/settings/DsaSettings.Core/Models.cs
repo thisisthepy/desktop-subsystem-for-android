@@ -18,7 +18,27 @@ public sealed record StatusInfo(
     string? LastReason,
     string? UpdateNotice,
     string? Problem = null,
-    ProgramUpdateProgress? ProgramUpdate = null);
+    ProgramUpdateProgress? ProgramUpdate = null,
+    StartButtonKind StartButton = StartButtonKind.None);
+
+/// <summary>The status card's first button, as the service decides it from the state
+/// (<c>start_button</c> in <c>dsa status --json</c>). The app does not work it out itself, so
+/// every settings app shows the same button.</summary>
+public enum StartButtonKind
+{
+    /// <summary>The service did not say: the button is locked.</summary>
+    None,
+    /// <summary>Android is stopped: [Start].</summary>
+    Start,
+    /// <summary>Android runs: [Restart], which asks first, as app windows close.</summary>
+    Restart,
+    /// <summary>A start is under way: [Start], locked, with progress.</summary>
+    Starting,
+    /// <summary>A restart is under way: [Restart], locked, with progress.</summary>
+    Restarting,
+    /// <summary>Android is stopping: [Start], locked, with progress.</summary>
+    Stopping,
+}
 
 /// <summary>How far an update of DSA itself has got, as the service and the settings app see
 /// it.</summary>

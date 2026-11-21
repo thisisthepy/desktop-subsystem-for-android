@@ -1838,3 +1838,6 @@ msgstr "Theo mặc định (trên cả màn hình)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Theo mặc định (trong cửa sổ)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android dừng rồi khởi động lại.\n\nCác cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng khi nó đã khởi động xong."

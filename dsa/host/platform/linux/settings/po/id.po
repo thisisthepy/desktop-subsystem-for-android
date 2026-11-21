@@ -1838,3 +1838,6 @@ msgstr "Ikuti bawaan (di seluruh layar)"
 
 msgid "Follow the default (inside the window)"
 msgstr "Ikuti bawaan (di dalam jendela)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android berhenti lalu dimulai lagi.\n\nJendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai."

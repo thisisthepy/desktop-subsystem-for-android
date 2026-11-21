@@ -1738,6 +1738,24 @@ fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
 }
 
 #[test]
+fn fr17_the_start_button_becomes_restart_while_android_runs() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let stopped = json_of(&dsa(&endpoint, "status --json"));
+    assert_eq!(stopped["start_button"], "start");
+    let started = json_of(&dsa(&endpoint, "start --wait --timeout 10 --json"));
+    assert_eq!(started["start_button"], "restart");
+    // With no image waiting, the Restart button's command stops Android and starts it again.
+    let restarted = json_of(&dsa(
+        &endpoint,
+        "android restart --wait --timeout 20 --json",
+    ));
+    assert_eq!(restarted["state"], "Active");
+    assert_eq!(restarted["start_button"], "restart");
+    assert!(restarted["restarting"].is_null());
+}
+
+#[test]
 fn fr15_dsa_status_says_how_far_an_update_of_dsa_has_got() {
     use dsa_host_core::host_api::{ProgramPhase, ProgramProgress, Status};
     let status = |phase| Status {

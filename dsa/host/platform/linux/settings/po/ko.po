@@ -1842,3 +1842,6 @@ msgstr "기본값 따르기 (화면 전체로)"
 
 msgid "Follow the default (inside the window)"
 msgstr "기본값 따르기 (창 안에서)"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android를 멈췄다가 다시 시작합니다.\n\n앱 창이 닫힙니다. 시작이 끝나면 앱을 다시 여세요."

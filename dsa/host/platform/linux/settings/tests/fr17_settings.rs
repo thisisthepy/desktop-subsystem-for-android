@@ -326,6 +326,56 @@ fn fr17_settings_are_read_as_the_service_reports_them() {
 }
 
 #[test]
+fn fr17_the_start_button_becomes_restart_while_android_runs() {
+    use dsa_host_core::start_button::{StartAction, StartButton};
+    let status = |state: &str| Status::read(&json!({ "state": state }));
+
+    let stopped = view::start_button(Some(&status("Stopped")), None);
+    assert_eq!(stopped, Some(StartButton::Start));
+    assert_eq!(view::start_button_text(stopped), "Start");
+    assert!(view::controls(Some(&status("Stopped"))).can_start);
+    for state in ["Active", "Dozing", "Frozen", "Stalled"] {
+        let button = view::start_button(Some(&status(state)), None);
+        assert_eq!(button, Some(StartButton::Restart), "{state}");
+        assert_eq!(view::start_button_text(button), "Restart", "{state}");
+        assert!(
+            button.unwrap().enabled() && button.unwrap().confirms(),
+            "{state}"
+        );
+        assert!(!view::controls(Some(&status(state))).can_start, "{state}");
+    }
+    // Under way: locked, with progress, and the label of what is under way.
+    let starting = view::start_button(Some(&status("Starting")), None).unwrap();
+    assert!(!starting.enabled() && starting.in_progress());
+    let restarting = view::start_button(Some(&status("Stopping")), Some(StartAction::Restart));
+    assert_eq!(restarting, Some(StartButton::Restarting));
+    assert_eq!(view::start_button_text(restarting), "Restart");
+    assert_eq!(
+        view::start_button(None, Some(StartAction::Restart)),
+        Some(StartButton::Restarting)
+    );
+    // An unknown state leaves the button locked.
+    assert_eq!(view::start_button(None, None), None);
+
+    // Restart runs `dsa android restart` and waits for Android to run again.
+    let fake = Fake::new(json!({ "state": "Active", "restarting": null }));
+    let elevated = Fake::new(json!({}));
+    let restarted = client(&fake, &elevated).restart().unwrap();
+    assert_eq!(restarted.state, State::Active);
+    assert_eq!(
+        fake.calls(),
+        [line(&[
+            "android",
+            "restart",
+            "--wait",
+            "--timeout",
+            "360",
+            "--json"
+        ])]
+    );
+}
+
+#[test]
 fn fr17_the_general_page_offers_what_the_state_allows() {
     let status = |state: &str| Status::read(&json!({ "state": state }));
     let stopped = view::controls(Some(&status("Stopped")));

@@ -52,6 +52,14 @@
   <data name="StartButton.Content" xml:space="preserve">
     <value>Avvia</value>
   </data>
+  <data name="RestartButton.Content" xml:space="preserve">
+    <value>Riavvia</value>
+  </data>
+  <data name="RestartConfirm.Body" xml:space="preserve">
+    <value>Android si arresta e si avvia di nuovo.
+
+Le finestre delle sue app si chiudono. Riapri le app quando si è avviato.</value>
+  </data>
   <data name="StopButton.Content" xml:space="preserve">
     <value>Arresta</value>
   </data>

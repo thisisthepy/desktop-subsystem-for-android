@@ -1838,3 +1838,6 @@ msgstr "依循預設值（在整個螢幕上）"
 
 msgid "Follow the default (inside the window)"
 msgstr "依循預設值（在視窗內）"
+
+msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
+msgstr "Android 會停止並重新啟動。\n\n它的應用程式視窗會關閉。啟動完成後，請重新開啟應用程式。"

@@ -116,8 +116,8 @@ struct MenuBarContent: View {
     var body: some View {
         Text(Format.fill(T("MenuBar_State"), [general.stateText]))
         Divider()
-        Button(T("StartButton.Content")) { Task { await general.start() } }
-            .disabled(!general.canStart)
+        Button(general.startButtonText) { pressStart(general) }
+            .disabled(!general.canPressStart)
         Button(T("StopButton.Content")) { Task { await general.stop() } }
             .disabled(!general.canStop)
         Divider()
