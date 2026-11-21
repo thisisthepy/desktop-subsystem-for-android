@@ -1129,9 +1129,30 @@ pub struct ClipboardText {
     #[prost(string, tag = "1")]
     pub text: ::prost::alloc::string::String,
 }
+/// An image on a clipboard, in either direction, as PNG, in the same way as ClipboardText: it
+/// becomes the other side's clipboard, and neither side sends back what it was just given. The
+/// image goes in pieces of at most 256 KiB, in order, so other messages pass between them; every
+/// piece names the clip and its whole length. A clip is whole once `offset` plus the length of
+/// `data` reaches `size`. A piece of a new `clip_id` drops a clip that was not whole. A sender
+/// drops an image whose PNG is longer than 12 MiB instead of sending part of it, and a receiver
+/// drops a clip that says it is longer.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClipboardImage {
+    /// Unique among the images one side sends on one connection.
+    #[prost(uint32, tag = "1")]
+    pub clip_id: u32,
+    /// The PNG's whole length in bytes.
+    #[prost(uint64, tag = "2")]
+    pub size: u64,
+    /// Where `data` starts in the PNG.
+    #[prost(uint64, tag = "3")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "4")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
 /// Host to guest: whether the clipboards are shared. The agent takes them to be shared when it
 /// connects; the host says so when they are not, and on every change after that. While they
-/// are not, the agent sends no ClipboardText and ignores the host's.
+/// are not, the agent sends no ClipboardText or ClipboardImage and ignores the host's.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ClipboardSharing {
     #[prost(bool, tag = "1")]
@@ -3671,7 +3692,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3739,6 +3760,8 @@ pub mod envelope {
         ClipboardText(super::ClipboardText),
         #[prost(message, tag = "27")]
         ClipboardSharing(super::ClipboardSharing),
+        #[prost(message, tag = "31")]
+        ClipboardImage(super::ClipboardImage),
         #[prost(message, tag = "28")]
         ClockProbe(super::ClockProbe),
         #[prost(message, tag = "29")]

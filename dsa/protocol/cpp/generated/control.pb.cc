@@ -1019,6 +1019,22 @@ struct ClipboardTextDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClipboardTextDefaultTypeInternal _ClipboardText_default_instance_;
+PROTOBUF_CONSTEXPR ClipboardImage::ClipboardImage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.data_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.size_)*/uint64_t{0u}
+  , /*decltype(_impl_.offset_)*/uint64_t{0u}
+  , /*decltype(_impl_.clip_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ClipboardImageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClipboardImageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ClipboardImageDefaultTypeInternal() {}
+  union {
+    ClipboardImage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClipboardImageDefaultTypeInternal _ClipboardImage_default_instance_;
 PROTOBUF_CONSTEXPR ClipboardSharing::ClipboardSharing(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.on_)*/false
@@ -24408,6 +24424,290 @@ void ClipboardText::InternalSwap(ClipboardText* other) {
 
 std::string ClipboardText::GetTypeName() const {
   return "dsa.control.v1.ClipboardText";
+}
+
+
+// ===================================================================
+
+class ClipboardImage::_Internal {
+ public:
+};
+
+ClipboardImage::ClipboardImage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClipboardImage)
+}
+ClipboardImage::ClipboardImage(const ClipboardImage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ClipboardImage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.data_){}
+    , decltype(_impl_.size_){}
+    , decltype(_impl_.offset_){}
+    , decltype(_impl_.clip_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.data_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.data_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_data().empty()) {
+    _this->_impl_.data_.Set(from._internal_data(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.size_, &from._impl_.size_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.clip_id_) -
+    reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.clip_id_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClipboardImage)
+}
+
+inline void ClipboardImage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.data_){}
+    , decltype(_impl_.size_){uint64_t{0u}}
+    , decltype(_impl_.offset_){uint64_t{0u}}
+    , decltype(_impl_.clip_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.data_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.data_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ClipboardImage::~ClipboardImage() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClipboardImage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ClipboardImage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.data_.Destroy();
+}
+
+void ClipboardImage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ClipboardImage::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClipboardImage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.data_.ClearToEmpty();
+  ::memset(&_impl_.size_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.clip_id_) -
+      reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.clip_id_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ClipboardImage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 clip_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.clip_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 size = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 offset = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.offset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes data = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_data();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ClipboardImage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClipboardImage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 clip_id = 1;
+  if (this->_internal_clip_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_clip_id(), target);
+  }
+
+  // uint64 size = 2;
+  if (this->_internal_size() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_size(), target);
+  }
+
+  // uint64 offset = 3;
+  if (this->_internal_offset() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_offset(), target);
+  }
+
+  // bytes data = 4;
+  if (!this->_internal_data().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        4, this->_internal_data(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClipboardImage)
+  return target;
+}
+
+size_t ClipboardImage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClipboardImage)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes data = 4;
+  if (!this->_internal_data().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_data());
+  }
+
+  // uint64 size = 2;
+  if (this->_internal_size() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_size());
+  }
+
+  // uint64 offset = 3;
+  if (this->_internal_offset() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_offset());
+  }
+
+  // uint32 clip_id = 1;
+  if (this->_internal_clip_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_clip_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ClipboardImage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ClipboardImage*>(
+      &from));
+}
+
+void ClipboardImage::MergeFrom(const ClipboardImage& from) {
+  ClipboardImage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClipboardImage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_data().empty()) {
+    _this->_internal_set_data(from._internal_data());
+  }
+  if (from._internal_size() != 0) {
+    _this->_internal_set_size(from._internal_size());
+  }
+  if (from._internal_offset() != 0) {
+    _this->_internal_set_offset(from._internal_offset());
+  }
+  if (from._internal_clip_id() != 0) {
+    _this->_internal_set_clip_id(from._internal_clip_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ClipboardImage::CopyFrom(const ClipboardImage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClipboardImage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ClipboardImage::IsInitialized() const {
+  return true;
+}
+
+void ClipboardImage::InternalSwap(ClipboardImage* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.data_, lhs_arena,
+      &other->_impl_.data_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ClipboardImage, _impl_.clip_id_)
+      + sizeof(ClipboardImage::_impl_.clip_id_)
+      - PROTOBUF_FIELD_OFFSET(ClipboardImage, _impl_.size_)>(
+          reinterpret_cast<char*>(&_impl_.size_),
+          reinterpret_cast<char*>(&other->_impl_.size_));
+}
+
+std::string ClipboardImage::GetTypeName() const {
+  return "dsa.control.v1.ClipboardImage";
 }
 
 
@@ -71493,6 +71793,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::GuestBoot& guest_boot(const Envelope* msg);
   static const ::dsa::control::v1::ClipboardText& clipboard_text(const Envelope* msg);
   static const ::dsa::control::v1::ClipboardSharing& clipboard_sharing(const Envelope* msg);
+  static const ::dsa::control::v1::ClipboardImage& clipboard_image(const Envelope* msg);
   static const ::dsa::control::v1::ClockProbe& clock_probe(const Envelope* msg);
   static const ::dsa::control::v1::ClockAnswer& clock_answer(const Envelope* msg);
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
@@ -71788,6 +72089,10 @@ Envelope::_Internal::clipboard_text(const Envelope* msg) {
 const ::dsa::control::v1::ClipboardSharing&
 Envelope::_Internal::clipboard_sharing(const Envelope* msg) {
   return *msg->_impl_.body_.clipboard_sharing_;
+}
+const ::dsa::control::v1::ClipboardImage&
+Envelope::_Internal::clipboard_image(const Envelope* msg) {
+  return *msg->_impl_.body_.clipboard_image_;
 }
 const ::dsa::control::v1::ClockProbe&
 Envelope::_Internal::clock_probe(const Envelope* msg) {
@@ -72934,6 +73239,21 @@ void Envelope::set_allocated_clipboard_sharing(::dsa::control::v1::ClipboardShar
     _impl_.body_.clipboard_sharing_ = clipboard_sharing;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clipboard_sharing)
+}
+void Envelope::set_allocated_clipboard_image(::dsa::control::v1::ClipboardImage* clipboard_image) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clipboard_image) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clipboard_image);
+    if (message_arena != submessage_arena) {
+      clipboard_image = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clipboard_image, submessage_arena);
+    }
+    set_has_clipboard_image();
+    _impl_.body_.clipboard_image_ = clipboard_image;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clipboard_image)
 }
 void Envelope::set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -75712,6 +76032,11 @@ Envelope::Envelope(const Envelope& from)
           from._internal_clipboard_sharing());
       break;
     }
+    case kClipboardImage: {
+      _this->_internal_mutable_clipboard_image()->::dsa::control::v1::ClipboardImage::MergeFrom(
+          from._internal_clipboard_image());
+      break;
+    }
     case kClockProbe: {
       _this->_internal_mutable_clock_probe()->::dsa::control::v1::ClockProbe::MergeFrom(
           from._internal_clock_probe());
@@ -76801,6 +77126,12 @@ void Envelope::clear_body() {
     case kClipboardSharing: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.clipboard_sharing_;
+      }
+      break;
+    }
+    case kClipboardImage: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clipboard_image_;
       }
       break;
     }
@@ -78100,6 +78431,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 30:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 242)) {
           ptr = ctx->ParseMessage(_internal_mutable_open_app_settings(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ClipboardImage clipboard_image = 31;
+      case 31:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 250)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clipboard_image(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -79736,6 +80075,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::open_app_settings(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ClipboardImage clipboard_image = 31;
+  if (_internal_has_clipboard_image()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(31, _Internal::clipboard_image(this),
+        _Internal::clipboard_image(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   if (_internal_has_screen_state()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -81188,6 +81534,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.clipboard_sharing_);
       break;
     }
+    // .dsa.control.v1.ClipboardImage clipboard_image = 31;
+    case kClipboardImage: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clipboard_image_);
+      break;
+    }
     // .dsa.control.v1.ClockProbe clock_probe = 28;
     case kClockProbe: {
       total_size += 2 +
@@ -82582,6 +82935,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_clipboard_sharing());
       break;
     }
+    case kClipboardImage: {
+      _this->_internal_mutable_clipboard_image()->::dsa::control::v1::ClipboardImage::MergeFrom(
+          from._internal_clipboard_image());
+      break;
+    }
     case kClockProbe: {
       _this->_internal_mutable_clock_probe()->::dsa::control::v1::ClockProbe::MergeFrom(
           from._internal_clock_probe());
@@ -83738,6 +84096,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::DeviceIdle >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClipboardText*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardText >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::ClipboardText >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClipboardImage*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardImage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClipboardImage >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClipboardSharing*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardSharing >(Arena* arena) {

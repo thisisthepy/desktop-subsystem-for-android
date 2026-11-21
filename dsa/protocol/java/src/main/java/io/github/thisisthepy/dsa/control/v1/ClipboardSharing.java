@@ -7,7 +7,7 @@ package io.github.thisisthepy.dsa.control.v1;
  * <pre>
  * Host to guest: whether the clipboards are shared. The agent takes them to be shared when it
  * connects; the host says so when they are not, and on every change after that. While they
- * are not, the agent sends no ClipboardText and ignores the host's.
+ * are not, the agent sends no ClipboardText or ClipboardImage and ignores the host's.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.ClipboardSharing}
@@ -130,7 +130,7 @@ public  final class ClipboardSharing extends
    * <pre>
    * Host to guest: whether the clipboards are shared. The agent takes them to be shared when it
    * connects; the host says so when they are not, and on every change after that. While they
-   * are not, the agent sends no ClipboardText and ignores the host's.
+   * are not, the agent sends no ClipboardText or ClipboardImage and ignores the host's.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.ClipboardSharing}
