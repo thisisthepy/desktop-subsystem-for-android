@@ -1098,8 +1098,15 @@ unsafe extern "system" fn task_window_proc(
             }
             // A maximized window is kept to its monitor by Windows, and one that fills its
             // monitor covers more than the work area.
+            //
+            // While the user drags the window, it keeps the size the desktop suggests up to the
+            // whole monitor, as a native window does: cut to the work area, it would come out
+            // shorter than the desktop's size to the eye (the taskbar's height), take another
+            // shape under the user's hand, and come back a different size when dragged back.
+            // Only a window larger than the monitor is cut, so it cannot reach the next one.
+            let dragged = data.is_some_and(|data| data.in_move_loop.get());
             if !zoomed && data.is_some_and(titled) {
-                if let Some(work) = work_area(suggested) {
+                if let Some(work) = area_near(suggested, !dragged) {
                     limit = (
                         limit.0.min(work.right - work.left),
                         limit.1.min(work.bottom - work.top),
@@ -1126,7 +1133,8 @@ unsafe extern "system" fn task_window_proc(
                     "win.dpi_changed",
                     window_rect(hwnd),
                     &format!(
-                        "dpi={dpi} suggested={sx},{sy},{sw}x{sh} limit={}x{} held={held}",
+                        "dpi={dpi} suggested={sx},{sy},{sw}x{sh} limit={}x{} held={held} \
+                         dragged={dragged}",
                         limit.0.min(99_999),
                         limit.1.min(99_999)
                     ),
@@ -1958,9 +1966,29 @@ unsafe fn set_pos_traced(
     why: &str,
 ) {
     let traced = data.filter(|_| trace_detailed());
-    let before = traced.map(|_| window_rect(hwnd));
+    let before = window_rect(hwnd);
     SetWindowPos(hwnd, after, rect.0, rect.1, rect.2, rect.3, flags);
-    if let (Some(data), Some(((bx, by), (bw, bh)))) = (traced, before) {
+    // Every size DSA gives a window itself is logged with its reason, trace or no trace: a
+    // window that changes size without the user is the first thing a report asks about.
+    if let Some(data) = data {
+        let after_size = window_rect(hwnd).1;
+        if after_size != before.1 {
+            note(
+                data.logger.as_deref(),
+                &format!(
+                    "task {}: the window was resized from {}x{} to {}x{}: {}",
+                    data.task_id,
+                    before.1 .0,
+                    before.1 .1,
+                    after_size.0,
+                    after_size.1,
+                    size_change_reason(why)
+                ),
+            );
+        }
+    }
+    if let Some(data) = traced {
+        let ((bx, by), (bw, bh)) = before;
         let detail = format!(
             "why={why} asked={},{},{}x{} {} before={bx},{by},{bw}x{bh}",
             rect.0,
@@ -1971,6 +1999,25 @@ unsafe fn set_pos_traced(
         );
         trace_window(data, "wm.set_pos", window_rect(hwnd), &detail);
     }
+}
+
+/// Why DSA gave a window a size itself, in words, for the `why` [`set_pos_traced`] is called
+/// with. The tag itself follows, so the line can be matched with the resize trace.
+fn size_change_reason(why: &str) -> String {
+    let words = match why {
+        "dpi_changed" => {
+            "the window moved onto a monitor of another scale and took the size Windows \
+             suggests there, which keeps it the same size to the eye"
+        }
+        "frame_arrived" => "the app drew a frame of another size, and the window took its size",
+        "guest_size" => "Android gave the task another size",
+        "guest_size_fullscreen" => "Android gave the task another size in full screen",
+        "mode_titled" => "the window got its title bar back",
+        "mode_untopmost" => "the window left picture in picture",
+        "mode_pip" => "the window went to picture in picture",
+        _ => "DSA placed the window",
+    };
+    format!("{words} ({why})")
 }
 
 /// Sizes and places `hwnd` for itself, not as the user: a fixed-size window takes it too.
@@ -2159,6 +2206,18 @@ unsafe fn work_area(rect: &RECT) -> Option<RECT> {
     let mut info: MONITORINFO = std::mem::zeroed();
     info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
     (GetMonitorInfoW(monitor, &mut info) != 0).then_some(info.rcWork)
+}
+
+/// The work area (`work`) or the whole of the monitor nearest `rect`.
+unsafe fn area_near(rect: &RECT, work: bool) -> Option<RECT> {
+    let monitor = MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST);
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    (GetMonitorInfoW(monitor, &mut info) != 0).then_some(if work {
+        info.rcWork
+    } else {
+        info.rcMonitor
+    })
 }
 
 /// The largest client area a window can have on its monitor's work area.

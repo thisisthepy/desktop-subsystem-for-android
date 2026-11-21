@@ -626,6 +626,22 @@ pub struct WindowSizing {
     /// of the guest, until the window manager takes it to log
     /// ([`take_late_echo`](Self::take_late_echo)).
     late_echo: Option<(u32, u32)>,
+    /// Whether the window crossed onto a monitor of another scale during the drag under way:
+    /// the sizes it reports until the drag ends are the desktop's rescaling of it, not sizes
+    /// for the task ([`view_resized`](Self::view_resized)).
+    rescaled_in_drag: bool,
+}
+
+/// The most task pixels, in either direction, by which the size a desktop gives a window for
+/// a monitor of another scale can differ from its task's size at the window's new scale. The
+/// desktop scales the whole window, frame included, by the ratio of the monitors' DPI, while
+/// the task is shown at the ratio of the two densities, each rounded to an even number.
+const RESCALE_ROUNDING: u32 = 4;
+
+/// Whether `size` differs from `current` by more than the desktop's rounding of a rescaled
+/// window ([`RESCALE_ROUNDING`]).
+fn beyond_rescale_rounding(size: (u32, u32), current: (u32, u32)) -> bool {
+    size.0.abs_diff(current.0) > RESCALE_ROUNDING || size.1.abs_diff(current.1) > RESCALE_ROUNDING
 }
 
 /// How many sizes of a drag are remembered to tell a late report from a new one.
@@ -670,6 +686,7 @@ impl WindowSizing {
             stale: None,
             ignored: None,
             late_echo: None,
+            rescaled_in_drag: false,
         }
     }
 
@@ -816,6 +833,9 @@ impl WindowSizing {
     /// its window takes the scale between the monitor's density and the task's.
     pub fn dpi_changed(&mut self, dpi: u32) -> Option<TaskRequest> {
         let wanted = density_for_dpi(dpi);
+        if self.dragging && wanted != self.monitor_density {
+            self.rescaled_in_drag = true;
+        }
         self.monitor_density = wanted;
         if self.mode == ScalingMode::System {
             return None;
@@ -903,6 +923,14 @@ impl WindowSizing {
             return None;
         }
         self.view = view;
+        if self.dragging && self.rescaled_in_drag {
+            // The desktop rescaled the window for the monitor it was dragged onto, rounding its
+            // own way: the task keeps its size until the move ends, and its frames are shown
+            // scaled meanwhile. Asked for the rounded size, the task would be resized under the
+            // user's hand, and a frame of it would resize the window mid-drag. The end of the
+            // move gives the task the window's size ([`settle`](Self::settle)).
+            return None;
+        }
         if self.dragging {
             self.pass(size);
         }
@@ -975,6 +1003,7 @@ impl WindowSizing {
         }
         self.dragging = false;
         self.drag_ended = Some(now);
+        let rescaled = std::mem::take(&mut self.rescaled_in_drag);
         if self.interim != 0
             && self.mode == ScalingMode::App
             && self.asked_density.unwrap_or(self.density) != self.monitor_density
@@ -984,6 +1013,26 @@ impl WindowSizing {
             self.switch_due = true;
             self.resized_live = false;
             return None;
+        }
+        if rescaled {
+            // The window moved across scales (and maybe back): the task keeps the size it has,
+            // and the window the size the desktop gave it for its monitor, which differs from
+            // the task's at the window's scale only by the desktop's rounding. A size beyond
+            // that rounding was the user's (an edge dragged in the same loop), and is asked.
+            self.resized_live = false;
+            let size = clamp_size(to_task_size(self.view, self.asking_scale()), self.max);
+            let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
+            if !beyond_rescale_rounding(size, current) {
+                return None;
+            }
+            self.pass(size);
+            self.asked = Some((size, now));
+            return Some(TaskRequest::Resize {
+                task_id: self.task_id,
+                width: size.0,
+                height: size.1,
+                live: false,
+            });
         }
         if !std::mem::take(&mut self.resized_live) {
             if let Some((size, _)) = self.asked {
@@ -1463,6 +1512,15 @@ mod tests {
             max_width: 1920,
             max_height: 1080,
             ..Task::default()
+        }
+    }
+
+    /// A task on a display large enough for a 200% monitor.
+    fn big(width: i32, height: i32, density_dpi: u32) -> Task {
+        Task {
+            max_width: 3840,
+            max_height: 3840,
+            ..task(width, height, density_dpi)
         }
     }
 
@@ -2312,6 +2370,81 @@ mod tests {
         // Then reconfigured once at the size it has, which the window keeps.
         assert_eq!(sizing.reconfigure(now + SETTLE), resize(526, 949));
         assert_eq!(sizing.dpi_changed(120), None);
+    }
+
+    #[test]
+    fn fr4_a_drag_200_100_200_resizes_nothing_mid_drag_and_ends_at_the_size_it_started() {
+        // One drag from a 200% monitor onto a 100% one and back. Windows suggests each size
+        // by its own rounding (the whole window, frame included, at the ratio of the DPIs),
+        // a few pixels off the task's size at the window's scale.
+        for mode in [ScalingMode::App, ScalingMode::System] {
+            let mut sizing = WindowSizing::with_mode(&big(1186, 1711, 262), mode);
+            let now = Instant::now();
+            sizing.dpi_reported(192);
+            assert_eq!(sizing.dragging(true, now), None);
+            assert_eq!(sizing.dpi_changed(96), None);
+            assert_eq!(sizing.view_resized((595, 857), now), None, "{mode:?}");
+            assert_eq!(sizing.dpi_changed(192), None);
+            assert_eq!(sizing.view_resized((1188, 1712), now), None, "{mode:?}");
+            // Back where it began: the task keeps its size, and nothing is due.
+            assert_eq!(sizing.dragging(false, now), None, "{mode:?}");
+            assert_eq!(sizing.settle(now), vec![], "{mode:?}");
+            assert_eq!(sizing.task_size().0, (1186, 1711));
+            assert_eq!(sizing.scale(), (1, 1));
+        }
+    }
+
+    #[test]
+    fn fr4_moves_200_100_200_take_each_density_once_at_the_windows_size_and_nothing_mid_drag() {
+        // Measured: a 755x1076 window at 125% was dragged onto the 200% monitor and given
+        // 1208x1704 there; the rounded size was asked of the guest mid-drag (740x1058), and the
+        // window shrank to it after the user let go before growing back. Each move now asks
+        // nothing until it ends, and then the density and the window's own size, once.
+        let mut sizing = WindowSizing::new(&big(1186, 1711, 262));
+        let now = Instant::now();
+        sizing.dpi_reported(192);
+        // 200% to 100%.
+        sizing.dragging(true, now);
+        assert_eq!(sizing.dpi_changed(96), None);
+        for view in [(596, 858), (595, 857)] {
+            assert_eq!(sizing.view_resized(view, now), None, "nothing mid-drag");
+        }
+        assert_eq!(sizing.dragging(false, now), None);
+        assert_eq!(
+            sizing.settle(now),
+            vec![density(130).unwrap(), live_resize(595, 857).unwrap()]
+        );
+        assert_eq!(sizing.guest_updated(&big(595, 857, 130)), None);
+        assert_eq!(sizing.scale(), (1, 1));
+        // 100% back to 200%.
+        sizing.dragging(true, now);
+        assert_eq!(sizing.dpi_changed(192), None);
+        assert_eq!(
+            sizing.view_resized((1188, 1712), now),
+            None,
+            "nothing mid-drag"
+        );
+        assert_eq!(sizing.dragging(false, now), None);
+        assert_eq!(
+            sizing.settle(now),
+            vec![density(262).unwrap(), live_resize(1188, 1712).unwrap()]
+        );
+        assert_eq!(sizing.guest_updated(&big(1188, 1712, 262)), None);
+        assert_eq!(sizing.scale(), (1, 1));
+        assert_eq!(sizing.task_size().0, (1188, 1712));
+    }
+
+    #[test]
+    fn fr4_an_edge_dragged_after_a_scale_change_in_the_same_loop_is_still_asked() {
+        let mut sizing = WindowSizing::with_mode(&big(1186, 1711, 262), ScalingMode::System);
+        let now = Instant::now();
+        sizing.dpi_reported(192);
+        sizing.dragging(true, now);
+        sizing.dpi_changed(96);
+        // Far beyond the desktop's rounding: the user's size.
+        assert_eq!(sizing.view_resized((800, 857), now), None);
+        let size = to_task_size((800, 857), sizing.scale());
+        assert_eq!(sizing.dragging(false, now), resize(size.0, size.1));
     }
 
     #[test]

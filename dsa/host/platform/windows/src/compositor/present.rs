@@ -887,25 +887,34 @@ impl WindowPresenter {
         if state.hidden.frame() == HiddenFrame::Hold {
             return;
         }
+        // The same frame measured at the new scale: shown if it fits the window, never a size
+        // for the window to take.
         let shown = frame_in_window(&state, region);
-        let keep = match state.follow.frame_arrived(shown) {
-            Arrival::Show => false,
-            Arrival::Keep => true,
-            Arrival::Wait | Arrival::Stale => {
+        match state.follow.rescaled(shown) {
+            Arrival::Show => {}
+            Arrival::Stale => {
+                let view = state.follow.view();
+                trace_stage(
+                    self.logger.as_deref(),
+                    self.task_id,
+                    "app.frame_stale",
+                    region,
+                    &format!(
+                        "view={}x{} why=the scale changed under a frame drawn before it: not \
+                         followed",
+                        view.0, view.1
+                    ),
+                );
                 self.commit_visual(&mut state);
                 return;
             }
-        };
-        if keep {
-            state.kept_region = Some(region);
+            Arrival::Keep | Arrival::Wait => {
+                self.commit_visual(&mut state);
+                return;
+            }
         }
-        if let Err(why) = self.present_locked(&mut state, texture, region, keep, false) {
+        if let Err(why) = self.present_locked(&mut state, texture, region, false, false) {
             note(self.logger.as_deref(), &why);
-            return;
-        }
-        drop(state);
-        if keep {
-            self.tell_frame_ready();
         }
     }
 
