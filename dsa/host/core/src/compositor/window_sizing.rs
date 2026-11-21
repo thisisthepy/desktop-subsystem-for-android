@@ -1061,29 +1061,27 @@ pub struct FrameRectRequest {
     /// placing the window, and its rectangle is taken as it is. The frame the guest draws for
     /// it is shown stretched until it arrives, and the guest is asked for the window's size.
     pub edge_drag: bool,
-    /// The edges the proposal moves (left, top): an edge drag keeps the opposite edge where
-    /// it is.
+    /// The edges the user drags (left, top), as the desktop reported them when the drag
+    /// started: an edge drag keeps the opposite edge where it is, whether the window grows or
+    /// shrinks.
     pub moves: (bool, bool),
 }
 
-/// The rectangle a window takes for a proposed one ([`FrameRectRequest`]). The window never
-/// leaves the place the desktop proposed: the position is the proposed top left, or, for an
-/// edge drag to a smaller frame, a point inside the proposed rectangle that keeps the edges the
-/// user is not dragging in place. It is never outside the proposed rectangle, so a window the
-/// desktop put on a monitor stays on it.
+/// The rectangle a window takes for a proposed one ([`FrameRectRequest`]). A rectangle the
+/// desktop places (a snap, a maximise, the keyboard, a new monitor scale) is taken as it is, so
+/// a window the desktop put on a monitor stays on it. During the user's drag of an edge the
+/// window takes the frame's size and keeps the edges the user is not dragging where the
+/// proposal has them. Placing the frame at the proposed top left instead would push the right
+/// or bottom edge out while the left or top edge shrinks the window, and the desktop would
+/// compute the next proposal from the pushed rectangle, so the window would slide after the
+/// mouse rather than resize.
 pub fn frame_rect(request: FrameRectRequest) -> (i32, i32, i32, i32) {
     let (x, y, width, height) = request.requested;
     let Some((frame_width, frame_height)) = request.frame_outer.filter(|_| request.edge_drag)
     else {
         return request.requested;
     };
-    let shift = |moved: bool, asked: i32, taken: i32| {
-        if moved && taken < asked {
-            asked - taken
-        } else {
-            0
-        }
-    };
+    let shift = |moved: bool, asked: i32, taken: i32| if moved { asked - taken } else { 0 };
     (
         x + shift(request.moves.0, width, frame_width),
         y + shift(request.moves.1, height, frame_height),
@@ -2027,11 +2025,11 @@ mod tests {
     }
 
     #[test]
-    fn fr4_no_rule_yields_a_position_outside_the_requested_rectangle() {
+    fn fr4_no_desktop_placement_yields_a_position_outside_the_requested_rectangle() {
         let work = (0, 0, 2880, 1704);
         let requested = (1429, 0, 1462, 863);
         for frame in [(854, 1539), (300, 200), (1462, 863), (3000, 2000)] {
-            for edge_drag in [false, true] {
+            for edge_drag in [false] {
                 for moves in [(false, false), (true, false), (false, true), (true, true)] {
                     let (x, y, width, height) = frame_rect(FrameRectRequest {
                         requested,
@@ -2103,6 +2101,94 @@ mod tests {
             moves: (false, false),
         });
         assert_eq!(right, (100, 50, 800, 600));
+    }
+
+    #[test]
+    fn fr4_shrinking_from_the_left_edge_keeps_the_right_edge() {
+        // The frame shown is still the larger one the guest drew before the drag shrank the
+        // window: the window must not slide right after the mouse.
+        let (x, y, width, height) = frame_rect(FrameRectRequest {
+            requested: (300, 50, 700, 700),
+            frame_outer: Some((800, 700)),
+            edge_drag: true,
+            moves: (true, false),
+        });
+        assert_eq!((x, y, width, height), (200, 50, 800, 700));
+        assert_eq!(
+            x + width,
+            1000,
+            "the right edge stays where the proposal has it"
+        );
+    }
+
+    #[test]
+    fn fr4_shrinking_from_the_top_edge_keeps_the_bottom_edge() {
+        let (x, y, width, height) = frame_rect(FrameRectRequest {
+            requested: (100, 250, 800, 500),
+            frame_outer: Some((800, 600)),
+            edge_drag: true,
+            moves: (false, true),
+        });
+        assert_eq!((x, y, width, height), (100, 150, 800, 600));
+        assert_eq!(
+            y + height,
+            750,
+            "the bottom edge stays where the proposal has it"
+        );
+    }
+
+    #[test]
+    fn fr4_growing_from_the_left_or_top_edge_keeps_the_opposite_edge() {
+        let rect = frame_rect(FrameRectRequest {
+            requested: (100, 50, 900, 700),
+            frame_outer: Some((800, 600)),
+            edge_drag: true,
+            moves: (true, true),
+        });
+        assert_eq!(rect, (200, 150, 800, 600));
+    }
+
+    #[test]
+    fn fr4_dragging_the_right_or_bottom_edge_keeps_the_top_left() {
+        for frame in [(800, 600), (1000, 800)] {
+            let (x, y, ..) = frame_rect(FrameRectRequest {
+                requested: (100, 50, 900, 700),
+                frame_outer: Some(frame),
+                edge_drag: true,
+                moves: (false, false),
+            });
+            assert_eq!((x, y), (100, 50), "{frame:?}");
+        }
+    }
+
+    #[test]
+    fn fr4_a_repeated_left_edge_shrink_does_not_walk_the_window() {
+        // Each proposal comes from the rectangle the window took for the last one: with the
+        // right edge kept, the window stays put while the frame lags behind.
+        let mut rect = (200, 50, 800, 700);
+        for _ in 0..10 {
+            let proposed = (rect.0 + 20, rect.1, rect.2 - 20, rect.3);
+            rect = frame_rect(FrameRectRequest {
+                requested: proposed,
+                frame_outer: Some((800, 700)),
+                edge_drag: true,
+                moves: (true, false),
+            });
+        }
+        assert_eq!(rect, (200, 50, 800, 700));
+    }
+
+    #[test]
+    fn fr4_a_snap_proposal_is_taken_as_it_is_whatever_frame_is_shown() {
+        for frame in [(300, 200), (3000, 2000)] {
+            let rect = frame_rect(FrameRectRequest {
+                requested: (1429, 0, 1462, 863),
+                frame_outer: Some(frame),
+                edge_drag: false,
+                moves: (true, true),
+            });
+            assert_eq!(rect, (1429, 0, 1462, 863));
+        }
     }
 
     #[test]

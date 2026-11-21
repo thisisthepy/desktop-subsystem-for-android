@@ -1365,8 +1365,11 @@ unsafe fn keep_to_frame(hwnd: HWND, data: &WindowData, pos: &mut WINDOWPOS) {
         return;
     }
     let (width, height) = window_outer(hwnd, size, dpi);
-    let left_moved = pos.flags & SWP_NOMOVE == 0 && pos.x != current.left;
-    let top_moved = pos.flags & SWP_NOMOVE == 0 && pos.y != current.top;
+    // The edges the user drags, as WM_SIZING reported them. Comparing the proposal with the
+    // current rectangle would miss a left or top edge drag that does not move that edge yet.
+    let movable = pos.flags & SWP_NOMOVE == 0;
+    let (left_edge, top_edge) = data.drag_edges.get();
+    let (left_moved, top_moved) = (movable && left_edge, movable && top_edge);
     let (x, y, width, height) = frame_rect(FrameRectRequest {
         requested: (pos.x, pos.y, pos.cx, pos.cy),
         frame_outer: Some((width, height)),
