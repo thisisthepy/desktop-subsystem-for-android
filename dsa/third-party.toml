@@ -231,6 +231,175 @@ part = "guest"
 distribution = "linked"
 source = "https://github.com/JetBrains/kotlin"
 
+# The guest image's default apps (dsa/apps): each built from its pinned upstream source with
+# DSA's patches (the AOSP package name and DSA's design), with the libraries its own build
+# bundles into the APK. Each app is a program of its own in the guest; DSA's design files are
+# under DSA's licence. Versions are the ones each app's pinned build names.
+
+[[component]]
+name = "Clock (LineageOS DeskClock, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://github.com/LineageOS/android_packages_apps_DeskClock"
+
+[[component]]
+name = "Gallery (LineageOS Glimpse, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://github.com/LineageOS/android_packages_apps_Glimpse"
+
+[[component]]
+name = "Camera (LineageOS Aperture, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://github.com/LineageOS/android_packages_apps_Aperture"
+
+[[component]]
+name = "Music (LineageOS Twelve, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://github.com/LineageOS/android_packages_apps_Twelve"
+
+[[component]]
+name = "Calculator (LineageOS ExactCalculator, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://github.com/LineageOS/android_packages_apps_ExactCalculator"
+
+[[component]]
+name = "Recorder (LineageOS Recorder, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://github.com/LineageOS/android_packages_apps_Recorder"
+
+[[component]]
+name = "Files (AOSP DocumentsUI, modified)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "separate-program"
+modified = true
+source = "https://android.googlesource.com/platform/packages/apps/DocumentsUI"
+
+[[component]]
+name = "AndroidX libraries (in every default app: activity, appcompat, camera, constraintlayout, core, exifinterface, fragment, gridlayout, lifecycle, media3, navigation, preference, recyclerview, room, viewpager2, webkit and their dependencies)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/frameworks/support"
+
+[[component]]
+name = "Material Components for Android (every default app)"
+version = "1.14.0-alpha10"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/material-components/material-components-android"
+
+[[component]]
+name = "Kotlin standard library, kotlinx.coroutines and kotlinx.serialization (Gallery, Camera, Music, Recorder, Calculator)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/JetBrains/kotlin"
+
+[[component]]
+name = "Coil image loader (Camera, Music)"
+version = "3.0.4"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/coil-kt/coil"
+
+[[component]]
+name = "OkHttp and Okio (Gallery, Music)"
+version = "5.3.2"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/square/okhttp"
+
+[[component]]
+name = "Glide image loader (Gallery, Files)"
+version = "5.0.5"
+license = "BSD-2-Clause AND MIT AND Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/bumptech/glide"
+
+[[component]]
+name = "ZoomImage (Gallery)"
+version = "1.4.0"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/panpf/zoomimage"
+
+[[component]]
+name = "Adobe XMP Core (Gallery)"
+version = "6.1.11"
+license = "BSD-3-Clause"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/adobe/XMP-Toolkit-SDK"
+
+[[component]]
+name = "ZXing (Camera)"
+version = "3.5.3"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/zxing/zxing"
+
+[[component]]
+name = "zxing-cpp (Camera)"
+version = "3.1.1"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/zxing-cpp/zxing-cpp"
+
+[[component]]
+name = "Nier Visualizer (Music)"
+version = "0.1.3"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/bogerchan/Nier-Visualizer"
+
+[[component]]
+name = "CR exact real arithmetic library (Calculator)"
+version = "1.0"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/external/crcalc"
+
+[[component]]
+name = "Guava (Files)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/google/guava"
+
+[[component]]
+name = "Apache Commons Compress (Files)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://commons.apache.org/proper/commons-compress/"
+
 # The address data (geodata/address-boundaries.bin), which the host turns positions into
 # addresses with. dsa/host/core/geodata/build-geodata.py makes it from these, simplified.
 

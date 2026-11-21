@@ -1,0 +1,100 @@
+Follow DSA's design: Material 3 Expressive with dynamic colour, rounded shapes,
+settings grouped into cards and a large title that starts folded in a low window.
+
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index e781420..c15f861 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -63,7 +63,7 @@ dependencies {
+     implementation("androidx.activity:activity-ktx:1.7.2")
+     implementation("androidx.appcompat:appcompat:1.6.1")
+     implementation("androidx.core:core-ktx:1.12.0")
+-    implementation("com.google.android.material:material:1.9.0")
++    implementation("com.google.android.material:material:1.14.0-alpha09")
+     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+ 
+     // Lifecycle
+diff --git a/app/src/main/java/org/lineageos/recorder/ListActivity.kt b/app/src/main/java/org/lineageos/recorder/ListActivity.kt
+index a1559cb..062cb98 100644
+--- a/app/src/main/java/org/lineageos/recorder/ListActivity.kt
++++ b/app/src/main/java/org/lineageos/recorder/ListActivity.kt
+@@ -174,9 +174,15 @@ class ListActivity : AppCompatActivity() {
+             it.setDisplayShowHomeEnabled(true)
+             it.setDisplayHomeAsUpEnabled(true)
+         }
++        // The large title starts folded in a low window.
++        io.github.thisisthepy.dsa.design.DsaDesign.showLargeTitle(findViewById(R.id.appBarLayout))
+ 
+         listRecyclerView.layoutManager = LinearLayoutManager(this)
+         listRecyclerView.adapter = recordingsAdapter
++        // The recordings are the rows of one card.
++        io.github.thisisthepy.dsa.design.CardGroups.attach(
++            listRecyclerView, io.github.thisisthepy.dsa.design.CardGroups.NONE
++        )
+ 
+         ViewCompat.setOnApplyWindowInsetsListener(contentView) { _, windowInsets ->
+             val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+diff --git a/app/src/main/res/layout/activity_list.xml b/app/src/main/res/layout/activity_list.xml
+index d04cc23..a43ae0c 100644
+--- a/app/src/main/res/layout/activity_list.xml
++++ b/app/src/main/res/layout/activity_list.xml
+@@ -10,15 +10,27 @@
+     android:layout_height="match_parent">
+ 
+     <com.google.android.material.appbar.AppBarLayout
++        android:id="@+id/appBarLayout"
+         android:layout_width="match_parent"
+         android:layout_height="wrap_content"
+         android:fitsSystemWindows="true"
+-        app:liftOnScroll="true">
++        app:liftOnScroll="true"
++        app:liftOnScrollTargetViewId="@+id/listRecyclerView">
+ 
+-        <androidx.appcompat.widget.Toolbar
+-            android:id="@+id/toolbar"
++        <com.google.android.material.appbar.CollapsingToolbarLayout
++            style="?attr/collapsingToolbarLayoutLargeStyle"
+             android:layout_width="match_parent"
+-            android:layout_height="?attr/actionBarSize" />
++            android:layout_height="?attr/collapsingToolbarLayoutLargeSize"
++            app:layout_scrollFlags="scroll|exitUntilCollapsed|snap"
++            app:toolbarId="@id/toolbar">
++
++            <androidx.appcompat.widget.Toolbar
++                android:id="@+id/toolbar"
++                android:layout_width="match_parent"
++                android:layout_height="?attr/actionBarSize"
++                app:layout_collapseMode="pin" />
++
++        </com.google.android.material.appbar.CollapsingToolbarLayout>
+     </com.google.android.material.appbar.AppBarLayout>
+ 
+     <ProgressBar
+diff --git a/app/src/main/res/values/styles.xml b/app/src/main/res/values/styles.xml
+index 546ab97..2421022 100644
+--- a/app/src/main/res/values/styles.xml
++++ b/app/src/main/res/values/styles.xml
+@@ -4,7 +4,7 @@
+      SPDX-License-Identifier: Apache-2.0
+ -->
+ <resources>
+-    <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
++    <style name="AppTheme" parent="Theme.Material3Expressive.DayNight.NoActionBar">
+         <item name="android:navigationBarColor">@android:color/transparent</item>
+         <item name="android:statusBarColor">@android:color/transparent</item>
+         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+@@ -13,6 +13,14 @@
+         <item name="alertDialogTheme">@style/Theme.Recorder.AlertDialog</item>
+         <item name="materialAlertDialogTheme">@style/Theme.Recorder.AlertDialog</item>
+         <item name="windowActionModeOverlay">true</item>
++
++        <!-- DSA design: rounded shapes, cards and a bold large title. -->
++        <item name="shapeAppearanceCornerSmall">@style/DsaShape.Small</item>
++        <item name="shapeAppearanceCornerMedium">@style/DsaShape.Medium</item>
++        <item name="shapeAppearanceCornerLarge">@style/DsaShape.Large</item>
++        <item name="shapeAppearanceCornerExtraLarge">@style/DsaShape.ExtraLarge</item>
++        <item name="materialCardViewStyle">@style/DsaCard</item>
++        <item name="collapsingToolbarLayoutLargeStyle">@style/DsaCollapsingToolbar</item>
+     </style>
+ 
+     <style name="AppTheme.DialogActivity">

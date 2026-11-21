@@ -4,7 +4,10 @@
 # from the services lock (framework_lock.py services-lock): every project the published build's
 # manifest syncs by default, each at the manifest's commit.
 #
-#   build-services.sh <tree> <android16|android17> <out folder>
+#   build-services.sh <tree> <android16|android17> <out folder> [<apps folder>]
+#
+# With <apps folder>, the same tree also builds the image's patched DocumentsUI
+# (dsa/apps/documentsui) and leaves it there as dsa/apps/apps.py records an app.
 #
 # The Java framework reaches across most of the platform, so unlike build.sh this builds in the
 # whole tree, with the published build's own product (the lock's target) and release
@@ -232,6 +235,19 @@ build() {
 uv run "$repo/dsa/guest/framework/apply-patches.py" --android "$android" --top "$top"
 # soong_ui is built from this source when the build starts, so the change is in the first run.
 uv run "$repo/dsa/guest/framework/framework_lock.py" soong-memory-limit "$top/build/soong/ui/build/soong.go"
+# DocumentsUI, the image's file manager (dsa/apps/documentsui), builds only in an Android tree,
+# and this one is the published build's own. Its design files, its patches and the flag value
+# that turns its Material 3 look on go in before the analysis: they add files that the
+# analysis globs, and changing them afterwards would make the next build analyse the whole
+# tree again. DSA_SERVICES_LOCK, when set, is the lock the tree was fetched from, which says
+# the tree has DocumentsUI at the commit dsa/apps/apps.json pins.
+apps_out="${4:-}"
+if [[ -n "$apps_out" ]]; then
+  lock_args=()
+  [[ -z "${DSA_SERVICES_LOCK:-}" ]] || lock_args=(--lock "$DSA_SERVICES_LOCK")
+  uv run "$repo/dsa/apps/apps.py" patch-tree documentsui --top "$top" --android "$android" \
+    --release "$release" "${lock_args[@]}"
+fi
 
 cd "$top"
 export ALLOW_MISSING_DEPENDENCIES=true
@@ -301,6 +317,21 @@ while read -r name installed; do
   jars+=("$jar")
 done <<< "$outputs"
 
+# DocumentsUI's APK, which its install path is a copy of, the same way: the module's own APK,
+# signed with the tree's platform test key (make-image.py signs it again with the image's).
+documentsui_apk=""
+if [[ -n "$apps_out" ]]; then
+  installed="$(jq -r '.apps[] | select(.name == "documentsui") | .build.installed' "$repo/dsa/apps/apps.json")"
+  query="$("$ninja" -f "$ninja_file" -t query "$product_out/$installed")" \
+    || { echo "::error::ninja knows no rule for $product_out/$installed"; exit 1; }
+  if ! documentsui_apk="$(uv run "$repo/dsa/guest/framework/framework_lock.py" install-source --apk <<< "$query")"; then
+    head -40 <<< "$query"
+    echo "::error::$installed: the build cannot make DocumentsUI's own APK in place of the install path"
+    exit 1
+  fi
+  echo "$installed is a copy of $documentsui_apk"
+fi
+
 # The Java build needs no more than the runner's own memory and the first swap file.
 if [[ -n "${DSA_ANALYSIS_SWAP:-}" && -f "$DSA_ANALYSIS_SWAP" ]]; then
   sudo swapoff "$DSA_ANALYSIS_SWAP"
@@ -320,3 +351,12 @@ for i in "${!names[@]}"; do
   ls -l "$out/${names[$i]}"
 done
 cp "$top/.dsa-patches.json" "$out/services-patches.json"
+
+# After services.jar is in its folder, so that a DocumentsUI failure still leaves the jar for
+# the workflow to keep.
+if [[ -n "$documentsui_apk" ]]; then
+  build "the DocumentsUI build" "$documentsui_apk"
+  room "after the DocumentsUI build"
+  uv run "$repo/dsa/apps/apps.py" record documentsui --apk "$documentsui_apk" --android "$android" --out "$apps_out"
+  ls -l "$apps_out"
+fi

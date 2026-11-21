@@ -1,0 +1,22 @@
+Follow DSA's design: Material 3 Expressive with dynamic colour, rounded shapes,
+settings grouped into cards and a large title that starts folded in a low window.
+
+diff --git a/res/values/themes.xml b/res/values/themes.xml
+index 6fbc2af..2914321 100644
+--- a/res/values/themes.xml
++++ b/res/values/themes.xml
+@@ -10,6 +10,14 @@
+         <item name="android:windowLightStatusBar">?isLightTheme</item>
+         <item name="android:navigationBarColor">?colorSurface</item>
+         <item name="android:windowLightNavigationBar">?isLightTheme</item>
++
++        <!-- DSA design: rounded shapes, cards and a bold large title. -->
++        <item name="shapeAppearanceCornerSmall">@style/DsaShape.Small</item>
++        <item name="shapeAppearanceCornerMedium">@style/DsaShape.Medium</item>
++        <item name="shapeAppearanceCornerLarge">@style/DsaShape.Large</item>
++        <item name="shapeAppearanceCornerExtraLarge">@style/DsaShape.ExtraLarge</item>
++        <item name="materialCardViewStyle">@style/DsaCard</item>
++        <item name="collapsingToolbarLayoutLargeStyle">@style/DsaCollapsingToolbar</item>
+     </style>
+ 
+     <style name="Theme.Calculator">

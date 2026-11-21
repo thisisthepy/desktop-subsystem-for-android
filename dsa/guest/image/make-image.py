@@ -11,7 +11,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
 3. drops the published kernel modules (they belong to Google's kernel, and DSA ships its
    own kernel with the drivers built in) and installs the Hyper-V mount table;
    with --channeld and --agent, it adds the control channel daemon and the agent, the
-   platform app that reports each app task to the host;
+   platform app that reports each app task to the host; with --default-apps, it adds the
+   default apps dsa/apps builds (a clock, a gallery, a camera, a music player, a calculator, a
+   recorder and the file manager) in place of the AOSP apps they replace;
 4. re-signs every APK, APEX and verified boot image with the keys in --keys, because the
    published build is signed with AOSP's test keys, whose private halves are public;
 5. compiles the system apps users open (COMPILED_APPS) with the build's own dex2oat
@@ -54,6 +56,7 @@ import argparse
 import base64
 import gzip
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -84,7 +87,9 @@ SHELL_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # calendar, media, downloads, settings, telephony's database), PackageInstaller,
 # PermissionController, DocumentsUI, the print spooler, the sound picker, Settings, Provision
 # (it marks the device set up), Telecom (system_server binds it at boot, and calling apps place
-# their own calls through it), CarrierConfig, the browser, the camera and the clock. The browser
+# their own calls through it), CarrierConfig and the browser. The clock, the camera, the
+# calculator and DocumentsUI give way to the default apps (DEFAULT_APPS_SOURCE), which take
+# their package names. The browser
 # stays although web links go to the host's browser by default (the agent holds the browser
 # role then): an app may start it by name, the user can choose to keep links in Android, which
 # gives the role back to it, and a link that cannot reach the host opens in it.
@@ -129,8 +134,9 @@ UNNEEDED_APPS = [
     # Cuttlefish's monitoring service (com.android.google.gce.gceservice) reports boot and
     # network state to the Cuttlefish launcher on its host, which DSA does not have.
     "CuttlefishService",
-    # Old AOSP user apps whose upstream maintenance has effectively stopped. The user installs
-    # the calendar, gallery and music player they want. The providers and services beside
+    # Old AOSP user apps whose upstream maintenance has effectively stopped. The image's
+    # default apps (DEFAULT_APPS_SOURCE) bring a gallery and a music player under these apps'
+    # package names; no calendar is shipped, so the user installs the one they want. The providers and services beside
     # them (CalendarProvider, MediaProvider, DownloadProvider, MusicFX) stay, so other apps
     # that read calendars, media or downloads keep working.
     "Calendar",
@@ -2157,11 +2163,14 @@ def apk_named(names, suffix):
     return next((name for name in names if name == suffix or name.endswith(suffix)), None)
 
 
-def system_overlay_targets(z, otatools, work, env):
+def system_overlay_targets(z, otatools, work, env, replaced=None):
     """The resource table of each package a system screen overlay overlays, by overlay file,
     read from the target_files `z`: from the APK, or for PermissionController from inside the
-    permission APEX, which otatools unpacks."""
-    names = z.namelist()
+    permission APEX, which otatools unpacks. An APK `replaced` maps from its target_files name to
+    the bytes the image carries instead (a default app in the published app's place, DocumentsUI)
+    is read from there, so the overlay is built against the app the image has."""
+    replaced = replaced or {}
+    names = sorted(set(z.namelist()) | set(replaced))
     tables = {}
     for overlay in SYSTEM_OVERLAYS:
         if overlay["target_apk"] is not None:
@@ -2169,7 +2178,7 @@ def system_overlay_targets(z, otatools, work, env):
             if name is None:
                 raise ValueError(f"the image has no {overlay['target_apk'].lstrip('/')}, which "
                                  f"{overlay['apk']} overlays")
-            tables[overlay["apk"]] = apk_resource_table(z.read(name))
+            tables[overlay["apk"]] = apk_resource_table(replaced[name] if name in replaced else z.read(name))
             continue
         apex = next((n for n in PERMISSION_APEXES if n in names), None)
         if apex is None:
@@ -5300,6 +5309,191 @@ AGENT_APKCERTS = (
     'name="DsaAgent.apk" certificate="build/make/target/product/security/platform.x509.pem" '
     'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"'
 )
+# The default apps (dsa/apps/apps.json): a clock, a gallery, a camera, a music player, a
+# calculator and a recorder from LineageOS, and AOSP's file manager (DocumentsUI), each built
+# from its pinned source with DSA's design and patched to the AOSP app's package name, so it
+# stands where the AOSP app stood and apps that ask for that app by name find it. Each one the
+# build already has (the AOSP clock, camera and calculator, and the published DocumentsUI) is
+# taken out, or for DocumentsUI replaced in place. Calendar stays out (UNNEEDED_APPS).
+DEFAULT_APPS_SOURCE = REPO / "dsa/apps/apps.json"
+DEFAULT_APPS_SCRIPT = REPO / "dsa/apps/apps.py"
+# Every default app starts not stopped (Android otherwise keeps a preinstalled app from
+# receiving broadcasts, its clock alarms among them, until it is first opened) and is installed
+# for every full user and profile but a clone profile, as LineageOS installs them; the clock
+# may also run its alarms while the guest saves power.
+DEFAULT_APPS_SYSCONFIG = "SYSTEM/etc/sysconfig/dsa-default-apps.xml"
+# The runtime permissions the framework grants a default app from the first boot (the clock's
+# notifications, which its alarms and timers show).
+DEFAULT_APPS_PERMISSIONS = "SYSTEM/etc/default-permissions/dsa-default-apps.xml"
+# The certificates apkcerts.txt names a default app's signing by: testkey, which the image's
+# key folder replaces with its release key, unless apps.json names another (DocumentsUI needs
+# the platform key for the system interfaces it uses).
+DEFAULT_APP_CERTIFICATE = "build/make/target/product/security/{}.x509.pem"
+DEFAULT_APP_PRIVATE_KEY = "build/make/target/product/security/{}.pk8"
+
+
+def default_apps():
+    """The default apps apps.json lists."""
+    return json.loads(DEFAULT_APPS_SOURCE.read_text(encoding="utf-8"))["apps"]
+
+
+def _apps_script():
+    spec = importlib.util.spec_from_file_location("dsa_apps", DEFAULT_APPS_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def default_app_provenance(app, android):
+    """What `app` must be built from: its pin and the SHA-256 of each patch and design file
+    dsa/apps has now (apps.py's record of a build, without the APK's names)."""
+    return _apps_script().provenance(app, android)
+
+
+def replaced_by_default_apps(name, apps=None):
+    """Whether a target_files member belongs to an AOSP app a default app takes the place of:
+    one of the apps it replaces, or the build's own compiled code of a default app that is
+    replaced in place (DocumentsUI), which was made for the build's dex and not for ours."""
+    for app in apps if apps is not None else default_apps():
+        if any(f"/{replaced}/" in name for replaced in app["replaces"]):
+            return True
+        if name.startswith(f"{Path(app['image']).parent.as_posix()}/oat/"):
+            return True
+    return False
+
+
+def load_default_apps(folder, android):
+    """The APKs of the default apps in `folder` (apps.py build and record leave each as
+    <image file name> with <app>.json beside it), by their target_files names, and their
+    records. Refuses a folder that lacks an app or has one built from another pin or other
+    patches than dsa/apps has now: the image would carry an app whose design or package name
+    is not the one this repository makes."""
+    folder = Path(folder)
+    payloads, records, problems = {}, [], []
+    for app in default_apps():
+        record_path = folder / f"{app['name']}.json"
+        if not record_path.is_file():
+            problems.append(f"{folder} has no {record_path.name}, so the image would have no {app['label']} app")
+            continue
+        record = json.loads(record_path.read_text())
+        wanted = default_app_provenance(app, android)
+        built = {key: record.get(key) for key in wanted}
+        if built != wanted:
+            changed = sorted(key for key in wanted if built[key] != wanted[key])
+            problems.append(f"{app['name']} was built from another {', '.join(changed)} than dsa/apps has now")
+            continue
+        apk = folder / record["apk"]
+        if not apk.is_file():
+            problems.append(f"{folder} has no {record['apk']}, the {app['label']} app its record names")
+            continue
+        payloads[app["image"]] = apk.read_bytes()
+        records.append({**wanted, "image": app["image"]})
+    if problems:
+        raise ValueError("; ".join(problems))
+    return payloads, records
+
+
+def default_apps_sysconfig(apps):
+    """The system configuration of the default apps (DEFAULT_APPS_SYSCONFIG)."""
+    lines = ['<?xml version="1.0" encoding="utf-8"?>', "<config>"]
+    for app in apps:
+        lines.append(f'    <initial-package-state package="{app["package"]}" stopped="false" />')
+        lines.append(f'    <install-in-user-type package="{app["package"]}">')
+        lines.append('        <install-in user-type="FULL" />')
+        lines.append('        <install-in user-type="PROFILE" />')
+        lines.append('        <do-not-install-in user-type="android.os.usertype.profile.CLONE" />')
+        lines.append("    </install-in-user-type>")
+        lines += [f"    {line}" for line in app.get("sysconfig", [])]
+    lines.append("</config>")
+    return "\n".join(lines) + "\n"
+
+
+def default_apps_permissions(apps):
+    """The runtime permissions granted to the default apps (DEFAULT_APPS_PERMISSIONS)."""
+    lines = ['<?xml version="1.0" encoding="utf-8"?>', "<exceptions>"]
+    for app in apps:
+        if not app.get("default_permissions"):
+            continue
+        lines.append(f'    <exception package="{app["package"]}">')
+        lines += [f'        <permission name="{p}" fixed="false" />' for p in app["default_permissions"]]
+        lines.append("    </exception>")
+    lines.append("</exceptions>")
+    return "\n".join(lines) + "\n"
+
+
+def default_app_apkcerts(app):
+    """The apkcerts.txt line that has signing give a default app its certificate."""
+    key = app.get("certificate", "testkey")
+    return (f'name="{Path(app["image"]).name}" certificate="{DEFAULT_APP_CERTIFICATE.format(key)}" '
+            f'private_key="{DEFAULT_APP_PRIVATE_KEY.format(key)}" partition="system"')
+
+
+def default_apps_fs_config(apps):
+    """The filesystem_config.txt lines of the default apps' folders, APKs and configuration."""
+    lines = []
+    for app in apps:
+        folder = Path(app["image"]).parent.as_posix().lower()
+        lines.append(f"{folder} 0 0 755 capabilities=0x0")
+        lines.append(f"{app['image'].lower()} 0 0 644 capabilities=0x0")
+    lines.append(f"{DEFAULT_APPS_SYSCONFIG.lower()} 0 0 644 capabilities=0x0")
+    lines.append(f"{DEFAULT_APPS_PERMISSIONS.lower()} 0 0 644 capabilities=0x0")
+    return lines
+
+
+def apk_manifest_package(apk):
+    """The package name in an APK's compiled AndroidManifest.xml."""
+    with zipfile.ZipFile(io.BytesIO(apk)) as z:
+        axml = z.read("AndroidManifest.xml")
+    file_type, file_header, _ = struct.unpack_from("<HHI", axml, 0)
+    if file_type != XML_FILE:
+        raise ValueError("not a compiled Android XML file")
+    strings = []
+    offset = file_header
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if chunk_type == XML_STRING_POOL:
+            strings = xml_strings(axml, offset)
+        elif chunk_type == XML_START_ELEMENT:
+            tag, attributes = _xml_element(axml, offset, header_size, strings)
+            return attributes.get("package") if tag == "manifest" else None
+        offset += size
+    return None
+
+
+def default_apps_problems(names, read, records, android):
+    """What is wrong with the default apps of a signed target_files whose members are `names`
+    and read with `read`: an app missing or under another package name than the AOSP one it
+    takes, an app built from another pin or other patches than dsa/apps has now (`records`,
+    image.json's "default_apps"), or an AOSP app it replaces, or Calendar, still there."""
+    problems = []
+    names = set(names)
+    recorded = {r.get("name"): r for r in records or []}
+    apps = default_apps()
+    for app in apps:
+        label, path = app["label"], app["image"]
+        if path not in names:
+            problems.append(f"{path} is missing, so the image has no {label} app")
+            continue
+        try:
+            package = apk_manifest_package(read(path))
+        except (ValueError, KeyError, zipfile.BadZipFile) as e:
+            problems.append(f"{path} has no readable manifest ({e})")
+            continue
+        if package != app["package"]:
+            problems.append(f"{path} is {package}, not {app['package']}, so apps that ask for the "
+                            f"{label} app by its AOSP name do not find it")
+        wanted = default_app_provenance(app, android)
+        record = recorded.get(app["name"])
+        if record is None:
+            problems.append(f"image.json does not say what the {label} app was built from")
+        elif {key: record.get(key) for key in wanted} != wanted:
+            problems.append(f"the {label} app was built from another source or other patches than dsa/apps has now")
+    for name in sorted(names):
+        if name.endswith(".apk") and (replaced_by_default_apps(name, apps) or "/Calendar/" in name):
+            problems.append(f"{name} is still in the image, beside the default app that replaces it")
+    return problems
+
+
 # A static overlay of framework settings, built with aapt2 against the image's own
 # framework-res. The tap timeout is how long a view inside anything that scrolls waits before
 # it shows that it is pressed, in case the touch turns into a scroll: 100 ms by default, and
@@ -6590,7 +6784,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
            agent=None, hwcomposer=None, framework_overlay=None, settings_overlay=None, power_hal=None,
            codec2=None, audio=None, gnss_hal=None,
            sensors=None, camera=None, arm_translation=None, framework=None, overlays=None, su_client=None,
-           arch=None, uncompressed_erofs=False, dxg_drivers=None):
+           arch=None, uncompressed_erofs=False, dxg_drivers=None, default_apps_payloads=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
     daemon when `channeld` names one, the agent when `agent` names its APK, DSA's
@@ -6612,7 +6806,16 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     of the host's direct-mapped mode beside fstab.dsa (DIRECT_MAPPED_FSTAB); with
     `uncompressed_erofs` the read-only partitions are built uncompressed, so that mode maps
     every file (UNCOMPRESSED_EROFS_PROPS). With `dxg_drivers`, the folder of the dxg graphics
-    drivers (DXG_DRIVER_FILES), the image carries them for a boot that asks for them."""
+    drivers (DXG_DRIVER_FILES), the image carries them for a boot that asks for them. With
+    `default_apps_payloads`, the default apps' APKs by their target_files names
+    (load_default_apps), the image carries them with their configuration, in place of the AOSP
+    apps they replace."""
+    apps_in_image = [app for app in default_apps() if app["image"] in (default_apps_payloads or {})]
+    if default_apps_payloads is not None:
+        default_apps_payloads = dict(default_apps_payloads)
+        unknown = sorted(set(default_apps_payloads) - {app["image"] for app in default_apps()})
+        if unknown:
+            raise ValueError(f"{', '.join(unknown)} is not where apps.json puts a default app")
     fstab = (HERE / "fstab.dsa").read_bytes()
     mapped_fstab = direct_mapped_fstab(fstab.decode()).encode()
     dxg_payloads = checked_dxg_drivers(dxg_drivers, arch or DEFAULT_ARCH) if dxg_drivers else None
@@ -6679,7 +6882,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         *(power_payloads or {}).values(), *(codec2_payloads or {}).values(),
         audio_payload, *(gnss_payloads or {}).values(), *(sensors_payloads or {}).values(),
         *(camera_payloads or {}).values(), *(framework or {}).values(),
-        *(dxg_payloads or {}).values(),
+        *(dxg_payloads or {}).values(), *(default_apps_payloads or {}).values(),
     ])
     replaced_framework = set()
     replaced_graphics_payload = False
@@ -6730,6 +6933,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         for folder in added_gapps_folders:
             config = GAPPS_PARTITION_FS_CONFIG[folder.split("/", 1)[0]]
             added_fs_config.setdefault(config, []).append(f"{folder.lower()} 0 0 755 capabilities=0x0")
+        if default_apps_payloads is not None:
+            # A default app replaced in place (DocumentsUI) keeps the build's own lines.
+            added_fs_config.setdefault(SYSTEM_FS_CONFIG, []).extend(
+                default_apps_fs_config([app for app in apps_in_image if app["image"] not in names]))
         for name in names:
             if name.endswith(".cil"):
                 cil_map[name] = zin.read(name)
@@ -6863,7 +7070,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             if name == AOSP_XBIN_SU_BINARY and channeld_payload is not None:
                 continue
             if (removed(name, has_hwcomposer, has_power, has_gnss, has_sensors, has_camera)
-                    or name in removed_variants):
+                    or name in removed_variants
+                    or (default_apps_payloads is not None and replaced_by_default_apps(name))):
                 if name.endswith((".apk", ".apex", ".capex")):
                     print(f"removing {name}", flush=True)
                 continue
@@ -6900,6 +7108,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             elif framework is not None and name in framework:
                 data = framework[name]
                 replaced_framework.add(name)
+            elif default_apps_payloads is not None and name in default_apps_payloads:
+                # A default app in the published app's place (DocumentsUI).
+                print(f"replacing {name} with the default app built from dsa/apps", flush=True)
+                data = default_apps_payloads.pop(name)
             else:
                 data = zin.read(name)
                 if name in PROP_FILES:
@@ -6948,8 +7160,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         line + b"\n" for line in data.splitlines()
                         if not any(f'name="{a}.apk"' in line.decode()
                                    for a in REMOVED_APPS + ["DsaAgent"]
-                                   + [Path(overlay).stem for overlay in SYSTEM_OVERLAY_FILES])
+                                   + [Path(overlay).stem for overlay in SYSTEM_OVERLAY_FILES]
+                                   + ([Path(app["image"]).stem for app in apps_in_image]
+                                      + [r for app in default_apps() for r in app["replaces"]]
+                                      if default_apps_payloads is not None else []))
                     )
+                    for app in apps_in_image:
+                        data += default_app_apkcerts(app).encode() + b"\n"
                     if agent_payload is not None:
                         data += AGENT_APKCERTS.encode() + b"\n"
                     if overlay_payload is not None:
@@ -7135,6 +7352,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(SETTINGS_OVERLAY_APK, settings_overlay_payload)
         for overlay_name, payload in design_payloads.items():
             zout.writestr(f"VENDOR/overlay/{overlay_name}", payload)
+        if default_apps_payloads is not None:
+            # What is left was not in the build (DocumentsUI was written in its place above).
+            for path, payload in default_apps_payloads.items():
+                print(f"adding the default app {path}", flush=True)
+                zout.writestr(path, payload)
+            zout.writestr(DEFAULT_APPS_SYSCONFIG, default_apps_sysconfig(apps_in_image))
+            zout.writestr(DEFAULT_APPS_PERMISSIONS, default_apps_permissions(apps_in_image))
         if agent_payload is not None:
             zout.writestr(AGENT_APK, agent_payload)
             zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
@@ -7241,6 +7465,8 @@ COMPILED_APPS = [
     "PRODUCT/app/webview/webview.apk",
     AGENT_APK,
 ]
+# The default apps are apps users open too (DocumentsUI is above already).
+COMPILED_APPS += [app["image"] for app in default_apps() if app["image"] not in COMPILED_APPS]
 # The apps whose dex make-image.py edits (edit_settings_apk), compiled after the edits with
 # the rest. dex2oat verifies every method as it compiles, and refuses an edited app with a
 # method the verifier rejects outright: ART would throw a VerifyError instead of running it,
@@ -8318,6 +8544,10 @@ def main():
     parser.add_argument("--agent", type=Path,
                         help="the guest agent's APK (DsaAgent), unsigned or signed with any key; "
                         "the image signs it with the platform key")
+    parser.add_argument("--default-apps", type=Path,
+                        help="the folder of the default apps dsa/apps/apps.py built (each APK with its "
+                             "<app>.json record), which the image carries in place of the AOSP apps "
+                             "they replace, signed with the image's keys")
     parser.add_argument("--aapt2", type=Path,
                         help="aapt2 from the Android SDK's build-tools, which builds the system screen "
                              "overlays; found under ANDROID_HOME when not given, and without it the image has "
@@ -8392,6 +8622,11 @@ def main():
         if sibling.exists():
             vulkan_driver = sibling
 
+    default_apps_payloads = default_apps_records = None
+    if args.default_apps:
+        default_apps_payloads, default_apps_records = load_default_apps(
+            args.default_apps, f"android{spec['android_major']}")
+
     framework_overlay = None
     settings_overlay = None
     design_overlays = None
@@ -8400,7 +8635,7 @@ def main():
         framework_res = work / "framework-res.apk"
         with zipfile.ZipFile(target_files) as z:
             framework_res.write_bytes(z.read(FRAMEWORK_RES))
-            tables = system_overlay_targets(z, otatools, work, env)
+            tables = system_overlay_targets(z, otatools, work, env, replaced=default_apps_payloads)
         framework_overlay, settings_overlay, design_overlays = build_system_overlays(
             aapt2, framework_res, work, tables)
     else:
@@ -8414,7 +8649,7 @@ def main():
            sensors=args.sensors, camera=args.camera, arm_translation=args.arm_translation,
            framework=framework_payloads, overlays=design_overlays, su_client=args.su_client,
            arch=args.arch, uncompressed_erofs=args.uncompressed_erofs,
-           dxg_drivers=args.dxg_drivers)
+           dxg_drivers=args.dxg_drivers, default_apps_payloads=default_apps_payloads)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
@@ -8499,6 +8734,9 @@ def main():
     if args.dxg_drivers:
         # The boot arguments the image answers, for a host deciding whether to ask.
         manifest["dxg"] = DXG_MANIFEST
+    if default_apps_records is not None:
+        # What each default app was built from, which check-image.py compares with dsa/apps.
+        manifest["default_apps"] = default_apps_records
     (out / "image.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copy(signed, out / "signed-target_files.zip")
     shutil.rmtree(work)

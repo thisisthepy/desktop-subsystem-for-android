@@ -649,6 +649,44 @@ jobs:
           path: .scratch/agent/DsaAgent.apk
           if-no-files-found: error
 
+  # The default apps (dsa/apps), as the agent is built above: each LineageOS app fetched at its
+  # pinned commit, patched with DSA's design and package name, and built with its own Gradle
+  # build into an unsigned release APK that make-image.py signs. DocumentsUI builds only in an
+  # Android tree, so the image job takes it from the Framework build instead.
+  default-apps:
+    name: Build the default app (ubuntu-latest, ${{ matrix.app }})
+    needs: channel
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [deskclock, gallery, camera, music, calculator, recorder]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Fetch and patch the app
+        run: uv run dsa/apps/apps.py fetch ${{ matrix.app }}
+
+      - name: Build the app
+        run: uv run dsa/apps/apps.py build ${{ matrix.app }} --out .scratch/default-apps
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-default-app-${{ matrix.app }}
+          path: .scratch/default-apps/
+          if-no-files-found: error
+
   # What the images take from the newest passing runs of other workflows on develop: the
   # default translator, the packages of the Translator build whose versions are the ones the
   # lock pins now, and the patched framework, the files of the Framework build whose versions
@@ -796,7 +834,7 @@ jobs:
 
   image:
     name: ${{ inputs.dev_build && 'Make' || 'Make and publish' }} the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
-    needs: [channel, kernel, kernel-arm64, guest-programs, agent, prebuilt]
+    needs: [channel, kernel, kernel-arm64, guest-programs, agent, default-apps, prebuilt]
     # The prebuilt job is skipped when the release carries neither a default translator nor
     # a patched framework, and the kernel of the other architecture for a development build.
     if: inputs.rebuild_images && !cancelled() && !failure()
@@ -914,6 +952,20 @@ jobs:
         with:
           name: guest-agent
           path: .scratch/agent
+
+      # The default apps (dsa/apps), built above, and DocumentsUI, which builds only in an
+      # Android tree and comes from the Framework build's services job.
+      - name: Download the default apps
+        uses: actions/download-artifact@v4
+        with:
+          pattern: guest-default-app-*
+          path: .scratch/default-apps
+          merge-multiple: true
+
+      - name: Download the patched DocumentsUI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/apps/download-documentsui.sh ${{ matrix.android }} .scratch/default-apps
 
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }} ${{ matrix.arch }}
@@ -1043,6 +1095,7 @@ jobs:
           --power-hal .scratch/power-hal
           --gnss-hal .scratch/gnss-hal/dsa-gnss
           --agent .scratch/agent/DsaAgent.apk
+          --default-apps .scratch/default-apps
           --aapt2 .scratch/build-tools/aapt2
           ${{ steps.translator.outputs.args }}
           ${{ steps.framework.outputs.args }}

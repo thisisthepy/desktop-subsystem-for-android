@@ -10039,5 +10039,120 @@ class DxgDriverTests(unittest.TestCase):
         self.assertIn("ro.boot.dsa.egl", make_image.DXG_IMPORTS[1])
 
 
+def fake_apk(package):
+    """An APK whose compiled manifest names `package`."""
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as z:
+        z.writestr("AndroidManifest.xml", compiled_xml(("manifest", [("", "package", package)], [])))
+    return data.getvalue()
+
+
+class DefaultAppsTests(unittest.TestCase):
+    ANDROID = "android17"
+
+    def setUp(self):
+        self.apps = make_image.default_apps()
+        self.files = {app["image"]: fake_apk(app["package"]) for app in self.apps}
+        self.records = [{**make_image.default_app_provenance(app, self.ANDROID), "image": app["image"]}
+                        for app in self.apps]
+
+    def problems(self, files=None, records="same"):
+        files = self.files if files is None else files
+        return make_image.default_apps_problems(
+            set(files), files.__getitem__, self.records if records == "same" else records, self.ANDROID)
+
+    def test_fr42_the_default_apps_are_in_the_image_with_aosp_package_names(self):
+        self.assertEqual({app["name"]: app["package"] for app in self.apps}, {
+            "deskclock": "com.android.deskclock",
+            "gallery": "com.android.gallery3d",
+            "camera": "com.android.camera2",
+            "music": "com.android.music",
+            "calculator": "com.android.calculator2",
+            "recorder": "com.android.soundrecorder",
+            "documentsui": "com.android.documentsui",
+        })
+        self.assertEqual(self.problems(), [])
+        for app in self.apps:
+            self.assertEqual(make_image.apk_manifest_package(self.files[app["image"]]), app["package"])
+
+        # An app missing, or under its upstream package name, is refused.
+        missing = {k: v for k, v in self.files.items() if "DsaClock" not in k}
+        self.assertTrue(any("no Clock app" in p for p in self.problems(missing)))
+        renamed = dict(self.files)
+        renamed["SYSTEM/app/DsaCamera/DsaCamera.apk"] = fake_apk("org.lineageos.aperture")
+        self.assertTrue(any("org.lineageos.aperture, not com.android.camera2" in p for p in self.problems(renamed)))
+
+        # An app built without dsa/apps' patches, or with no record at all, is refused.
+        stale = [dict(r) for r in self.records]
+        stale[0]["patches"] = {"0001-follow-the-dsa-design.patch": "0" * 64}
+        self.assertTrue(any("other patches" in p for p in self.problems(records=stale)))
+        self.assertTrue(any("does not say what" in p for p in self.problems(records=None)))
+
+        # The AOSP apps they replace, and Calendar, are not left beside them.
+        left = dict(self.files)
+        left["PRODUCT/app/DeskClock/DeskClock.apk"] = fake_apk("com.android.deskclock")
+        left["SYSTEM/app/Calendar/Calendar.apk"] = fake_apk("com.android.calendar")
+        problems = self.problems(left)
+        self.assertTrue(any("DeskClock/DeskClock.apk is still in the image" in p for p in problems))
+        self.assertTrue(any("Calendar/Calendar.apk is still in the image" in p for p in problems))
+
+    def test_fr42_the_image_takes_the_aosp_apps_out_and_compiles_the_default_ones(self):
+        for name in ("PRODUCT/app/DeskClock/DeskClock.apk", "SYSTEM/app/Camera2/Camera2.apk",
+                     "PRODUCT/app/Calculator/Calculator.apk",
+                     "SYSTEM/priv-app/DocumentsUI/oat/x86_64/DocumentsUI.odex"):
+            self.assertTrue(make_image.replaced_by_default_apps(name), name)
+        for app in self.apps:
+            self.assertFalse(make_image.replaced_by_default_apps(app["image"]), app["image"])
+            self.assertFalse(make_image.removed(app["image"]), app["image"])
+            self.assertIn(app["image"], make_image.COMPILED_APPS)
+        # Calendar stays out of every image, default apps or not.
+        self.assertIn("Calendar", make_image.UNNEEDED_APPS)
+
+    def test_fr42_the_default_apps_are_signed_and_configured(self):
+        by_name = {app["name"]: app for app in self.apps}
+        self.assertIn('certificate="build/make/target/product/security/platform.x509.pem"',
+                      make_image.default_app_apkcerts(by_name["documentsui"]))
+        self.assertEqual(
+            make_image.default_app_apkcerts(by_name["camera"]),
+            'name="DsaCamera.apk" certificate="build/make/target/product/security/testkey.x509.pem" '
+            'private_key="build/make/target/product/security/testkey.pk8" partition="system"')
+        sysconfig = make_image.default_apps_sysconfig(self.apps)
+        ET.fromstring(sysconfig)
+        for app in self.apps:
+            self.assertIn(f'<initial-package-state package="{app["package"]}" stopped="false" />', sysconfig)
+        self.assertIn('<allow-in-power-save package="com.android.deskclock" />', sysconfig)
+        permissions = make_image.default_apps_permissions(self.apps)
+        ET.fromstring(permissions)
+        self.assertIn('<exception package="com.android.deskclock">', permissions)
+        self.assertIn('<permission name="android.permission.POST_NOTIFICATIONS" fixed="false" />', permissions)
+        fs_config = make_image.default_apps_fs_config([by_name["camera"]])
+        self.assertIn("system/app/dsacamera 0 0 755 capabilities=0x0", fs_config)
+        self.assertIn("system/app/dsacamera/dsacamera.apk 0 0 644 capabilities=0x0", fs_config)
+        self.assertIn("system/etc/sysconfig/dsa-default-apps.xml 0 0 644 capabilities=0x0", fs_config)
+
+    def test_fr42_make_image_refuses_default_apps_built_from_other_patches(self):
+        apps_script = make_image._apps_script()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "default-apps"
+            for app in self.apps:
+                apk = Path(tmp) / f"{app['name']}.apk"
+                apk.write_bytes(self.files[app["image"]])
+                apps_script.write_record(app, apk, folder, self.ANDROID)
+            payloads, records = make_image.load_default_apps(folder, self.ANDROID)
+            self.assertEqual(set(payloads), {app["image"] for app in self.apps})
+            self.assertEqual([r["name"] for r in records], [app["name"] for app in self.apps])
+            self.assertEqual(self.problems(records=records), [])
+
+            record = folder / "music.json"
+            written = json.loads(record.read_text())
+            written["commit"] = "0" * 40
+            record.write_text(json.dumps(written))
+            with self.assertRaisesRegex(ValueError, "music was built from another commit"):
+                make_image.load_default_apps(folder, self.ANDROID)
+            record.unlink()
+            with self.assertRaisesRegex(ValueError, "no Music app"):
+                make_image.load_default_apps(folder, self.ANDROID)
+
+
 if __name__ == "__main__":
     unittest.main()

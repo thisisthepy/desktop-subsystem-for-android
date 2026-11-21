@@ -1,0 +1,56 @@
+Follow DSA's design: Material 3 Expressive with dynamic colour, rounded shapes,
+settings grouped into cards and a large title that starts folded in a low window.
+
+diff --git a/app/src/main/java/org/lineageos/glimpse/SettingsActivity.kt b/app/src/main/java/org/lineageos/glimpse/SettingsActivity.kt
+index 4d9e1b8..27ff597 100644
+--- a/app/src/main/java/org/lineageos/glimpse/SettingsActivity.kt
++++ b/app/src/main/java/org/lineageos/glimpse/SettingsActivity.kt
+@@ -83,7 +83,7 @@ class SettingsActivity : AppCompatActivity(R.layout.activity_settings) {
+                 if (appBarOffset != -1) {
+                     appBarLayout.setOffset(appBarOffset, settingsActivity.coordinatorLayout)
+                 } else {
+-                    appBarLayout.setExpanded(true, false)
++                    appBarLayout.setExpanded(io.github.thisisthepy.dsa.design.DsaDesign.largeTitleStartsExpanded(requireContext()), false)
+                 }
+ 
+                 appBarLayout.setLiftOnScrollTargetView(listView)
+@@ -115,6 +115,7 @@ class SettingsActivity : AppCompatActivity(R.layout.activity_settings) {
+         ) = super.onCreateRecyclerView(inflater, parent, savedInstanceState).apply {
+             clipToPadding = false
+             isVerticalScrollBarEnabled = false
++            io.github.thisisthepy.dsa.design.PreferenceCards.attach(this)
+ 
+             ViewCompat.setOnApplyWindowInsetsListener(this) { _, windowInsets ->
+                 val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+diff --git a/app/src/main/res/values/themes.xml b/app/src/main/res/values/themes.xml
+index 4c2766d..b08273a 100644
+--- a/app/src/main/res/values/themes.xml
++++ b/app/src/main/res/values/themes.xml
+@@ -5,9 +5,17 @@
+ -->
+ <resources>
+     <!-- Base application theme -->
+-    <style name="Theme.Glimpse" parent="Theme.Material3.DayNight.NoActionBar">
++    <style name="Theme.Glimpse" parent="Theme.Material3Expressive.DayNight.NoActionBar">
+         <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+         <item name="windowActionModeOverlay">true</item>
++
++        <!-- DSA design: rounded shapes, cards and a bold large title. -->
++        <item name="shapeAppearanceCornerSmall">@style/DsaShape.Small</item>
++        <item name="shapeAppearanceCornerMedium">@style/DsaShape.Medium</item>
++        <item name="shapeAppearanceCornerLarge">@style/DsaShape.Large</item>
++        <item name="shapeAppearanceCornerExtraLarge">@style/DsaShape.ExtraLarge</item>
++        <item name="materialCardViewStyle">@style/DsaCard</item>
++        <item name="collapsingToolbarLayoutLargeStyle">@style/DsaCollapsingToolbar</item>
+     </style>
+ 
+     <!-- Top app bar option -->
+@@ -23,7 +31,7 @@
+     </style>
+ 
+     <!-- Media viewer -->
+-    <style name="Theme.Glimpse.MediaViewer" parent="Theme.Material3.Dark.NoActionBar">
++    <style name="Theme.Glimpse.MediaViewer" parent="Theme.Material3Expressive.Dark.NoActionBar">
+         <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+     </style>
+ 

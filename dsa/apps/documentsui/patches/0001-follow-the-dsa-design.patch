@@ -1,0 +1,37 @@
+Follow DSA's design: Material 3 Expressive with dynamic colour, rounded shapes,
+settings grouped into cards and a large title that starts folded in a low window.
+
+diff --git a/res/flag(com.android.documentsui.flags.use_material3)/values/themes_m3.xml b/res/flag(com.android.documentsui.flags.use_material3)/values/themes_m3.xml
+index 657ce31..d8f8bf1 100644
+--- a/res/flag(com.android.documentsui.flags.use_material3)/values/themes_m3.xml
++++ b/res/flag(com.android.documentsui.flags.use_material3)/values/themes_m3.xml
+@@ -69,6 +69,14 @@
+         <!-- System bar colors. -->
+         <item name="android:statusBarColor">?attr/colorSurfaceContainer</item>
+         <item name="android:navigationBarColor">?attr/colorSurfaceContainer</item>
++
++        <!-- DSA design: rounded shapes, cards and a bold large title. -->
++        <item name="shapeAppearanceCornerSmall">@style/DsaShape.Small</item>
++        <item name="shapeAppearanceCornerMedium">@style/DsaShape.Medium</item>
++        <item name="shapeAppearanceCornerLarge">@style/DsaShape.Large</item>
++        <item name="shapeAppearanceCornerExtraLarge">@style/DsaShape.ExtraLarge</item>
++        <item name="materialCardViewStyle">@style/DsaCard</item>
++        <item name="collapsingToolbarLayoutLargeStyle">@style/DsaCollapsingToolbar</item>
+     </style>
+ 
+     <!-- Similar to Widget.Material3.SideSheet.Modal.Detached, but with a different width. Manually
+diff --git a/src/com/android/documentsui/BaseActivity.java b/src/com/android/documentsui/BaseActivity.java
+index 829f759..226cc14 100644
+--- a/src/com/android/documentsui/BaseActivity.java
++++ b/src/com/android/documentsui/BaseActivity.java
+@@ -1339,7 +1339,9 @@ public abstract class BaseActivity
+     public void expandAppBar() {
+         final AppBarLayout appBarLayout = findViewById(getRes(R.id.app_bar));
+         if (appBarLayout != null) {
+-            appBarLayout.setExpanded(true);
++            // The large title starts folded in a low window.
++            appBarLayout.setExpanded(
++                    io.github.thisisthepy.dsa.design.DsaDesign.largeTitleStartsExpanded(this));
+         }
+     }
+ 

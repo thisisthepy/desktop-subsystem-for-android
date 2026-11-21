@@ -399,11 +399,11 @@ def manifest_problems(version, text):
     return problems
 
 
-def install_source(query):
+def install_source(query, suffix=".jar"):
     """The file an install path is a copy of, from what `ninja -t query <install path>` prints:
-    the one explicit input of its rule, which must copy a jar. The services build builds that
-    file, the module's own dex jar, so that installing it does not also build what the module
-    requires."""
+    the one explicit input of its rule, which must copy a file ending in `suffix` (a jar, or an
+    app's APK). The services build builds that file, the module's own dex jar or APK, so that
+    installing it does not also build what the module requires."""
     rule, inputs, section = None, [], None
     for line in query.splitlines():
         if line.startswith("  ") and not line.startswith("    "):
@@ -420,8 +420,9 @@ def install_source(query):
     if not re.search(r"cp|copy|install", rule, re.IGNORECASE):
         raise LockError(f"the install path is made by {rule}, which is not a copy, so the module's "
                         "own output cannot stand in for it")
-    if len(inputs) != 1 or not inputs[0].endswith(".jar"):
-        raise LockError(f"the install path is a copy of {', '.join(inputs) or 'nothing'}, not of one jar")
+    if len(inputs) != 1 or not inputs[0].endswith(suffix):
+        kind = "jar" if suffix == ".jar" else suffix.lstrip(".").upper()
+        raise LockError(f"the install path is a copy of {', '.join(inputs) or 'nothing'}, not of one {kind}")
     return inputs[0]
 
 
@@ -448,9 +449,9 @@ def soong_memory_limit(text):
 
 
 def main(argv):
-    if argv[1:] == ["install-source"]:
+    if argv[1:] in (["install-source"], ["install-source", "--apk"]):
         try:
-            print(install_source(sys.stdin.read()))
+            print(install_source(sys.stdin.read(), ".apk" if argv[2:] == ["--apk"] else ".jar"))
         except LockError as error:
             raise SystemExit(str(error))
         return

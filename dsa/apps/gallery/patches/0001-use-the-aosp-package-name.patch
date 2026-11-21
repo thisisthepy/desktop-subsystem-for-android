@@ -1,0 +1,15 @@
+Use the AOSP package name, so the app takes the place of the AOSP app it replaces.
+
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 0a01125..77caccc 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -13,7 +13,7 @@ android {
+     compileSdk = 36
+ 
+     defaultConfig {
+-        applicationId = "org.lineageos.glimpse"
++        applicationId = "com.android.gallery3d"
+         minSdk = 30
+         targetSdk = 36
+         versionCode = 1

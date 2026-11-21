@@ -7,6 +7,9 @@ could start without developer mode, listen on TCP or ask for an authorisation, w
 app is not signed with one of the keys in the key folder, when a system screen overlay is
 missing or was built against another framework-res or another build of the app it overlays,
 when Settings' pages would open with their large title folded, when the trace script is missing, when the agent is missing or not signed with the platform key, when
+a default app (dsa/apps) is missing, has another package name than the AOSP one it takes, was
+built from another pin or other patches than dsa/apps has, or sits beside the AOSP app it
+replaces, when
 Settings still has the preferences or code that crash it without Bluetooth, or still shows the
 emergency gesture or calls into an app the image leaves out, when the window
 manager would not give a freeform window its status bar inset, when the
@@ -423,6 +426,11 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if agent in names and make_image.AGENT_SYSCONFIG not in names:
         problems.append(f"{make_image.AGENT_SYSCONFIG} is missing, so Android's backup manager does not use "
                         "the agent's backup transport and app data never reaches the host's backup")
+
+    # The default apps: each under the AOSP package name it takes, built from the pin and the
+    # patches dsa/apps has now, and none of the AOSP apps they replace (nor Calendar) beside them.
+    problems.extend(make_image.default_apps_problems(
+        names, z.read, manifest.get("default_apps"), f"android{manifest['android_major']}"))
 
     # The network: eth0 shown as Wi-Fi, with its address and DNS servers from DHCP.
     problems.extend(make_image.network_problems(names, z.read, manifest["kernel_cmdline"]))

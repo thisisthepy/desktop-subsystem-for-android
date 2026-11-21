@@ -965,6 +965,32 @@ class ServicesTests(unittest.TestCase):
         self.assertLess(script.index('build "the analysis of the tree"'), script.index('sudo swapoff "$DSA_ANALYSIS_SWAP"'))
         self.assertLess(script.index('sudo rm -f "$DSA_ANALYSIS_SWAP"'), script.index('build "the services.jar build"'))
 
+    def test_fr42_the_services_tree_builds_the_patched_documentsui_apk(self):
+        # DocumentsUI builds only in an Android tree; the services build's tree is the published
+        # build's own, so it is patched there before the analysis and its APK built after
+        # services.jar.
+        apk = "out/soong/.intermediates/packages/apps/DocumentsUI/DocumentsUI/android_common/DocumentsUI.apk"
+        query = (
+            "out/target/product/vsoc_x86_64_only/system/priv-app/DocumentsUI/DocumentsUI.apk:\n"
+            "  input: g.android.Cp\n"
+            f"    {apk}\n"
+            "    | out/host/linux-x86/bin/cp_helper\n"
+            "  outputs:\n"
+            "    out/target/product/vsoc_x86_64_only/system/priv-app/DocumentsUI/DocumentsUI.apk.installed\n")
+        self.assertEqual(framework_lock.install_source(query, ".apk"), apk)
+        with self.assertRaisesRegex(framework_lock.LockError, "not of one APK"):
+            framework_lock.install_source(query.replace(apk, apk + ".zip"), ".apk")
+        with self.assertRaisesRegex(framework_lock.LockError, "not of one jar"):
+            framework_lock.install_source(query)
+        script = (REPO / ".github/scripts/framework/build-services.sh").read_text()
+        patched = script.index('apps.py" patch-tree documentsui')
+        self.assertLess(patched, script.index('build "the analysis of the tree" nothing'))
+        self.assertIn('install-source --apk', script)
+        self.assertLess(script.index('build "the services.jar build"'), script.index('build "the DocumentsUI build"'))
+        self.assertIn('apps.py" record documentsui', script)
+        workflow = (REPO / ".github/workflows/framework.yml").read_text()
+        self.assertIn("name: default-app-documentsui-${{ matrix.android }}-${{ steps.pins.outputs.version }}", workflow)
+
     def test_fr22_a_services_build_failure_says_whether_disk_memory_or_time(self):
         script = (REPO / ".github/scripts/framework/build-services.sh").read_text()
         for cause in ("ran out of time", "ran out of disk", "ran out of memory"):

@@ -60,6 +60,8 @@ on:
   #   paths:
   #     - dsa/guest/framework/framework-lock.json
   #     - dsa/guest/framework/patches/**
+  #     - dsa/apps/documentsui/**
+  #     - dsa/apps/design/**
 
 concurrency:
   group: framework-${{ github.ref }}
@@ -464,15 +466,32 @@ jobs:
           DSA_SERVICES_JOBS: 2
         run: |
           start=$SECONDS
-          .github/scripts/framework/build-services.sh "$DSA_TRANSLATOR_WORK/aosp" "$ANDROID_BRANCH" "$DSA_TRANSLATOR_WORK/services"
+          # The same tree builds the image's patched DocumentsUI (dsa/apps/documentsui), which
+          # builds only in an Android tree, into the last folder.
+          DSA_SERVICES_LOCK="$RUNNER_TEMP/services-lock.json" \
+            .github/scripts/framework/build-services.sh "$DSA_TRANSLATOR_WORK/aosp" "$ANDROID_BRANCH" \
+            "$DSA_TRANSLATOR_WORK/services" "$DSA_TRANSLATOR_WORK/default-apps"
           echo "built in $(( (SECONDS - start) / 60 )) minutes"
           df -h / /mnt
 
+      # Kept even when the DocumentsUI build after it failed: services.jar was in its folder by
+      # then.
       - name: Keep services.jar
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: framework-services-${{ matrix.android }}-${{ steps.pins.outputs.version }}
           path: ${{ env.DSA_TRANSLATOR_WORK }}/services/
+          if-no-files-found: error
+          retention-days: 90
+
+      # The patched DocumentsUI and its record, which the image workflows take for every image
+      # of this Android version (.github/scripts/apps/download-documentsui.sh).
+      - name: Keep DocumentsUI
+        uses: actions/upload-artifact@v4
+        with:
+          name: default-app-documentsui-${{ matrix.android }}-${{ steps.pins.outputs.version }}
+          path: ${{ env.DSA_TRANSLATOR_WORK }}/default-apps/
           if-no-files-found: error
           retention-days: 90
 

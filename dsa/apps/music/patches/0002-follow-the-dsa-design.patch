@@ -1,0 +1,56 @@
+Follow DSA's design: Material 3 Expressive with dynamic colour, rounded shapes,
+settings grouped into cards and a large title that starts folded in a low window.
+
+diff --git a/app/src/main/java/org/lineageos/twelve/SettingsActivity.kt b/app/src/main/java/org/lineageos/twelve/SettingsActivity.kt
+index 176189a..24dce9f 100644
+--- a/app/src/main/java/org/lineageos/twelve/SettingsActivity.kt
++++ b/app/src/main/java/org/lineageos/twelve/SettingsActivity.kt
+@@ -96,7 +96,7 @@ class SettingsActivity : AppCompatActivity(R.layout.activity_settings) {
+                 if (appBarOffset != -1) {
+                     appBarLayout.setOffset(appBarOffset, settingsActivity.coordinatorLayout)
+                 } else {
+-                    appBarLayout.setExpanded(true, false)
++                    appBarLayout.setExpanded(io.github.thisisthepy.dsa.design.DsaDesign.largeTitleStartsExpanded(requireContext()), false)
+                 }
+ 
+                 appBarLayout.setLiftOnScrollTargetView(listView)
+@@ -128,6 +128,7 @@ class SettingsActivity : AppCompatActivity(R.layout.activity_settings) {
+         ) = super.onCreateRecyclerView(inflater, parent, savedInstanceState).apply {
+             clipToPadding = false
+             isVerticalScrollBarEnabled = false
++            io.github.thisisthepy.dsa.design.PreferenceCards.attach(this)
+ 
+             ViewCompat.setOnApplyWindowInsetsListener(this) { _, windowInsets ->
+                 val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+diff --git a/app/src/main/java/org/lineageos/twelve/fragments/CollapsingToolbarLayoutFragment.kt b/app/src/main/java/org/lineageos/twelve/fragments/CollapsingToolbarLayoutFragment.kt
+index 8fc4a04..e7dd74d 100644
+--- a/app/src/main/java/org/lineageos/twelve/fragments/CollapsingToolbarLayoutFragment.kt
++++ b/app/src/main/java/org/lineageos/twelve/fragments/CollapsingToolbarLayoutFragment.kt
+@@ -36,7 +36,7 @@ abstract class CollapsingToolbarLayoutFragment : Fragment {
+         if (appBarOffset != -1) {
+             appBarLayout.setOffset(appBarOffset, coordinatorLayout)
+         } else {
+-            appBarLayout.setExpanded(true, false)
++            appBarLayout.setExpanded(io.github.thisisthepy.dsa.design.DsaDesign.largeTitleStartsExpanded(requireContext()), false)
+         }
+ 
+         appBarLayout.addOnOffsetChangedListener(offsetChangedListener)
+diff --git a/app/src/main/res/values/themes.xml b/app/src/main/res/values/themes.xml
+index 6b75fdc..0f467ce 100644
+--- a/app/src/main/res/values/themes.xml
++++ b/app/src/main/res/values/themes.xml
+@@ -10,6 +10,14 @@
+         <item name="android:navigationBarColor">@android:color/transparent</item>
+         <item name="enableEdgeToEdge">true</item>
+         <item name="materialSwitchStyle">@style/Widget.SettingsLib.MaterialSwitch</item>
++
++        <!-- DSA design: rounded shapes, cards and a bold large title. -->
++        <item name="shapeAppearanceCornerSmall">@style/DsaShape.Small</item>
++        <item name="shapeAppearanceCornerMedium">@style/DsaShape.Medium</item>
++        <item name="shapeAppearanceCornerLarge">@style/DsaShape.Large</item>
++        <item name="shapeAppearanceCornerExtraLarge">@style/DsaShape.ExtraLarge</item>
++        <item name="materialCardViewStyle">@style/DsaCard</item>
++        <item name="collapsingToolbarLayoutLargeStyle">@style/DsaCollapsingToolbar</item>
+     </style>
+ 
+     <!-- Base dialog theme -->

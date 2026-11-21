@@ -53,11 +53,16 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
 - Apps a desktop has no use for are removed too (`UNNEEDED_APPS` in `make-image.py`, each
   with its reason): telephony apps without a modem, screen savers and wallpaper pickers, the
   launcher's search widget, Bluetooth MIDI, the old AOSP Calendar, Gallery and Music apps
-  (no longer maintained upstream; the user installs their own), and developer and demo apps.
-  Each is a leaf that
+  (no longer maintained upstream), and developer and demo apps. No calendar is shipped; the
+  user installs their own. Each is a leaf that
   nothing else needs; WebView, the providers, PackageInstaller, PermissionController,
   DocumentsUI and the other apps that apps call stay. `make-image.py` prints each file it
   removes.
+- With `--default-apps`, the image carries DSA's default apps (`dsa/apps`): a clock, a
+  gallery, a camera, a music player, a calculator, a recorder and the file manager, each built
+  from a pinned LineageOS or AOSP source with DSA's design and under the package name of the
+  AOSP app it replaces. The AOSP clock, camera and calculator leave the image, and DocumentsUI
+  is replaced in place. `check-image.py` refuses an image without them.
 - The guest keeps its memory small, so the host gets back what it does not use. It swaps to
   zram of half its memory (`fstab.dsa`, `dsa-memory.rc`), and lmkd watches the swap as well
   as memory pressure. When no app task has been in use for a minute (none open, or all
