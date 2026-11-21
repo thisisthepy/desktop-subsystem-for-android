@@ -1353,7 +1353,7 @@ unsafe fn keep_to_frame(hwnd: HWND, data: &WindowData, pos: &mut WINDOWPOS) {
     // size is the desktop placing the window (the end of a move loop that snaps, a snap layout,
     // Win+arrow, a maximise or restore): its rectangle is taken as it is, never replaced by
     // the old frame's size or moved to fit it. The guest was asked for the size above, the last
-    // frame is shown stretched until the frame of the new size arrives, and a frame of another
+    // frame is shown 1:1 until the frame of the new size arrives, and a frame of another
     // size does not resize an arranged window (take_kept_frame).
     if !data.sizing.get() {
         return;

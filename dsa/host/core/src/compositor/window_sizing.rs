@@ -378,30 +378,6 @@ pub fn frame_placement(
     }
 }
 
-/// Where a window of `view` pixels shows the last frame it has (`frame` task pixels, at
-/// `scale`) while a frame of its new size is still `pending`: the window grew or shrank (the
-/// maximise button, a double click on the title bar, a snap, the keyboard, a restore, an
-/// edge) and the guest has not drawn at the new size yet. The last frame is stretched to fit
-/// the window, keeping its shape, in the window's middle, in every scaling mode, so the window
-/// never shows a small frame with the desktop around it. Once nothing is pending the frame is
-/// placed as [`frame_placement`] says.
-pub fn shown_frame_placement(
-    frame: (u32, u32),
-    view: (u32, u32),
-    scale: Scale,
-    held: bool,
-    pending: bool,
-) -> FramePlacement {
-    let placed = frame_placement(frame, view, scale, held);
-    if !pending || frame.0 == 0 || frame.1 == 0 || view.0 == 0 || view.1 == 0 {
-        return placed;
-    }
-    if to_window_size(frame, scale) == view {
-        return placed;
-    }
-    fit_placement(frame, view)
-}
-
 /// `frame` task pixels scaled to fit a window of `view` pixels, keeping their shape, centred.
 fn fit_placement(frame: (u32, u32), view: (u32, u32)) -> FramePlacement {
     // The direction that fills the window first sets the scale.
@@ -421,13 +397,29 @@ fn fit_placement(frame: (u32, u32), view: (u32, u32)) -> FramePlacement {
 }
 
 /// The solid colour (`0xAARRGGBB`, opaque) under a task's frame, which shows wherever the
-/// frame does not cover the window: beside a frame stretched while a frame of the new size is
-/// pending, or beside a frame the guest keeps smaller. It is the app's own colour, never the
-/// desktop and never a white the app did not draw: the colour of the frame's top edge
+/// frame does not cover the window: beside the last frame, shown 1:1, while a frame of the
+/// new size is pending, or beside a frame the guest keeps smaller. It is the app's own
+/// colour, never the desktop and never a white the app did not draw: the colour of the
+/// frame's top edge
 /// (`band`, then `fill`, as the title bar's band reads it) when it is known, else the app's
 /// splash background, else the theme's window colour.
-pub fn gap_fill(band: Option<u32>, fill: Option<u32>, splash: Option<u32>, theme: u32) -> u32 {
-    band.or(fill).or(splash).unwrap_or(theme) | 0xFF00_0000
+///
+/// A window without a surface of its own behind its visuals (on Windows,
+/// `WS_EX_NOREDIRECTIONBITMAP`) shows the desktop wherever no visual covers it, so every
+/// host puts this colour under the frame. Only a `see_through` window, whose transparency is
+/// the point, gets none. `theme` is asked only when nothing of the app's is known. The frame
+/// itself is never scaled for it: it stays where [`frame_placement`] puts it.
+pub fn uncovered_fill(
+    see_through: bool,
+    band: Option<u32>,
+    fill: Option<u32>,
+    splash: Option<u32>,
+    theme: impl FnOnce() -> u32,
+) -> Option<u32> {
+    if see_through {
+        return None;
+    }
+    Some(band.or(fill).or(splash).unwrap_or_else(theme) | 0xFF00_0000)
 }
 
 /// What the window system's move loop says of a window, and when the window reports that
@@ -1059,7 +1051,7 @@ pub struct FrameRectRequest {
     /// The user is dragging one of the window's edges right now. Nothing else holds a size:
     /// a snap, a maximise, a restore, the keyboard and a new monitor scale are the desktop
     /// placing the window, and its rectangle is taken as it is. The frame the guest draws for
-    /// it is shown stretched until it arrives, and the guest is asked for the window's size.
+    /// it is awaited with the last frame shown 1:1, and the guest is asked for the window's size.
     pub edge_drag: bool,
     /// The edges the user drags (left, top), as the desktop reported them when the drag
     /// started: an edge drag keeps the opposite edge where it is, whether the window grows or
@@ -1461,54 +1453,72 @@ mod tests {
     }
 
     #[test]
-    fn fr4_a_pending_frame_is_stretched_to_fit_the_new_window_centred_in_every_mode() {
-        // App mode (1:1): a 1200x800 frame in a window maximised to 2560x1380 before the guest
-        // drew at that size. It fills the height, keeps its shape, and sits in the middle.
-        let placed = shown_frame_placement((1200, 800), (2560, 1380), (1, 1), true, true);
-        assert_eq!(placed.size, (2070, 1380));
-        assert_eq!(placed.origin, (245, 0));
-        // Without the pending frame the same capped frame stays 1:1 in the middle.
-        let capped = shown_frame_placement((1200, 800), (2560, 1380), (1, 1), true, false);
-        assert_eq!(capped.size, (1200, 800));
-        assert_eq!(
-            capped,
-            frame_placement((1200, 800), (2560, 1380), (1, 1), true)
-        );
-        // System mode (the task keeps its density): fit, centred, the same way.
-        let placed = shown_frame_placement((1600, 900), (2560, 1380), (82, 131), true, true);
-        assert_eq!(placed.size, (2453, 1380));
-        assert_eq!(placed.origin, (53, 0));
-        // A window that shrank (restore) and is not held stretches its last frame down too.
-        let placed = shown_frame_placement((2560, 1380), (1280, 690), (1, 1), false, true);
-        assert_eq!(placed.size, (1280, 690));
-        assert_eq!(placed.origin, (0, 0));
-        // A frame already the window's size is shown as it is.
-        let placed = shown_frame_placement((1000, 800), (1000, 800), (1, 1), true, true);
+    fn fr4_a_pending_frame_is_shown_unscaled_in_the_middle_of_the_window() {
+        // A 1200x800 frame in a window maximised to 2560x1380 before the guest drew at that
+        // size: shown 1:1, never stretched, in the window's middle.
+        let placed = frame_placement((1200, 800), (2560, 1380), (1, 1), true);
         assert_eq!(placed.scale, (1, 1));
-        assert_eq!(placed.size, (1000, 800));
+        assert_eq!(placed.size, (1200, 800));
+        assert_eq!(placed.origin, (680, 290));
+        // A window that is not held shows its last frame 1:1 at its top left.
+        let placed = frame_placement((2560, 1380), (1280, 690), (1, 1), false);
+        assert_eq!(placed.scale, (1, 1));
+        assert_eq!(placed.size, (2560, 1380));
+        assert_eq!(placed.origin, (0, 0));
     }
 
     #[test]
-    fn fr4_what_a_stretched_frame_leaves_is_filled_with_the_apps_colour_never_transparent() {
-        let theme = 0x0020_2020;
+    fn fr4_the_strips_beside_an_unscaled_pending_frame_are_filled_with_the_apps_colour() {
+        let unused = || -> u32 { panic!("the theme is read only when nothing else is known") };
         // The colour of the frame's top edge comes first.
         assert_eq!(
-            gap_fill(
+            uncovered_fill(
+                false,
                 Some(0xFF12_3456),
                 Some(0xFF65_4321),
                 Some(0xFFAB_CDEF),
-                theme
+                unused
             ),
-            0xFF12_3456
+            Some(0xFF12_3456)
         );
         assert_eq!(
-            gap_fill(None, Some(0xFF65_4321), Some(0xFFAB_CDEF), theme),
-            0xFF65_4321
+            uncovered_fill(false, None, Some(0xFF65_4321), Some(0xFFAB_CDEF), unused),
+            Some(0xFF65_4321)
         );
         // Then the splash background, then the theme's colour.
-        assert_eq!(gap_fill(None, None, Some(0xFFAB_CDEF), theme), 0xFFAB_CDEF);
-        // Always opaque, so the desktop never shows through.
-        assert_eq!(gap_fill(None, None, None, theme), 0xFF20_2020);
+        assert_eq!(
+            uncovered_fill(false, None, None, Some(0xFFAB_CDEF), unused),
+            Some(0xFFAB_CDEF)
+        );
+        // Always opaque, even from a colour read without alpha, so the desktop never shows
+        // through.
+        assert_eq!(
+            uncovered_fill(false, None, None, None, || 0x0020_2020),
+            Some(0xFF20_2020)
+        );
+        assert_eq!(
+            uncovered_fill(false, Some(0x0012_3456), None, None, unused),
+            Some(0xFF12_3456)
+        );
+        // A see-through window keeps its transparency.
+        assert_eq!(
+            uncovered_fill(true, Some(0xFF12_3456), None, None, unused),
+            None
+        );
+    }
+
+    #[test]
+    fn fr4_a_filled_window_does_not_scale_its_pending_frame() {
+        // Left and right strips beside a 1:1 frame in a wider maximised window: the frame
+        // keeps its size and the strips (680 pixels each side) are what the fill covers.
+        let view = (2560, 1380);
+        let placed = frame_placement((1200, 800), view, (1, 1), true);
+        assert_eq!(placed.scale, (1, 1));
+        assert_eq!(placed.size, (1200, 800));
+        let left = placed.origin.0;
+        let right = view.0 - placed.origin.0 - placed.size.0;
+        assert_eq!((left, right), (680, 680));
+        assert!(uncovered_fill(false, None, None, None, || 0).is_some());
     }
 
     #[test]
