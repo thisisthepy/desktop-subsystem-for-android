@@ -1409,6 +1409,15 @@ impl TaskWindow {
         }
     }
 
+    /// The largest client area the guest can draw for the task, in client pixels: a held
+    /// window larger than it fills the strips beside its frame (FrameFollow::strips_filled).
+    pub fn set_frame_limit(&mut self, max: Option<(u32, u32)>) {
+        if self.follow.limit() != max {
+            self.follow.set_limit(max);
+            self.place_frame();
+        }
+    }
+
     /// The smallest and largest the window's content may be, in client pixels.
     pub fn set_limits(&self, min: Option<(u32, u32)>, max: Option<(u32, u32)>) {
         unsafe {

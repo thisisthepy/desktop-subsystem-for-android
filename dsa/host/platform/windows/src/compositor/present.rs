@@ -959,6 +959,18 @@ impl WindowPresenter {
         }
     }
 
+    /// The largest client area the guest can draw for the task at the window's scale
+    /// (`None`: not known), so a held window larger than it fills the strips it leaves.
+    pub fn set_limit(&self, limit: Option<(u32, u32)>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed || state.follow.limit() == limit {
+            return;
+        }
+        state.follow.set_limit(limit);
+        // Committed again with the next frame or tick, with or without the fill.
+        state.committed = None;
+    }
+
     pub fn set_held(&self, held: bool) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.closed || state.follow.held() == held {

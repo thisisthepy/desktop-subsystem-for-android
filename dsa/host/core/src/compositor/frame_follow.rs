@@ -78,6 +78,9 @@ pub struct FrameFollow {
     /// drawing; the first frame of another size is the guest's answer
     /// ([`FrameFollow::strips_filled`]).
     waiting_from: Option<Option<(u32, u32)>>,
+    /// The largest client area the guest can draw for the task, in window pixels, when known
+    /// ([`FrameFollow::set_limit`]).
+    limit: Option<(u32, u32)>,
 }
 
 impl FrameFollow {
@@ -122,8 +125,32 @@ impl FrameFollow {
     /// maximise, a snap or a restore), the last frame is shown as it is with nothing drawn
     /// around it, so the window's own animation shows the app, not a solid colour around a
     /// frame cut out of it.
+    ///
+    /// A held window larger than the largest client area the guest can draw
+    /// ([`FrameFollow::set_limit`]) is filled at once, whatever frame comes: no answer of the
+    /// guest can cover it, including one of the same size as the frame already shown (a
+    /// window already at the limit, maximised again). A window within the limit is filled
+    /// only beside the guest's answer, so a maximise that the app catches up with shows
+    /// nothing around its last frame meanwhile.
     pub fn strips_filled(&self) -> bool {
-        self.held && self.waiting_from.is_none()
+        if !self.held {
+            return false;
+        }
+        let beyond_limit = self
+            .limit
+            .is_some_and(|limit| self.view.0 > limit.0 || self.view.1 > limit.1);
+        beyond_limit || self.waiting_from.is_none()
+    }
+
+    /// The largest client area the guest can draw for the task at the window's scale: its
+    /// display's size, or the largest task size, in window pixels. `None` while not known.
+    pub fn set_limit(&mut self, limit: Option<(u32, u32)>) {
+        self.limit = limit;
+    }
+
+    /// The limit [`FrameFollow::set_limit`] gave.
+    pub fn limit(&self) -> Option<(u32, u32)> {
+        self.limit
     }
 
     /// A frame of `size` is on the screen of a window that holds its size.
@@ -522,6 +549,37 @@ mod tests {
         assert!(!follow.strips_filled());
         assert_eq!(follow.frame_arrived((1200, 1380)), Arrival::Show);
         assert!(follow.strips_filled());
+    }
+
+    #[test]
+    fn fr4_a_window_already_at_the_limit_maximised_again_leaves_no_transparent_strip() {
+        // A task at the 200% main monitor's density on a 2560x1440 monitor at 125%: the guest
+        // can draw at most 2400x1380 window pixels for it. Snapped to that limit, then
+        // maximised to 2560x1380, the guest answers with the same 2400x1380 frame.
+        let mut follow = FrameFollow::new((2400, 1380));
+        follow.set_limit(Some((2400, 1380)));
+        follow.frame_arrived((2400, 1380));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        // Beyond the limit, the strips are filled at once and stay filled.
+        assert!(follow.strips_filled());
+        assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
+        assert!(follow.strips_filled());
+        // Restored and maximised again: the same.
+        follow.set_held(false);
+        assert!(!follow.strips_filled());
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        assert!(follow.strips_filled());
+
+        // On the main monitor the limit is above the maximised size, and a maximise the app
+        // catches up with fills nothing meanwhile, as before.
+        let mut follow = FrameFollow::new((1041, 1495));
+        follow.set_limit(Some((2880, 2880)));
+        follow.frame_arrived((1041, 1495));
+        follow.set_held(true);
+        follow.view_taken((2880, 1704));
+        assert!(!follow.strips_filled());
     }
 
     #[test]

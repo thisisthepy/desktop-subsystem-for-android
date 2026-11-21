@@ -2360,6 +2360,9 @@ impl Ui {
                                     presenter.set_scale(scale);
                                 }
                             }
+                            if let Some(presenter) = data.presenter.borrow().as_deref() {
+                                presenter.set_limit(max);
+                            }
                             // A window that holds its size shows a frame of the new size
                             // elsewhere in it.
                             if data.held.get() {
@@ -2658,6 +2661,7 @@ impl Ui {
             *data.presenter.borrow_mut() = presenter.clone();
             if let Some(presenter) = presenter.as_deref() {
                 presenter.set_held(data.held.get());
+                presenter.set_limit(data.max_client.get());
             }
         }
         if let Some(presenter) = presenter {
