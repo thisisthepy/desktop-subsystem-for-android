@@ -104,7 +104,10 @@ class AndroidTaskSource(
     }
 
     private fun read(info: ActivityManager.RunningTaskInfo): TaskSnapshot {
-        val root = info.baseActivity ?: info.baseIntent?.component ?: info.topActivity
+        // The intent that started the task names the app that owns it, and keeps naming it:
+        // baseActivity is the lowest activity not finishing, which becomes a permission
+        // dialog's once the app's own activities below it finish.
+        val root = info.baseIntent?.component ?: info.baseActivity ?: info.topActivity
         val smallest = fields.minSize(info, context.resources.configuration.densityDpi)
         val top = activityInfo(info.topActivity ?: root)
         // A widget's setup runs above the agent's own activity, in a task that is the app's.

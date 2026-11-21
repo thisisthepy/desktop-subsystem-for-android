@@ -718,6 +718,25 @@ impl TaskWindows {
 
     /// Records a change to the guest's tasks, and returns what the windows must do.
     pub fn apply(&mut self, event: &TaskEvent) -> Vec<WindowChange> {
+        // A task stays the app's whose window it opened in: an older guest may name another
+        // package for it (a permission dialog that became the task's root), and taking that
+        // would move the window to another app's program or close the app's.
+        if let TaskEvent::Updated(task) = event {
+            if let Some(owner) = self
+                .tasks
+                .get(&task.task_id)
+                .map(|known| known.package_name.clone())
+                .filter(|owner| !owner.is_empty() && *owner != task.package_name)
+            {
+                self.notes.push(format!(
+                    "task {} was reported as {}'s, but its window is {}'s; it stays {}'s",
+                    task.task_id, task.package_name, owner, owner
+                ));
+                let mut kept = task.clone();
+                kept.package_name = owner;
+                return self.apply(&TaskEvent::Updated(kept));
+            }
+        }
         match event {
             TaskEvent::Updated(task) if task.is_overlay() => self.overlay_updated(task),
             TaskEvent::Removed { task_id } if self.overlays.contains_key(task_id) => {
@@ -1474,6 +1493,40 @@ mod tests {
             task_id,
             tone: None,
         }
+    }
+
+    #[test]
+    fn fr3_a_task_whose_root_became_a_permission_dialog_keeps_its_apps_window() {
+        // ONE store's task 133: the guest named the permission dialog the app opened as the
+        // task's package once the app's own activities finished.
+        let mut windows = TaskWindows::new();
+        let mut store = task(133, "ONE store", 720, 1280);
+        store.package_name = "com.skt.skaf.A000Z00040".into();
+        let opened = windows.apply(&TaskEvent::Updated(store.clone()));
+        assert!(opened
+            .iter()
+            .any(|change| matches!(change, WindowChange::Open { task_id: 133, .. })));
+        let mut dialog = store.clone();
+        dialog.package_name = "com.android.permissioncontroller".into();
+        let changes = windows.apply(&TaskEvent::Updated(dialog));
+        assert!(
+            changes.iter().all(|change| !matches!(
+                change,
+                WindowChange::Open { .. } | WindowChange::Close { .. }
+            )),
+            "{changes:?}"
+        );
+        assert_eq!(
+            windows
+                .tasks
+                .get(&133)
+                .map(|task| task.package_name.as_str()),
+            Some("com.skt.skaf.A000Z00040")
+        );
+        let changes = windows.apply(&TaskEvent::Updated(store));
+        assert!(changes
+            .iter()
+            .all(|change| !matches!(change, WindowChange::Close { .. })));
     }
 
     #[test]

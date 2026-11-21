@@ -36,6 +36,22 @@ class TaskReporterTest {
     }
 
     @Test
+    fun fr3_a_task_stays_its_apps_when_a_permission_dialog_becomes_its_root() {
+        // ONE store's task 133: the app asked for a permission and finished its own
+        // activities, and the framework named the permission dialog as the task's root.
+        val app = "com.skt.skaf.A000Z00040"
+        reporter.update(listOf(appTask(133, app, "ONE store", TaskBounds(0, 0, 778, 1293))))
+        reporter.update(listOf(appTask(133, "com.android.permissioncontroller", "ONE store", TaskBounds(0, 0, 778, 1293))))
+        reporter.update(listOf(appTask(133, app, "ONE store", TaskBounds(0, 0, 778, 1293))))
+
+        assertTrue(sent.none { it.bodyCase == Envelope.BodyCase.TASK_REMOVED })
+        val updates = sent.filter { it.bodyCase == Envelope.BodyCase.TASK_UPDATED }
+        assertTrue(updates.isNotEmpty())
+        assertTrue(updates.all { it.taskUpdated.packageName == app })
+        assertEquals(app, reporter.reportedPackage(133))
+    }
+
+    @Test
     fun fr22_a_task_carries_its_status_bar_and_is_sent_again_when_it_changes() {
         val dark = appTask(4).copy(statusBar = StatusBarAppearance.DARK, statusBarColor = 0xFF202124.toInt())
         reporter.update(listOf(dark))
