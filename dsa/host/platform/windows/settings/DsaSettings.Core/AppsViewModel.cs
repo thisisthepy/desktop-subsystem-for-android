@@ -1150,6 +1150,21 @@ public sealed class AppsViewModel : ObservableObject
             : SetWindowAsync(current with { Immersive = place });
     }
 
+    /// <summary>Lets go of the installed apps and their icons, for a page that is left: the
+    /// page lists them afresh each time it is shown, so the old list is never seen again, and
+    /// every app's icon would stay in memory for nothing. The window settings, the search and
+    /// the open cards stay. A run in progress keeps what it brings.</summary>
+    public void Release()
+    {
+        if (_busy)
+        {
+            return;
+        }
+        _apps = null;
+        _message = null;
+        ChangedAll();
+    }
+
     /// <summary>The name an app goes by on the page.</summary>
     public string LabelOf(string package) =>
         package == "com.android.shell" ? _text.Get("AppsAdbShell.Text") :

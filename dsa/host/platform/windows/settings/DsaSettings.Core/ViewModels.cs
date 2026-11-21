@@ -790,7 +790,7 @@ public sealed partial class MemoryViewModel : ObservableObject
         ? string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ReportAge"), guest.AgeSeconds)
         : "";
 
-    public IReadOnlyList<MemoryRow> HostRows => (_report?.Host ?? Array.Empty<HostProcess>())
+    private IReadOnlyList<MemoryRow> BuildHostRows() => (_report?.Host ?? Array.Empty<HostProcess>())
         .Select(p => new MemoryRow(
             _text.Get($"Role_{p.Role}"),
             string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ProcessDetail"), p.Pid, Format.Size(p.PrivateKb)),
@@ -799,39 +799,36 @@ public sealed partial class MemoryViewModel : ObservableObject
 
     /// <summary>Android's breakdown: the apps and the system, the caches, the kernel's
     /// reclaimable caches, shared memory and compressed swap, then the largest processes.</summary>
-    public IReadOnlyList<MemoryRow> GuestRows
+    private IReadOnlyList<MemoryRow> BuildGuestRows()
     {
-        get
+        if (_report?.Guest is not { } guest)
         {
-            if (_report?.Guest is not { } guest)
-            {
-                return Array.Empty<MemoryRow>();
-            }
-            // What the processes cost: in memory, plus their compressed share of zram. A service
-            // that does not say counts their PSS as in memory.
-            var apps = guest.Apps ?? new MemoryShare(guest.TotalPssKb, 0);
-            var rows = new List<MemoryRow>
-            {
-                new(_text.Get("Memory_Apps"), ShareDetail(apps), Format.Size(apps.TotalKb)),
-                new(_text.Get("Memory_Cache"), _text.Get("Memory_CacheDetail"), Format.Size(guest.CachedKb + guest.BuffersKb)),
-                new(_text.Get("Memory_Kernel"), _text.Get("Memory_KernelDetail"), Format.Size(guest.SlabReclaimableKb)),
-                new(_text.Get("Memory_Shared"), "", Format.Size(guest.ShmemKb)),
-                new(_text.Get("Memory_Zram"),
-                    string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ZramDetail"), Format.Size(guest.ZramOriginalKb)),
-                    Format.Size(guest.ZramUsedKb)),
-                new(_text.Get("Memory_Free"), "", Format.Size(guest.FreeKb)),
-            };
-            // Google Play services, which the user chose to install, on a line of its own, so
-            // what it costs is not taken for what Android and DSA cost.
-            if (guest.GooglePlay is { } play)
-            {
-                rows.Insert(1, new(_text.Get("Memory_GooglePlay"),
-                    string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_GooglePlayDetail"),
-                        play.Processes, ShareDetail(play.Cost)),
-                    Format.Size(play.Cost.TotalKb)));
-            }
-            return rows;
+            return Array.Empty<MemoryRow>();
         }
+        // What the processes cost: in memory, plus their compressed share of zram. A service
+        // that does not say counts their PSS as in memory.
+        var apps = guest.Apps ?? new MemoryShare(guest.TotalPssKb, 0);
+        var rows = new List<MemoryRow>
+        {
+            new(_text.Get("Memory_Apps"), ShareDetail(apps), Format.Size(apps.TotalKb)),
+            new(_text.Get("Memory_Cache"), _text.Get("Memory_CacheDetail"), Format.Size(guest.CachedKb + guest.BuffersKb)),
+            new(_text.Get("Memory_Kernel"), _text.Get("Memory_KernelDetail"), Format.Size(guest.SlabReclaimableKb)),
+            new(_text.Get("Memory_Shared"), "", Format.Size(guest.ShmemKb)),
+            new(_text.Get("Memory_Zram"),
+                string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ZramDetail"), Format.Size(guest.ZramOriginalKb)),
+                Format.Size(guest.ZramUsedKb)),
+            new(_text.Get("Memory_Free"), "", Format.Size(guest.FreeKb)),
+        };
+        // Google Play services, which the user chose to install, on a line of its own, so
+        // what it costs is not taken for what Android and DSA cost.
+        if (guest.GooglePlay is { } play)
+        {
+            rows.Insert(1, new(_text.Get("Memory_GooglePlay"),
+                string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_GooglePlayDetail"),
+                    play.Processes, ShareDetail(play.Cost)),
+                Format.Size(play.Cost.TotalKb)));
+        }
+        return rows;
     }
 
     /// <summary>"N in memory, M compressed", with the compressed part unknown when zram could
@@ -841,7 +838,7 @@ public sealed partial class MemoryViewModel : ObservableObject
             Format.Size(share.ResidentKb),
             share.CompressedKb is { } compressed ? Format.Size(compressed) : _text.Get("Memory_Unknown"));
 
-    public IReadOnlyList<MemoryRow> GuestProcessRows => (_report?.Guest?.TopProcesses ?? Array.Empty<GuestProcess>())
+    private IReadOnlyList<MemoryRow> BuildGuestProcessRows() => (_report?.Guest?.TopProcesses ?? Array.Empty<GuestProcess>())
         .Select(p => new MemoryRow(
             p.Name,
             string.Format(CultureInfo.CurrentCulture,
@@ -849,7 +846,45 @@ public sealed partial class MemoryViewModel : ObservableObject
             Format.Size(p.Cost?.TotalKb ?? p.PssKb)))
         .ToList();
 
-    public async Task RefreshAsync()
+    /// <summary>The page's lists. Each stays the same list for the page's life, and a refresh
+    /// changes its rows in place, so the window keeps the rows' controls.</summary>
+    public LiveRows HostRows { get; } = new();
+
+    public LiveRows GuestRows { get; } = new();
+
+    public LiveRows KernelRows { get; } = new();
+
+    public LiveRows GuestProcessRows { get; } = new();
+
+    private readonly SingleFlight _refresh = new();
+
+    /// <summary>Asks for a new report. A refresh asked for while one runs (the page's timer, its
+    /// Refresh button and its first showing can overlap) joins the one that runs.</summary>
+    public Task RefreshAsync() => _refresh.RunAsync(RefreshOnceAsync);
+
+    /// <summary>Lets go of the report and its rows, for a page that is left: the page asks for
+    /// a new report each time it is shown. A refresh in progress keeps what it brings.</summary>
+    public void Release()
+    {
+        if (_refresh.Running)
+        {
+            return;
+        }
+        _report = null;
+        _error = null;
+        UpdateRows();
+        ChangedAll();
+    }
+
+    private void UpdateRows()
+    {
+        HostRows.Update(BuildHostRows());
+        GuestRows.Update(BuildGuestRows());
+        KernelRows.Update(BuildKernelRows());
+        GuestProcessRows.Update(BuildGuestProcessRows());
+    }
+
+    private async Task RefreshOnceAsync()
     {
         try
         {
@@ -860,6 +895,7 @@ public sealed partial class MemoryViewModel : ObservableObject
         {
             _error = Format.Problem(_text, e);
         }
+        UpdateRows();
         ChangedAll();
     }
 }

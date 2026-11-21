@@ -38,8 +38,17 @@ internal static class WorkingSetTrim
 
     public static void PageLeft(Window window) => Later(window, WindowChange.PageLeft);
 
-    private static void Later(Window window, WindowChange change) =>
-        window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => Apply(MemoryTrim.After(change)));
+    // One trim waits at a time: a burst of window changes folds into it rather than queueing
+    // a full garbage collection for each change.
+    private static readonly TrimQueue Queue = new();
+
+    private static void Later(Window window, WindowChange change)
+    {
+        if (Queue.Request(change))
+        {
+            window.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => Apply(Queue.Take()));
+        }
+    }
 
     private static void Apply(MemoryTrim trim)
     {

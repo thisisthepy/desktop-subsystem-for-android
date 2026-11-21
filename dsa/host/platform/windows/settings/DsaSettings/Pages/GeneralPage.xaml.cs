@@ -15,7 +15,7 @@ public partial class GeneralPage : Page
     {
         InitializeComponent();
         DataContext = ViewModel;
-        _timer.Tick += async (_, _) => await ViewModel.PollAsync();
+        _timer.Tick += PollingTimers.Once(ViewModel.PollAsync);
         PollingTimers.Attach(this, _timer);
         Loaded += async (_, _) =>
         {

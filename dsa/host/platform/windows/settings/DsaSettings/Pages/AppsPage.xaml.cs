@@ -23,6 +23,8 @@ public partial class AppsPage : Page
             await ViewModel.LoadWindowSettingsAsync();
             ShowHighlighted();
         };
+        // The apps and their icons go when the page is left; they are listed afresh when shown.
+        Unloaded += (_, _) => ViewModel.Release();
     }
 
     /// <summary>Brings the card of the app a task window's App info named into view, open, and

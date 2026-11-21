@@ -73,11 +73,19 @@ public partial class MainWindow : FluentWindow
         };
     }
 
-    private const double WideWindowWidth = 1008;
+    private double _pageSide;
 
     private void ApplyPageMargins(double width)
     {
-        var side = width >= WideWindowWidth ? 56 : 36;
+        // The margins are app resources, and setting one makes every page element that uses it
+        // look it up and lay itself out again. A resize sends a size change for each step, so
+        // they are set only when the window crosses the breakpoint, not on every step.
+        var side = Dsa.Settings.Core.PageMargins.Side(width);
+        if (side == _pageSide)
+        {
+            return;
+        }
+        _pageSide = side;
         System.Windows.Application.Current.Resources["PageHeaderMargin"] = new System.Windows.Thickness(side, 16, side, 20);
         System.Windows.Application.Current.Resources["PageContentMargin"] = new System.Windows.Thickness(side, 0, side, 24);
     }

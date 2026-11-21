@@ -71,6 +71,21 @@ public class AppsViewModelTests
     }
 
     [Fact]
+    public async Task Nfr1_the_apps_page_lets_go_of_the_apps_and_their_icons_when_left()
+    {
+        var (vm, cli) = Make(new FakeCli().Answer("apps list --json", List));
+        await vm.RefreshAsync();
+        Assert.Equal(2, vm.Rows.Count);
+        vm.Release();
+        Assert.Empty(vm.Rows);
+        Assert.Equal("", vm.Count);
+        // Shown again, it lists them afresh.
+        await vm.RefreshAsync();
+        Assert.Equal(2, vm.Rows.Count);
+        Assert.Equal(2, cli.Calls.Count(c => c == "apps list --json"));
+    }
+
+    [Fact]
     public async Task Fr23_search_finds_an_app_by_name_or_package()
     {
         var (vm, _) = Make(new FakeCli().Answer("apps list --json", List));
