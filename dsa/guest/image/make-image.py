@@ -136,9 +136,6 @@ UNNEEDED_APPS = [
     "Calendar",
     "Gallery2",
     "Music",
-    # Developer and demo apps.
-    "Traceur",
-    "EasterEgg",
     # A text-to-speech engine of the guest's own, when a build has one: the agent's engine
     # speaks with the host's voices and is the default, and an engine here would hold its
     # voices in the guest's memory.
@@ -3099,7 +3096,10 @@ def edit_settings_apk(data, name):
 #   phone runs for a store before resale (screen, touch, battery and attestation checks). Its
 #   receiver resumes a trade-in evaluation after a reboot; a PC's VM is never traded in. The
 #   app and its status provider stay for Settings' entry.
-BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"]
+# - Traceur (com.android.traceur, System Tracing in developer options): its receiver only
+#   restores a trace that was running before the reboot. Opening System Tracing, or its
+#   quick setting, starts the app as before.
+BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk", "/Traceur.apk"]
 BOOT_ACTIONS = {"android.intent.action.BOOT_COMPLETED", "android.intent.action.LOCKED_BOOT_COMPLETED"}
 
 

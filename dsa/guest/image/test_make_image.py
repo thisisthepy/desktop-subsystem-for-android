@@ -6392,7 +6392,7 @@ class PublishedOdexTests(unittest.TestCase):
                 # members after it lie elsewhere in the new archive than in the published one,
                 # so a member read from the published archive after it is copied is read at
                 # its new place, which is no member's start there.
-                archive.writestr("SYSTEM/app/Traceur/Traceur.apk", b"removed" * 64)
+                archive.writestr("SYSTEM/app/Music/Music.apk", b"removed" * 64)
                 for name, data in files.items():
                     archive.writestr(name, data)
             make_image.modify(source, root / "modified.zip")
@@ -9743,6 +9743,13 @@ class SlimSystemServerTests(unittest.TestCase):
             self.assertTrue(any(tag == "activity" for tag, _ in components))
         for app in ("DynamicSystemInstallationService", "DeviceDiagnostics"):
             self.assertNotIn(app, make_image.REMOVED_APPS)
+
+    def test_nfr1_system_tracing_and_the_android_easter_egg_stay_without_starting_at_boot(self):
+        # A phone has both: System Tracing in developer options, and the logo that opens when
+        # the Android version in About is tapped. Neither runs until it is opened.
+        for app in ("Traceur", "EasterEgg"):
+            self.assertNotIn(app, make_image.REMOVED_APPS)
+        self.assertIn("/Traceur.apk", make_image.BOOT_RECEIVER_FREE_APKS)
 
     def test_nfr1_check_image_refuses_an_app_that_still_starts_at_boot(self):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()
