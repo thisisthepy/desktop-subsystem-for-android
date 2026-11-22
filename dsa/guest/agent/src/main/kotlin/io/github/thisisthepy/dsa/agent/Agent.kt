@@ -352,7 +352,9 @@ class Agent(
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
     private val settingsSync = SystemSettingsSync(systemSettings, log)
     private val deviceNameSync = DeviceNameSync(deviceName, log)
-    private val diagnosticsCollector = DiagnosticsCollector(diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner)
+    private val focusTrace = io.github.thisisthepy.dsa.agent.accessibility.FocusTraceLog()
+    private val diagnosticsCollector =
+        DiagnosticsCollector(diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner, focusTrace::text)
     private val backgroundApps = BackgroundApps(
         ownPackage,
         notifications,
@@ -547,6 +549,7 @@ class Agent(
         widgetNodes,
         reporter::reportedPackage,
         accessibilityFocusReader,
+        focusTrace,
     )
     /** Where the apps on the display keep system gestures out, as last heard. */
     private var exclusion: List<TaskBounds> = emptyList()

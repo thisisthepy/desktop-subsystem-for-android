@@ -67,8 +67,8 @@ use dsa_transport::{Connection, Connector, TransportError};
 pub use dsa_protocol::host_api::types::AppRootStatus;
 
 use crate::accessibility::{
-    AccessibilityTarget, AccessibilityWatch, ActionRequest, ActionResult, Announcement, FocusTrace,
-    GuestAccessibility, TreeUpdate,
+    service_focus_trace_line, AccessibilityTarget, AccessibilityWatch, ActionRequest, ActionResult,
+    Announcement, FocusTrace, GuestAccessibility, TreeUpdate,
 };
 use crate::adb_discovery::AutoConnectState;
 use crate::addon_disk::{Addon, AddonDisk};
@@ -2038,10 +2038,16 @@ fn client_body(update: GuestAccessibility) -> Body {
 }
 
 /// Logs when a tree the service passes on moves the focus, with the time it passed.
-fn trace_focus(trace: &mut FocusTrace, update: &GuestAccessibility, target: AccessibilityTarget) {
+/// The line starts with the caller's user, so the user's diagnostics archive keeps it.
+fn trace_focus(
+    trace: &mut FocusTrace,
+    update: &GuestAccessibility,
+    target: AccessibilityTarget,
+    user: &str,
+) {
     if let GuestAccessibility::Tree(tree) = update {
         if let Some(line) = trace.moved(tree, target, "the host service sent it on") {
-            eprintln!("{line}");
+            eprintln!("{}", service_focus_trace_line(user, &line));
         }
     }
 }
@@ -2988,7 +2994,9 @@ impl HostApiService {
         // one waits for the client's actions: a focus move then reaches the screen reader with
         // no wait at all. A transport that cannot send from a second thread keeps both here,
         // and the trees wait at most ACCESSIBILITY_POLL.
+        let user = peer.user.clone();
         let forward = connection.try_clone_sender().map(|sender| {
+            let user = user.clone();
             let sender = Arc::new(Mutex::new(sender));
             let updates = std::mem::replace(&mut watch.updates, std::sync::mpsc::channel().1);
             let ended = Arc::new(AtomicBool::new(false));
@@ -2999,7 +3007,7 @@ impl HostApiService {
                 .spawn(move || {
                     let mut trace = FocusTrace::new();
                     while let Ok(update) = updates.recv() {
-                        trace_focus(&mut trace, &update, target);
+                        trace_focus(&mut trace, &update, target, &user);
                         let frame = encode(&Envelope {
                             body: Some(client_body(update)),
                         });
@@ -3042,7 +3050,7 @@ impl HostApiService {
                                 return;
                             }
                         };
-                        trace_focus(&mut trace, &update, target);
+                        trace_focus(&mut trace, &update, target, &user);
                         if send(&mut *connection, client_body(update)).is_err() {
                             return;
                         }

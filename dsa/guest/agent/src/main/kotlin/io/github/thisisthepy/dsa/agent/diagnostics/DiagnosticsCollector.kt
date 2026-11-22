@@ -39,6 +39,8 @@ class DiagnosticsCollector(
     private val send: (ByteArray) -> Unit,
     private val log: Log,
     private val run: (Runnable) -> Unit = { Thread(it, "dsa-diagnostics").start() },
+    /** The agent's latest focus trace lines; empty when no focus moved. */
+    private val focusTrace: () -> String = { "" },
 ) {
     /** Starts gathering if the frame asks for it. False for any other frame. */
     fun handle(frame: ByteArray): Boolean {
@@ -72,6 +74,8 @@ class DiagnosticsCollector(
             }
         }
         sendFile(requestId, "android/dumpsys.txt", summary.toString().toByteArray(Charsets.UTF_8))
+        val trace = focusTrace()
+        if (trace.isNotEmpty()) sendFile(requestId, "android/focus-trace.txt", trace.toByteArray(Charsets.UTF_8))
         try {
             var total = 0L
             val names = HashSet<String>()

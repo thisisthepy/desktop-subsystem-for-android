@@ -260,6 +260,29 @@ opened event, and live regions and the app's announcements and toasts are raised
 notifications. The focus a client sees is whichever of Android's input focus and
 accessibility focus moved last.
 
+**Tracing a focus move.** Each focus move logs one line at each of three hops, so a slow or
+lost focus can be pinned to the hop where it stopped. Every line starts with
+`accessibility focus trace: task <task>: focus <id>, accessibility focus <id>`, then names
+its hop and the time it passed, in milliseconds since 1970 by the clock of the machine that
+logged it:
+
+1. The agent in Android, when it sent the move (`the agent sent it at <ms> ms`, then how
+   long after Android's event). It goes to Android's log (tag `DsaAgent`) and is kept in
+   memory for the diagnostics archive, since Android's log is shared and overwritten within
+   minutes.
+2. The host service, when it passed the move on (`the host service sent it on at <ms> ms`).
+   It goes to the service's log, `dsa-hostd.log` in the machine's DSA data folder, after the
+   ID of the user whose Android it came from. Only administrators can read that folder.
+3. The window, when it raised UI Automation's focus event
+   (`the window raised UI Automation's focus event at <ms> ms`). It goes to `dsa-wm.log` in
+   `%LOCALAPPDATA%\DSA\logs`.
+
+To read all three together, run `dsa logs collect -o diag.zip`. The archive holds the
+agent's lines in `android/focus-trace.txt`, the service's in `host/dsa-hostd.log` (only the
+lines about your user) and the window's in `host/dsa-wm.log`. Search
+each for `accessibility focus trace: task <task>: focus <id>` and line up the times: the
+difference between two hops is how long the move spent between them.
+
 ## Accessibility
 
 **Screen readers.** NVDA and Narrator read Android apps through the UI Automation tree

@@ -4,10 +4,10 @@
 use std::time::{Duration, Instant};
 
 use dsa_host_core::accessibility::{
-    focus_trace_line, from_screen, role_of, to_screen, AccessibilityTarget, ActionRequest,
-    ActionResult, ClientDemand, ClientPresence, Demand, DemandReason, FocusTrace, Node, NodeAction,
-    NodeRange, NodeStates, PresenceChange, Role, Tree, TreeError, TreeUpdate, MAX_NODES,
-    MAX_TEXT_CHARS, SNAPSHOT_INTERVAL,
+    focus_trace_line, from_screen, role_of, service_focus_trace_line, to_screen,
+    AccessibilityTarget, ActionRequest, ActionResult, ClientDemand, ClientPresence, Demand,
+    DemandReason, FocusTrace, Node, NodeAction, NodeRange, NodeStates, PresenceChange, Role, Tree,
+    TreeError, TreeUpdate, MAX_NODES, MAX_TEXT_CHARS, SNAPSHOT_INTERVAL,
 };
 use dsa_host_core::compositor::window_sizing::{density_for_dpi, scale_between, to_window_size};
 use dsa_host_core::input::WindowGeometry;
@@ -738,4 +738,32 @@ fn fr18_each_focus_move_is_traced_once_with_the_hop_and_time() {
         "accessibility focus trace: task 7: focus 3, accessibility focus none, raised at \
          1700000000123 ms"
     );
+}
+
+#[test]
+fn fr18_the_service_focus_trace_line_reaches_only_its_users_diagnostics() {
+    use dsa_host_core::diagnostics::lines_of_user;
+
+    let target = AccessibilityTarget::Task(147);
+    let mut trace = FocusTrace::new();
+    let mut screen = settings_screen(1);
+    screen.focused = Some(115);
+    let line = trace
+        .moved(&screen, target, "the host service sent it on")
+        .expect("the first focus is a move");
+    let user = "S-1-5-21-1-2-3-1001";
+    let logged = service_focus_trace_line(user, &line);
+    assert!(
+        logged.starts_with(
+            "S-1-5-21-1-2-3-1001: accessibility focus trace: task 147: focus 115,              accessibility focus none, the host service sent it on at "
+        ),
+        "{logged}"
+    );
+    // The service's log is shared: the user's archive keeps the line, another user's does not.
+    let log = format!(
+        "{logged}
+"
+    );
+    assert_eq!(lines_of_user(log.as_bytes(), user), log.as_bytes());
+    assert!(lines_of_user(log.as_bytes(), "S-1-5-21-1-2-3-1002").is_empty());
 }

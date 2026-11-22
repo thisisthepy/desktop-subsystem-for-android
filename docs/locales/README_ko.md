@@ -245,6 +245,28 @@ AutomationId, 이름, 컨트롤 유형으로 찾습니다. 요소가 아니라 �
 앱의 안내, 토스트는 알림으로 냅니다. 클라이언트가 보는 포커스는 Android의 입력 포커스와 접근성
 포커스 가운데 마지막으로 움직인 쪽입니다.
 
+**포커스 이동 추적.** 포커스가 한 번 움직일 때마다 세 단계에서 한 줄씩 기록합니다. 그래서 느리거나
+사라진 포커스가 어느 단계에서 멈췄는지 찾을 수 있습니다. 모든 줄은
+`accessibility focus trace: task <task>: focus <id>, accessibility focus <id>`로 시작하고,
+이어서 단계와 그 단계를 지난 시각을 씁니다. 시각은 그 줄을 기록한 기기의 시계로 잰 1970년 이후의
+밀리초입니다.
+
+1. Android 안의 에이전트가 이동을 보낼 때(`the agent sent it at <ms> ms`, 이어서 Android의
+   이벤트에서 얼마나 지났는지). Android 로그(태그 `DsaAgent`)에 기록하고, 진단 자료에 넣도록
+   메모리에도 보관합니다. Android 로그는 모든 앱이 함께 쓰므로 몇 분이면 덮어써지기 때문입니다.
+2. 호스트 서비스가 이동을 넘길 때(`the host service sent it on at <ms> ms`). 컴퓨터의 DSA 데이터
+   폴더에 있는 서비스 로그 `dsa-hostd.log`에, 이동이 온 Android의 사용자 ID 뒤에 기록합니다. 이
+   폴더는 관리자만 읽을 수 있습니다.
+3. 창이 UI Automation의 포커스 이벤트를 낼 때
+   (`the window raised UI Automation's focus event at <ms> ms`). `%LOCALAPPDATA%\DSA\logs`의
+   `dsa-wm.log`에 기록합니다.
+
+세 줄을 함께 보려면 `dsa logs collect -o diag.zip`을 실행합니다. 자료 안의
+`android/focus-trace.txt`에 에이전트의 줄이, `host/dsa-hostd.log`에 서비스의 줄(내 사용자에
+관한 줄만)이, `host/dsa-wm.log`에 창의 줄이 있습니다. 각각에서
+`accessibility focus trace: task <task>: focus <id>`를 찾아 시각을 맞춰 봅니다. 두 단계의 시각
+차이가 그 사이에 이동이 머문 시간입니다.
+
 ## 접근성
 
 **화면 읽기 프로그램.** NVDA와 내레이터(Narrator)는 위의 UI Automation 트리로 Android 앱을

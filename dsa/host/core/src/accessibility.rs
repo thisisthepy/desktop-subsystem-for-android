@@ -433,6 +433,14 @@ pub fn focus_trace_line(
     )
 }
 
+/// The host service's focus trace line as its log keeps it: after the ID of the user whose
+/// Android the move came from (`S-1-5-21-...: `). The service's log is shared by every user,
+/// and a user's diagnostics (`dsa logs collect`) keep only the lines about that user, so the
+/// line reaches the archive of the user whose window raised the same move, and no one else's.
+pub fn service_focus_trace_line(user: &str, line: &str) -> String {
+    format!("{user}: {line}")
+}
+
 /// Milliseconds since 1970 by the wall clock, for trace lines that compare across machines.
 pub fn wall_millis() -> u128 {
     std::time::SystemTime::now()

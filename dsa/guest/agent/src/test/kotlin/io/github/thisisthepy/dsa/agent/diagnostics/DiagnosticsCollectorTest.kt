@@ -119,4 +119,23 @@ class DiagnosticsCollectorTest {
             assertTrue(permission in names("privapp-permissions-dsa-agent.xml", "permission"))
         }
     }
+
+    @Test
+    fun fr18_the_focus_trace_goes_in_the_archive_only_when_a_focus_moved() {
+        val trace = io.github.thisisthepy.dsa.agent.accessibility.FocusTraceLog(capacity = 2)
+        fun names(): List<String> {
+            val sent = mutableListOf<ByteArray>()
+            DiagnosticsCollector(DiagnosticsSource.NONE, { sent += it }, RecordingLog(), run = { it.run() }, focusTrace = trace::text)
+                .collect(1)
+            return sent.map { Envelope.parseFrom(it) }.filter { it.hasDiagnosticsFile() }.map { it.diagnosticsFile.name }
+        }
+        assertEquals(listOf("android/dumpsys.txt"), names())
+        trace.add("accessibility focus trace: task 1: focus 2, accessibility focus none, the agent sent it at 1 ms")
+        trace.add("accessibility focus trace: task 1: focus 3, accessibility focus none, the agent sent it at 2 ms")
+        trace.add("accessibility focus trace: task 1: focus 4, accessibility focus none, the agent sent it at 3 ms")
+        assertEquals(listOf("android/dumpsys.txt", "android/focus-trace.txt"), names())
+        // Only the latest lines are kept.
+        assertFalse(trace.text().contains("focus 2,"))
+        assertTrue(trace.text().contains("focus 4,"))
+    }
 }

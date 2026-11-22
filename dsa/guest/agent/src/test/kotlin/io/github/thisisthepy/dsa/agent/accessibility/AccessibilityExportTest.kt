@@ -16,6 +16,7 @@ import io.github.thisisthepy.dsa.control.v1.AccessibilityAction
 import io.github.thisisthepy.dsa.control.v1.AccessibilityListening
 import io.github.thisisthepy.dsa.control.v1.AccessibilityTree
 import io.github.thisisthepy.dsa.control.v1.AccessibilityWatch
+import io.github.thisisthepy.dsa.control.v1.CollectDiagnostics
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.NodeAction
 import org.junit.Assert.assertEquals
@@ -939,6 +940,7 @@ class AccessibilityExportTest {
             accessibilityReader = reader,
             accessibilityFocusReader = focusReader,
             clock = { scheduler.now },
+            diagnosticsRunner = { it.run() },
         ).start()
         scheduler.runDue()
         service.windows[3] = listOf(list)
@@ -1098,5 +1100,20 @@ class AccessibilityExportTest {
         assertEquals("Wi-Fi", readTitle.text)
         assertFalse(readTitle.focused)
         assertTrue(log.lines.any { it.contains("accessibility focus trace: task 3: focus $rowId") })
+    }
+
+    @Test
+    fun fr18_the_agents_focus_trace_lines_go_in_the_diagnostics_archive() {
+        title.info = title.info.copy(focused = true)
+        startedWith(FakeScheduler(), FakeScheduler())
+        val titleId = trees().single().nodesList.single { it.text == "Network & internet" }.id
+        val logged = log.lines.first { it.contains("accessibility focus trace: task 3: focus $titleId") }
+        assertTrue(logged, logged.contains("the agent sent it at "))
+        // Android's log can lose the line; the diagnostics archive keeps it beside the host's.
+        deliver(Envelope.newBuilder().setCollectDiagnostics(CollectDiagnostics.newBuilder().setRequestId(9)).build())
+        val trace = daemon.sentMessages()
+            .filter { it.hasDiagnosticsFile() && it.diagnosticsFile.name == "android/focus-trace.txt" }
+            .joinToString("") { it.diagnosticsFile.data.toStringUtf8() }
+        assertTrue(trace, trace.lines().any { logged.endsWith(it) && it.startsWith("accessibility focus trace: task 3: focus $titleId") })
     }
 }

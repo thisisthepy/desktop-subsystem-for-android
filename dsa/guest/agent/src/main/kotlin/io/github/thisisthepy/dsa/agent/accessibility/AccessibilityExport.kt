@@ -410,6 +410,8 @@ class AccessibilityExport(
      * never waits behind a tree read on [reader].
      */
     private val focusReader: Scheduler = reader,
+    /** Keeps the focus trace lines for the diagnostics archive, beyond Android's log. */
+    private val focusTrace: FocusTraceLog? = null,
 ) {
     private class TaskState {
         var epoch = 0
@@ -943,11 +945,11 @@ class AccessibilityExport(
             event?.eventAt?.takeIf { it > 0 }?.let { "${now - it} ms after Android made its event" },
             event?.receivedAt?.takeIf { it > 0 }?.let { "${now - it} ms after the agent received it" },
         )
-        log.info(
-            "accessibility focus trace: $target: focus ${focus.takeIf { it != 0 } ?: "none"}, " +
-                "accessibility focus ${accessibilityFocus.takeIf { it != 0 } ?: "none"}, " +
-                hops.joinToString(", "),
-        )
+        val line = "accessibility focus trace: $target: focus ${focus.takeIf { it != 0 } ?: "none"}, " +
+            "accessibility focus ${accessibilityFocus.takeIf { it != 0 } ?: "none"}, " +
+            hops.joinToString(", ")
+        log.info(line)
+        focusTrace?.add(line)
     }
 
     private fun announce(change: AccessibilityChange) {
