@@ -3075,6 +3075,10 @@ def edit_settings_apk(data, name):
 #   restores a trace that was running before the reboot. Opening System Tracing, or its
 #   quick setting, starts the app as before.
 BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk", "/Traceur.apk"]
+# System apps a phone has that open only from Settings, so no launcher lists them: System
+# Tracing (Traceur, in developer options) and the Android logo (EasterEgg, opened by tapping
+# the Android version in About). check-image.py refuses an image without them.
+SETTINGS_ONLY_APKS = ["SYSTEM/app/Traceur/Traceur.apk", "SYSTEM/app/EasterEgg/EasterEgg.apk"]
 BOOT_ACTIONS = {"android.intent.action.BOOT_COMPLETED", "android.intent.action.LOCKED_BOOT_COMPLETED"}
 
 

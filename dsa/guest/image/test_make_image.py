@@ -9697,7 +9697,7 @@ class SlimSystemServerTests(unittest.TestCase):
 
     def test_nfr1_the_dsu_installer_and_trade_in_diagnostics_no_longer_start_at_every_boot(self):
         self.assertEqual(make_image.BOOT_RECEIVER_FREE_APKS,
-                         ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"])
+                         ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk", "/Traceur.apk"])
         published = {DYNSYSTEM_APK: _apk({"AndroidManifest.xml": DYNSYSTEM_MANIFEST, "classes.dex": b"dex"}),
                      DIAGNOSTICS_APK: _apk({"AndroidManifest.xml": DIAGNOSTICS_MANIFEST, "classes.dex": b"dex"})}
         with tempfile.TemporaryDirectory() as tmp:
@@ -9728,6 +9728,16 @@ class SlimSystemServerTests(unittest.TestCase):
         for app in ("Traceur", "EasterEgg"):
             self.assertNotIn(app, make_image.REMOVED_APPS)
         self.assertIn("/Traceur.apk", make_image.BOOT_RECEIVER_FREE_APKS)
+
+    def test_nfr1_check_image_refuses_an_image_without_system_tracing_or_the_easter_egg(self):
+        self.assertEqual(make_image.SETTINGS_ONLY_APKS,
+                         ["SYSTEM/app/Traceur/Traceur.apk", "SYSTEM/app/EasterEgg/EasterEgg.apk"])
+        for name in make_image.SETTINGS_ONLY_APKS:
+            # Neither is taken out by any removal rule of the image.
+            self.assertFalse(make_image.replaced_by_default_apps(name))
+            self.assertFalse(any(f"/{app}/" in name for app in make_image.REMOVED_APPS))
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("make_image.SETTINGS_ONLY_APKS", script)
 
     def test_nfr1_check_image_refuses_an_app_that_still_starts_at_boot(self):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()

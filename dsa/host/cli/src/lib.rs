@@ -2192,7 +2192,9 @@ fn apps(
             .iter()
             .find(|app| &app.package_name == package)
             .ok_or_else(|| {
-                format!("no app of {package} is installed in Android; dsa apps list shows them")
+                format!(
+                        "no app of {package} with a launcher entry is installed in Android; dsa                          apps list shows them (apps only Settings opens, such as System Tracing,                          have no launcher entry and are not listed)"
+                    )
             })?;
         let path = desktop::place_on_desktop(app)?;
         return Ok(if invocation.json {
@@ -2247,7 +2249,9 @@ fn apps(
                 .iter()
                 .find(|app| app.package_name == package)
                 .ok_or_else(|| {
-                    format!("no app of {package} is installed in Android; dsa apps list shows them")
+                    format!(
+                        "no app of {package} with a launcher entry is installed in Android; dsa                          apps list shows them (apps only Settings opens, such as System Tracing,                          have no launcher entry and are not listed)"
+                    )
                 })?;
             Ok(if invocation.json {
                 let mut value = app_json(app, true);
