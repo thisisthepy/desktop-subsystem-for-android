@@ -64,7 +64,8 @@ use dsa_host_core::compositor::surface_calls::{
     SURFACE_OP_TICK,
 };
 use dsa_host_core::compositor::window_sizing::{
-    shown_frame_placement, to_task_length, uncovered_fill, window_size_of, FramePlacement, Scale,
+    placement_ratios, shown_frame_placement, to_task_length, uncovered_fill, window_size_of,
+    FramePlacement, Scale,
 };
 use dsa_protocol::window_host::encode_body;
 use dsa_protocol::window_host::types::{envelope::Body, SurfaceAnswer, SurfaceCall};
@@ -1470,7 +1471,7 @@ impl WindowPresenter {
             view,
             state.scale,
             state.follow.held(),
-            state.follow.pending(),
+            state.follow.stretched(),
         );
         // The window has no redirection surface (WS_EX_NOREDIRECTIONBITMAP) and paints no
         // background (WM_ERASEBKGND), so wherever the frame's visual does not reach, beside a
@@ -1513,7 +1514,8 @@ impl WindowPresenter {
             }
             fill_shown &= state.fill_colour == Some(colour) && state.fill_surface.is_some();
         }
-        let (x, y, dx, dy) = frame_transform(frame_scale(buffers, state.frame), placement);
+        let (x, y, dx, dy) =
+            frame_transform(frame_scale(buffers, state.frame), state.frame, placement);
         let matrix = Matrix3x2 {
             M11: x,
             M12: 0.0,
@@ -1820,12 +1822,17 @@ fn fill_colour(
 /// The frame visual's scale and offset (x scale, y scale, x, y) that shows the frame where
 /// core places it (`placement`), for a swapchain whose buffers the frame fills at
 /// `buffer_scale`.
-fn frame_transform(buffer_scale: (f32, f32), placement: FramePlacement) -> (f32, f32, f32, f32) {
-    let (numerator, denominator) = placement.scale;
-    let ratio = numerator as f32 / denominator.max(1) as f32;
+fn frame_transform(
+    buffer_scale: (f32, f32),
+    frame: (u32, u32),
+    placement: FramePlacement,
+) -> (f32, f32, f32, f32) {
+    // Each axis on its own: a frame stretched over a window of another shape while the
+    // window waits for the app scales its two axes differently.
+    let (x, y) = placement_ratios(frame, placement);
     (
-        buffer_scale.0 * ratio,
-        buffer_scale.1 * ratio,
+        buffer_scale.0 * x as f32,
+        buffer_scale.1 * y as f32,
         placement.origin.0 as f32,
         placement.origin.1 as f32,
     )
@@ -1840,7 +1847,7 @@ mod tests {
     fn nfr8_windows_places_each_frame_as_the_shared_vectors_say() {
         for case in vectors::PLACEMENTS {
             let placement = frame_placement(case.frame, case.view, case.scale, case.held);
-            let (x, y, dx, dy) = frame_transform((1.0, 1.0), placement);
+            let (x, y, dx, dy) = frame_transform((1.0, 1.0), case.frame, placement);
             let expected = case.expected;
             assert_eq!(
                 (dx, dy),

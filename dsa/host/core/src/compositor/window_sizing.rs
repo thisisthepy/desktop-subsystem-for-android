@@ -407,9 +407,12 @@ pub fn frame_placement(
 /// `scale`) while a frame of its new size is still `pending`: the window holds a new size (the
 /// maximise button, a double click on the title bar, a snap, a restore) and the guest has not
 /// answered it yet ([`FrameFollow::pending`](super::frame_follow::FrameFollow::pending)). The
-/// last frame is stretched to fit the window, keeping its shape, in the window's middle, in
-/// every scaling mode, so the window grows with the app in it. Once nothing is pending the
-/// frame is placed as [`frame_placement`] says.
+/// last frame is stretched over the whole window, in every scaling mode, so the window grows
+/// (or shrinks) with the app in it and no part of the window is left uncovered: kept to its
+/// shape, a phone-shaped frame in a wide window left bands at its sides that showed the desktop.
+/// Its `size` is then the window's, and its `scale` is the height's; each axis is scaled by
+/// [`placement_ratios`]. Once nothing is pending the frame is placed as [`frame_placement`]
+/// says.
 pub fn shown_frame_placement(
     frame: (u32, u32),
     view: (u32, u32),
@@ -424,7 +427,35 @@ pub fn shown_frame_placement(
     if to_window_size(frame, scale) == view {
         return placed;
     }
-    fit_placement(frame, view)
+    FramePlacement {
+        scale: scale_between(view.1, frame.1),
+        origin: (0, 0),
+        size: view,
+    }
+}
+
+/// How much each axis of a frame of `frame` task pixels is scaled to cover `placement`: the
+/// placement's own scale on both axes, unless the placement stretches the frame to a size of
+/// another shape (more than a pixel off on an axis), when each axis is scaled to the size.
+pub fn placement_ratios(frame: (u32, u32), placement: FramePlacement) -> (f64, f64) {
+    let (numerator, denominator) = placement.scale;
+    let ratio = f64::from(numerator) / f64::from(denominator.max(1));
+    if frame.0 == 0 || frame.1 == 0 {
+        return (ratio, ratio);
+    }
+    let at_scale = to_window_size(frame, placement.scale);
+    let off = |a: u32, b: u32| a.abs_diff(b) > 1;
+    let axis = |size: u32, at: u32, frame: u32| {
+        if off(size, at) {
+            f64::from(size) / f64::from(frame)
+        } else {
+            ratio
+        }
+    };
+    (
+        axis(placement.size.0, at_scale.0, frame.0),
+        axis(placement.size.1, at_scale.1, frame.1),
+    )
 }
 
 /// `frame` task pixels scaled to fit a window of `view` pixels, keeping their shape, centred.
@@ -1883,7 +1914,7 @@ mod tests {
         let filled = |follow: &FrameFollow| {
             let frame = follow.shown().unwrap_or(follow.view());
             let placement =
-                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.pending());
+                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.stretched());
             follow.strips_filled(placement)
         };
         // Settings at 1041x1495 is maximised on the 2880x1800 main monitor (work area
@@ -1897,11 +1928,9 @@ mod tests {
         assert!(follow.pending());
         assert!(!filled(&follow));
         let view = follow.view();
-        let placed = shown_frame_placement((1041, 1495), view, (1, 1), true, follow.pending());
-        assert_eq!(placed.size.1, 1704);
-        assert!((1185..=1187).contains(&placed.size.0), "{placed:?}");
-        assert_eq!(placed.origin.1, 0);
-        assert_eq!(placed.origin.0, (2880 - placed.size.0) / 2);
+        let placed = shown_frame_placement((1041, 1495), view, (1, 1), true, follow.stretched());
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (2880, 1704));
         // The frame of the new size comes: shown 1:1, filling the window, nothing pending.
         follow.frame_arrived((2880, 1704));
         assert!(!follow.pending());
@@ -1929,7 +1958,7 @@ mod tests {
         let filled = |follow: &FrameFollow| {
             let frame = follow.shown().unwrap_or(follow.view());
             let placement =
-                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.pending());
+                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.stretched());
             follow.strips_filled(placement)
         };
         // On a 2560x1440 monitor at 125% the guest can draw at most 2400x1380 window pixels
@@ -1939,12 +1968,49 @@ mod tests {
         follow.frame_arrived((1140, 836));
         follow.set_held(true);
         follow.view_taken((2560, 1380));
-        // Beyond the limit: the strips are filled from the start, under the stretched frame.
+        // While pending, the last frame is stretched over the whole window: no strip at all.
         assert!(follow.pending());
-        assert!(filled(&follow));
+        assert!(follow.stretched());
+        let placed = shown_frame_placement((1140, 836), (2560, 1380), (1, 1), true, true);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (2560, 1380));
+        assert!(!filled(&follow));
+        // The guest's answer at its limit: shown as it is, the strips beside it filled.
         follow.frame_arrived((2400, 1380));
         assert!(!follow.pending());
         assert!(filled(&follow));
+    }
+
+    #[test]
+    fn fr4_a_maximise_by_sc_maximize_stretches_the_last_frame_over_the_whole_window() {
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        // FLO restored at 497x844 (client 471x831) on the 2880x1800 main monitor at 200%,
+        // maximised by WM_SYSCOMMAND SC_MAXIMIZE (the same path as the button and a double
+        // click): the client becomes 2880x1704 and no frame of that size has come yet.
+        let mut follow = FrameFollow::new((471, 831));
+        follow.set_limit(Some((2880, 2880)));
+        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        follow.set_held(true);
+        follow.view_taken((2880, 1704));
+        // FLO keeps drawing its old size meanwhile.
+        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        assert!(follow.stretched());
+        let placed = shown_frame_placement((471, 831), (2880, 1704), (1, 1), true, true);
+        // The whole window, not a phone-shaped frame in its middle with bands beside it.
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (2880, 1704));
+        let (x, y) = placement_ratios((471, 831), placed);
+        assert!((x * 471.0 - 2880.0).abs() < 0.5, "{x}");
+        assert!((y * 831.0 - 1704.0).abs() < 0.5, "{y}");
+        assert!(!follow.strips_filled(placed));
+        // Restored: the window lets go and takes its frames' size again; a held window
+        // snapped or restored to a smaller size while held is stretched the same way.
+        let placed = shown_frame_placement((2880, 1704), (471, 831), (1, 1), true, true);
+        assert_eq!((placed.origin, placed.size), ((0, 0), (471, 831)));
+        // An unstretched placement scales both axes by its own scale.
+        let placed = frame_placement((1041, 1495), (2880, 1704), (82, 131), true);
+        let (x, y) = placement_ratios((1041, 1495), placed);
+        assert_eq!(x, y);
     }
 
     #[test]

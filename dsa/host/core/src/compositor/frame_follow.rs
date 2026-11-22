@@ -162,6 +162,27 @@ impl FrameFollow {
         self.held && self.waiting_from.is_some()
     }
 
+    /// Whether the last frame is shown stretched over the whole window
+    /// ([`shown_frame_placement`](super::window_sizing::shown_frame_placement)'s `pending`):
+    /// the window waits for the guest's answer to its new size, and the frame on the screen is
+    /// not already as large as the guest can draw. A frame at that limit in a window beyond it
+    /// is the guest's last word (a window at the limit maximised again gets the same frame
+    /// back), so it is shown as it is, with the strips beside it filled.
+    pub fn stretched(&self) -> bool {
+        if !self.pending() {
+            return false;
+        }
+        let view = self.view;
+        let at_limit = match (self.limit, self.shown) {
+            (Some(limit), Some(shown)) => {
+                (view.0 > limit.0 && shown.0 + 1 >= limit.0)
+                    || (view.1 > limit.1 && shown.1 + 1 >= limit.1)
+            }
+            _ => false,
+        };
+        !at_limit
+    }
+
     /// The limit [`FrameFollow::set_limit`] gave.
     pub fn limit(&self) -> Option<(u32, u32)> {
         self.limit
@@ -363,7 +384,7 @@ mod tests {
             follow.view(),
             (1, 1),
             follow.held(),
-            follow.pending(),
+            follow.stretched(),
         );
         follow.strips_filled(placement)
     }

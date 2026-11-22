@@ -1023,7 +1023,7 @@ impl TaskWindow {
         let (view, backing) = unsafe { content_pixels(window) };
         let frame = self.on_screen.unwrap_or(view);
         let held = self.follow.held() && !self.overlay;
-        let pending = held && self.follow.pending();
+        let pending = held && self.follow.stretched();
         let placement = shown_frame_placement(frame, view, self.frame_scale, held, pending);
         let sample = TONES.with(|tones| {
             tones
