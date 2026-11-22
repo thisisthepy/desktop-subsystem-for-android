@@ -20,6 +20,7 @@ namespace dsa::camera {
 
 // The pixel formats the HAL offers, as android.hardware.graphics.common.PixelFormat numbers
 // them.
+constexpr int32_t kFormatRgba8888 = 0x1;                // preview shown on the screen
 constexpr int32_t kFormatBlob = 0x21;                   // JPEG stills
 constexpr int32_t kFormatImplementationDefined = 0x22;  // preview and video, the HAL's choice
 constexpr int32_t kFormatYcbcr420 = 0x23;               // apps that read the pictures
@@ -35,8 +36,19 @@ struct StreamSize {
     int64_t minFrameDurationNs = 0;
 };
 
-// The sizes a camera offers, largest first: each of its modes.
+// The sizes the host camera runs at, largest first: each of its modes.
+std::vector<StreamSize> modeSizes(const HostCamera& camera);
+
+// The sizes a camera offers Android, largest first: each of its modes, and each size apps
+// commonly ask for (320x240 to 1920x1080) that one of its modes is at least as large as. A
+// stream of such a size is cut from the picture of a larger mode.
 std::vector<StreamSize> streamSizes(const HostCamera& camera);
+
+// The format the HAL fills a stream with. A preview or video stream
+// (IMPLEMENTATION_DEFINED) is the HAL's choice: RGBA when the screen shows it, since the
+// guest's allocator makes no YUV buffer the GPU or the composer reads, else YUV. Other
+// formats stay as asked.
+int32_t overrideFormatFor(int32_t format, uint64_t consumerUsage);
 
 // The frame rate ranges (lowest, highest) a camera offers: every fixed rate its modes reach,
 // and each mode's own range, without repeats, in increasing order.
@@ -61,8 +73,9 @@ struct StreamAsk {
 // Whether the streams can run together on `camera`; `why` says what is wrong when not.
 bool streamsSupported(const HostCamera& camera, const std::vector<StreamAsk>& streams, std::string* why);
 
-// The size the host camera runs at for these streams: the largest of the preview and video
-// streams, or the still's when there is no other. Every stream is filled from it.
+// The size the host camera runs at for these streams: the smallest mode that the largest of
+// the preview and video streams (or the still, when there is no other) fits in, one of the
+// stream's shape first. Every stream is filled from it.
 StreamSize hostSizeFor(const HostCamera& camera, const std::vector<StreamAsk>& streams);
 
 // Android's camera IDs ("0", "1", ...), one for each host camera and kept while the HAL runs,

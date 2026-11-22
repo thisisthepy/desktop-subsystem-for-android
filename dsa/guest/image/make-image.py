@@ -59,6 +59,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -5891,9 +5892,172 @@ DESIGN_BLUE_TONES = {
     400: "#4F8AFF", 500: "#2B6EF2", 600: "#1A5AD7", 700: "#0D46AE", 800: "#053486", 900: "#001B4A",
     1000: "#000000",
 }
+
+
+# Every other colour role comes from the same blue, the way Material's tonal spot scheme makes
+# them: the secondary palette is the blue with little colour, the tertiary the blue's hue turned
+# 60 degrees towards cyan (towards violet it reads as a dull purple beside the blue), the
+# neutrals the blue nearly grey. A palette's tone is its CIE L* (0 black, 100 white), so two
+# roles a fixed number of tones apart have the same contrast whatever their hue; hue and chroma
+# are OKLCh's, which keeps a hue as it gets lighter (blue stays blue, not violet). Without
+# this, every role the design does not set keeps the framework's own grey violet scheme, and
+# the apps mix the blue primary with lavender containers, a violet tertiary and dark theme
+# surfaces of another hue. The agent makes the same palettes from the host's accent at run time.
+DESIGN_SEED = "#2B6EF2"
+# Each palette: its hue offset from the seed's (degrees) and its chroma (OKLCh). The first
+# accent keeps at least this chroma, more when the seed has more.
+DESIGN_PALETTES = {
+    "accent1": (0, 0.09), "accent2": (0, 0.04), "accent3": (-60, 0.06),
+    "neutral1": (0, 0.008), "neutral2": (0, 0.018),
+}
+# Each shade of a framework palette (system_accent1_500 and so on) and the tone it has.
+DESIGN_SHADE_TONES = {0: 100, 10: 99, 50: 95, 100: 90, 200: 80, 300: 70, 400: 60, 500: 50,
+                      600: 40, 700: 30, 800: 20, 900: 10, 1000: 0}
+# Each colour role of each theme: the palette and the tone it takes.
+DESIGN_ROLE_TONES = {
+    "light": {
+        "primary": ("accent1", 40), "on_primary": ("accent1", 100),
+        "primary_container": ("accent1", 90), "on_primary_container": ("accent1", 10),
+        "inverse_primary": ("accent1", 80), "surface_tint": ("accent1", 40),
+        "primary_dim": ("accent1", 35), "control_activated": ("accent1", 90),
+        "secondary": ("accent2", 40), "on_secondary": ("accent2", 100),
+        "secondary_container": ("accent2", 90), "on_secondary_container": ("accent2", 10),
+        "secondary_dim": ("accent2", 35),
+        "tertiary": ("accent3", 40), "on_tertiary": ("accent3", 100),
+        "tertiary_container": ("accent3", 90), "on_tertiary_container": ("accent3", 10),
+        "tertiary_dim": ("accent3", 35),
+        "on_background": ("neutral1", 10), "on_surface": ("neutral1", 10),
+        "surface_variant": ("neutral2", 90), "on_surface_variant": ("neutral2", 30),
+        "control_normal": ("neutral2", 30),
+        "outline": ("neutral2", 50), "outline_variant": ("neutral2", 80),
+        "inverse_surface": ("neutral1", 20), "inverse_on_surface": ("neutral1", 95),
+        "palette_key_color_primary": ("accent1", 50), "palette_key_color_secondary": ("accent2", 50),
+        "palette_key_color_tertiary": ("accent3", 50), "palette_key_color_neutral": ("neutral1", 50),
+        "palette_key_color_neutral_variant": ("neutral2", 50),
+    },
+    "dark": {
+        "primary": ("accent1", 80), "on_primary": ("accent1", 20),
+        "primary_container": ("accent1", 30), "on_primary_container": ("accent1", 90),
+        "inverse_primary": ("accent1", 40), "surface_tint": ("accent1", 80),
+        "primary_dim": ("accent1", 75), "control_activated": ("accent1", 30),
+        "secondary": ("accent2", 80), "on_secondary": ("accent2", 20),
+        "secondary_container": ("accent2", 30), "on_secondary_container": ("accent2", 90),
+        "secondary_dim": ("accent2", 75),
+        "tertiary": ("accent3", 80), "on_tertiary": ("accent3", 20),
+        "tertiary_container": ("accent3", 30), "on_tertiary_container": ("accent3", 90),
+        "tertiary_dim": ("accent3", 75),
+        "on_background": ("neutral1", 90), "on_surface": ("neutral1", 90),
+        "surface_variant": ("neutral2", 30), "on_surface_variant": ("neutral2", 80),
+        "control_normal": ("neutral2", 80),
+        "outline": ("neutral2", 60), "outline_variant": ("neutral2", 30),
+        "inverse_surface": ("neutral1", 90), "inverse_on_surface": ("neutral1", 20),
+        "palette_key_color_primary": ("accent1", 50), "palette_key_color_secondary": ("accent2", 50),
+        "palette_key_color_tertiary": ("accent3", 50), "palette_key_color_neutral": ("neutral1", 50),
+        "palette_key_color_neutral_variant": ("neutral2", 50),
+    },
+}
+# The fixed roles, the same in both themes.
+DESIGN_FIXED_ROLE_TONES = {
+    **{f"{role}_fixed": (palette, 90) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+    **{f"{role}_fixed_dim": (palette, 80) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+    **{f"on_{role}_fixed": (palette, 10) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+    **{f"on_{role}_fixed_variant": (palette, 30) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+}
+def _linear(channel):
+    c = channel / 255
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _gamma(value):
+    v = 12.92 * value if value <= 0.0031308 else 1.055 * value ** (1 / 2.4) - 0.055
+    return round(min(max(v, 0.0), 1.0) * 255)
+
+
+def color_lch(color):
+    """The OKLCh lightness (0 to 100), chroma and hue (degrees) of a #RRGGBB colour."""
+    value = color.lstrip("#")
+    r, g, b = (_linear(int(value[i:i + 2], 16)) for i in (0, 2, 4))
+    l_, m_, s_ = (math.copysign(abs(v) ** (1 / 3), v) for v in (
+        0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+        0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+        0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b))
+    lightness = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+    a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+    b_ = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    return lightness * 100, math.hypot(a, b_), math.degrees(math.atan2(b_, a)) % 360
+
+
+def _lch_linear_rgb(lightness, chroma, hue):
+    a, b = chroma * math.cos(math.radians(hue)), chroma * math.sin(math.radians(hue))
+    lightness /= 100
+    l_ = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (lightness - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    return (4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+            -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+            -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
+
+
+def tone_color(hue, chroma, tone):
+    """The #RRGGBB colour of a tone (CIE L*, 0 to 100) at an OKLCh hue, with the given chroma
+    or, where the screen cannot show that much, the most it can."""
+    if tone >= 100:
+        return "#FFFFFF"
+    if tone <= 0:
+        return "#000000"
+    # The OKLab lightness of a grey with that L*: the cube root of its luminance.
+    f = (tone + 16) / 116
+    luminance = f ** 3 if f ** 3 > 216 / 24389 else (116 * f - 16) / (24389 / 27)
+    lightness = 100 * luminance ** (1 / 3)
+
+    def inside(c):
+        return all(-1e-4 <= v <= 1 + 1e-4 for v in _lch_linear_rgb(lightness, c, hue))
+
+    low, high = 0.0, float(chroma)
+    if not inside(high):
+        for _ in range(24):
+            middle = (low + high) / 2
+            low, high = (middle, high) if inside(middle) else (low, middle)
+        high = low
+    return "#" + "".join(f"{_gamma(v):02X}" for v in _lch_linear_rgb(lightness, high, hue))
+
+
+def dynamic_palettes(seed):
+    """The five framework palettes of a seed colour: {palette: (hue, chroma)}."""
+    _, chroma, hue = color_lch(seed)
+    palettes = {}
+    for name, (turn, amount) in DESIGN_PALETTES.items():
+        palettes[name] = ((hue + turn) % 360, max(chroma, amount) if name == "accent1" else amount)
+    return palettes
+
+
+def dynamic_scheme(seed):
+    """The framework colours of a seed colour: each palette's shades in both themes, and each
+    colour role."""
+    palettes = dynamic_palettes(seed)
+    colors = {}
+    for name, (hue, chroma) in palettes.items():
+        for shade, tone in DESIGN_SHADE_TONES.items():
+            value = tone_color(hue, chroma, tone)
+            for theme in ("light", "dark"):
+                colors[f"system_{name}_{shade}_{theme}"] = value
+    for theme, roles in DESIGN_ROLE_TONES.items():
+        for role, (palette, tone) in roles.items():
+            colors[f"system_{role}_{theme}"] = tone_color(*palettes[palette], tone)
+    for role, (palette, tone) in DESIGN_FIXED_ROLE_TONES.items():
+        colors[f"system_{role}"] = tone_color(*palettes[palette], tone)
+    return colors
+
+
 # The page is a light grey (or black) and the cards on it white (or a dark grey), so the
-# cards stand out; dialogs and sheets sit a step above the page.
+# cards stand out; dialogs and sheets sit a step above the page. The values set here by hand
+# replace the scheme's.
 DESIGN_COLORS = {
+    **dynamic_scheme(DESIGN_SEED),
     **{f"system_accent1_{tone}_{theme}": value for tone, value in DESIGN_BLUE_TONES.items()
        for theme in ("light", "dark")},
     "system_primary_light": "#0B64D8",

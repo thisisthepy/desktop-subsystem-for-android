@@ -21,9 +21,14 @@ the host: a camera the user has blocked there is not offered to Android at all.
 2. Each camera is described at Android's EXTERNAL hardware level: a camera on the front of
    the screen faces front (`LENS_FACING_FRONT`), one on the back faces back, and any other
    (a USB camera, or one Windows does not place) is external. Its stream sizes and rates are
-   the modes the host camera has; preview and video streams are YUV, stills are JPEG.
+   the modes the host camera has, and the sizes apps ask for without looking (320x240 to
+   1920x1080, CameraX's defaults among them) that one of those modes is at least as large as.
+   A preview the screen shows (a SurfaceView or TextureView) is RGBA, because the guest's
+   allocator makes no YUV buffer the GPU or the composer reads; video and the streams apps
+   read are YUV, stills are JPEG.
 3. When an app configures its streams, the session opens its own connection and starts the
-   host camera at the size of its largest picture stream. The host holds the camera open
+   host camera at the smallest mode its largest picture stream fits in, one of the stream's
+   shape first. A stream of another shape is cropped at the centre, not stretched. The host holds the camera open
    from then until the session closes, so the camera light and the taskbar's in-use
    indicator show only while an app uses it.
 4. Each picture comes as a `CameraFrame` (NV12). For each capture request the session takes

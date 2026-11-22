@@ -6275,6 +6275,70 @@ class SystemScreenDesignTests(unittest.TestCase):
         values = ET.fromstring(files["res/values/dsa_design.xml"])
         self.assertEqual({c.get("name"): c.text for c in values.findall("color")}, colors)
 
+    @staticmethod
+    def luminance(color):
+        value = color.lstrip("#")
+        r, g, b = (make_image._linear(int(value[i:i + 2], 16)) for i in (0, 2, 4))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    def contrast(self, one, other):
+        light, dark = sorted((self.luminance(one), self.luminance(other)), reverse=True)
+        return (light + 0.05) / (dark + 0.05)
+
+    def test_fr34_every_palette_runs_from_white_to_black_in_order(self):
+        colors = make_image.DESIGN_COLORS
+        for palette in make_image.DESIGN_PALETTES:
+            for theme in ("light", "dark"):
+                shades = [colors[f"system_{palette}_{shade}_{theme}"] for shade in make_image.DESIGN_SHADE_TONES]
+                self.assertEqual((shades[0], shades[-1]), ("#FFFFFF", "#000000"), palette)
+                lights = [self.luminance(shade) for shade in shades]
+                self.assertEqual(lights, sorted(lights, reverse=True), (palette, theme, shades))
+                self.assertEqual(len(set(shades)), len(shades), (palette, theme))
+
+    def test_fr34_text_on_every_colour_role_is_readable(self):
+        colors = make_image.DESIGN_COLORS
+        pairs = [(role, f"on_{role}") for role in
+                 ("primary", "primary_container", "secondary", "secondary_container", "tertiary",
+                  "tertiary_container", "surface", "background", "surface_variant")]
+        pairs += [(f"surface_container{level}", "on_surface")
+                  for level in ("_lowest", "_low", "", "_high", "_highest")]
+        pairs += [("surface_bright", "on_surface"), ("surface_dim", "on_surface"),
+                  ("surface", "on_surface_variant"), ("inverse_surface", "inverse_on_surface")]
+        for theme in ("light", "dark"):
+            for back, text in pairs:
+                with self.subTest(theme=theme, role=back):
+                    self.assertGreaterEqual(
+                        self.contrast(colors[f"system_{back}_{theme}"], colors[f"system_{text}_{theme}"]), 4.5)
+        for role in ("primary", "secondary", "tertiary"):
+            self.assertGreaterEqual(self.contrast(colors[f"system_{role}_fixed"],
+                                                  colors[f"system_on_{role}_fixed"]), 4.5, role)
+
+    def test_fr34_every_colour_role_comes_from_the_blue(self):
+        colors = make_image.DESIGN_COLORS
+        # No role keeps the framework's own grey violet value.
+        for theme, roles in make_image.DESIGN_ROLE_TONES.items():
+            for role in roles:
+                self.assertIn(f"system_{role}_{theme}", colors)
+        for role in make_image.DESIGN_FIXED_ROLE_TONES:
+            self.assertIn(f"system_{role}", colors)
+        _, _, blue = make_image.color_lch(make_image.DESIGN_SEED)
+
+        def turn(color):
+            return (make_image.color_lch(color)[2] - blue + 180) % 360 - 180
+
+        # The secondary roles are the blue itself, the tertiary turns towards cyan, not violet.
+        for theme in ("light", "dark"):
+            for role in ("secondary", "secondary_container", "on_secondary_container"):
+                self.assertLess(abs(turn(colors[f"system_{role}_{theme}"])), 8, (role, theme))
+            for role in ("tertiary", "tertiary_container"):
+                self.assertLess(turn(colors[f"system_{role}_{theme}"]), -30, (role, theme))
+        # A tone is the same lightness in every palette, so a role's contrast does not depend
+        # on its hue.
+        for shade in (100, 500, 900):
+            lights = [self.luminance(colors[f"system_{palette}_{shade}_light"])
+                      for palette in make_image.DESIGN_PALETTES if palette != "accent1"]
+            self.assertLess(max(lights) - min(lights), 0.03, shade)
+
     def test_fr34_titles_are_bold(self):
         overlays = self.every_overlay()
         framework = ET.fromstring(overlays["DsaFrameworkOverlay.apk"]["res/values/dsa_design.xml"])

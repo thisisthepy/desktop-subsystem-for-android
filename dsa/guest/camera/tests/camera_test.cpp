@@ -101,14 +101,22 @@ TEST(fr26_a_host_picture_decodes) {
 }
 
 TEST(fr26_a_camera_offers_each_size_once_largest_first) {
-    const std::vector<StreamSize> sizes = streamSizes(webcam());
-    EXPECT_EQ(sizes.size(), 2u);
-    if (sizes.size() == 2) {
-        EXPECT_EQ(sizes[0].width, 1280u);
+    const std::vector<StreamSize> modes = modeSizes(webcam());
+    EXPECT_EQ(modes.size(), 2u);
+    if (modes.size() == 2) {
+        EXPECT_EQ(modes[0].width, 1280u);
         // Its fastest mode sets its shortest frame time.
-        EXPECT_EQ(sizes[0].minFrameDurationNs, 1000000000LL / 60);
-        EXPECT_EQ(sizes[1].width, 640u);
-        EXPECT_EQ(sizes[1].minFrameDurationNs, 1000000000LL / 30);
+        EXPECT_EQ(modes[0].minFrameDurationNs, 1000000000LL / 60);
+        EXPECT_EQ(modes[1].width, 640u);
+        EXPECT_EQ(modes[1].minFrameDurationNs, 1000000000LL / 30);
+    }
+    const std::vector<StreamSize> sizes = streamSizes(webcam());
+    for (size_t i = 1; i < sizes.size(); ++i) {
+        EXPECT_TRUE(static_cast<uint64_t>(sizes[i - 1].width) * sizes[i - 1].height >=
+                    static_cast<uint64_t>(sizes[i].width) * sizes[i].height);
+        for (size_t j = 0; j < i; ++j) {
+            EXPECT_TRUE(sizes[i].width != sizes[j].width || sizes[i].height != sizes[j].height);
+        }
     }
     const auto ranges = fpsRanges(webcam());
     const std::vector<std::pair<int32_t, int32_t>> expected = {{5, 30}, {15, 30}, {30, 30}, {60, 60}};
@@ -143,6 +151,100 @@ TEST(fr26_preview_video_and_still_streams_run_together) {
     EXPECT_EQ(still.width, 1280u);
 }
 
+namespace {
+
+// The camera the owner's PC reported (an OV02C10 webcam): no 320x240 mode of its own.
+HostCamera ov02c10() {
+    HostCamera camera;
+    camera.id = "ov02c10";
+    camera.name = "Camera Sensor OV02C10";
+    camera.facing = Facing::Front;
+    camera.modes = {Mode{1920, 1080, 30, 30}, Mode{1280, 720, 30, 30}, Mode{640, 360, 30, 30}};
+    return camera;
+}
+
+bool offers(const std::vector<StreamSize>& sizes, uint32_t width, uint32_t height) {
+    for (const StreamSize& size : sizes) {
+        if (size.width == width && size.height == height) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(fr26_a_camera_offers_the_sizes_apps_ask_for_without_looking) {
+    const std::vector<StreamSize> sizes = streamSizes(ov02c10());
+    // CameraX's analysis, preview and recording sizes, cut from a larger mode.
+    for (const auto& [width, height] : std::vector<std::pair<uint32_t, uint32_t>>{
+             {320, 240}, {640, 480}, {1280, 720}, {1920, 1080}, {176, 144}, {800, 600}}) {
+        EXPECT_TRUE(offers(sizes, width, height));
+    }
+    // Nothing larger than the camera's own largest mode.
+    for (const StreamSize& size : sizes) {
+        EXPECT_TRUE(size.width <= 1920 && size.height <= 1080);
+        EXPECT_EQ(size.minFrameDurationNs, 1000000000LL / 30);
+    }
+    EXPECT_TRUE(!offers(streamSizes(webcam()), 1920, 1080));
+    EXPECT_TRUE(offers(streamSizes(webcam()), 320, 240));
+}
+
+TEST(fr26_cameraxs_default_streams_run_on_a_camera_without_those_modes) {
+    std::string why;
+    // Preview 1280x720, analysis 320x240 YUV and a full size still: the session that failed.
+    const std::vector<StreamAsk> camerax = {{kFormatImplementationDefined, 1280, 720, true},
+                                            {kFormatYcbcr420, 320, 240, true},
+                                            {kFormatBlob, 1920, 1080, true}};
+    EXPECT_TRUE(streamsSupported(ov02c10(), camerax, &why));
+    EXPECT_EQ(why, std::string());
+    EXPECT_TRUE(streamsSupported(ov02c10(), {{kFormatYcbcr420, 640, 480, true}}, &why));
+    // The host runs the smallest mode the largest picture stream fits in, of its shape first.
+    const StreamSize preview = hostSizeFor(ov02c10(), camerax);
+    EXPECT_EQ(preview.width, 1280u);
+    EXPECT_EQ(preview.height, 720u);
+    const StreamSize analysis = hostSizeFor(ov02c10(), {{kFormatYcbcr420, 320, 240, true}});
+    EXPECT_EQ(analysis.width, 640u);
+    const StreamSize fourThree = hostSizeFor(ov02c10(), {{kFormatYcbcr420, 640, 480, true}});
+    EXPECT_EQ(fourThree.width, 1280u);
+}
+
+TEST(fr26_a_preview_the_screen_shows_is_rgba_and_video_is_yuv) {
+    // The SurfaceView's buffers: GPU_TEXTURE | COMPOSER_OVERLAY, which the guest's allocator
+    // cannot make in YUV.
+    EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x900), kFormatRgba8888);
+    EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x100), kFormatRgba8888);
+    // A video encoder, or a consumer that reads by CPU, gets YUV.
+    EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x10000), kFormatYcbcr420);
+    EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x10100), kFormatYcbcr420);
+    EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x3), kFormatYcbcr420);
+    // Formats an app names stay as named.
+    EXPECT_EQ(overrideFormatFor(kFormatYcbcr420, 0x900), kFormatYcbcr420);
+    EXPECT_EQ(overrideFormatFor(kFormatBlob, 0x3), kFormatBlob);
+}
+
+TEST(fr26_a_stream_of_another_shape_is_cropped_at_the_centre_not_stretched) {
+    const Crop wide = centerCrop(1280, 720, 640, 480);
+    EXPECT_EQ(wide.width, 960u);
+    EXPECT_EQ(wide.height, 720u);
+    EXPECT_EQ(wide.x, 160u);
+    EXPECT_EQ(wide.y, 0u);
+    const Crop same = centerCrop(1280, 720, 320, 180);
+    EXPECT_EQ(same.width, 1280u);
+    EXPECT_EQ(same.x, 0u);
+    // 8x2 luma 0..7 in each row, into a 2x2 buffer: a 2x2 region near the middle, which starts
+    // at column 2 (3 made even, so it starts on a chroma sample).
+    const uint8_t data[] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7,
+                            10, 20, 11, 21, 12, 22, 13, 23};
+    const Nv12 picture{data, sizeof(data), 8, 2, 8};
+    std::vector<uint8_t> y(4, 0), u(1, 0), v(1, 0);
+    YuvPlanes planes{{y.data(), 1, 2}, {u.data(), 1, 1}, {v.data(), 1, 1}};
+    EXPECT_TRUE(scaleToYuv(picture, 2, 2, planes));
+    EXPECT_EQ(y, (std::vector<uint8_t>{2, 3, 2, 3}));
+    EXPECT_EQ(u[0], 11);
+    EXPECT_EQ(v[0], 21);
+}
+
 TEST(fr26_android_camera_ids_stay_with_their_host_camera) {
     CameraIds ids;
     EXPECT_EQ(ids.idFor("front"), std::string("0"));
@@ -156,10 +258,11 @@ TEST(fr26_a_picture_scales_into_a_smaller_yuv_buffer) {
     // 4x2: luma 1, 2, 3, 4 in each row; chroma pairs (20, 30) and (21, 31).
     const uint8_t data[] = {1, 2, 3, 4, 1, 2, 3, 4, 20, 30, 21, 31};
     const Nv12 picture{data, sizeof(data), 4, 2, 4};
-    std::vector<uint8_t> y(2 * 2, 0), u(1, 0), v(1, 0);
+    // Into 2x1, the picture's own shape: every other pixel of the first row.
+    std::vector<uint8_t> y(2 * 1, 0), u(1, 0), v(1, 0);
     YuvPlanes planes{{y.data(), 1, 2}, {u.data(), 1, 1}, {v.data(), 1, 1}};
-    EXPECT_TRUE(scaleToYuv(picture, 2, 2, planes));
-    EXPECT_EQ(y, (std::vector<uint8_t>{1, 3, 1, 3}));
+    EXPECT_TRUE(scaleToYuv(picture, 2, 1, planes));
+    EXPECT_EQ(y, (std::vector<uint8_t>{1, 3}));
     EXPECT_EQ(u[0], 20);
     EXPECT_EQ(v[0], 30);
 }

@@ -16,6 +16,15 @@ already, so nothing is renamed.
 - The settings and screensaver settings lists group their preferences into cards, one per
   category (`PreferenceCards`).
 
+`patches/0002-follow-the-day-and-night-theme.patch`:
+
+- Upstream is dark only, so its text styles (the big time, the date, labels, the empty alarm
+  list), the inactive tabs, the city list, the alarm screen and the stopwatch marker are white
+  or translucent white. In the light theme they showed white on a light background. They take
+  the theme's `colorOnSurface` and `colorOnSurfaceVariant` instead, and the translucent colours
+  are black in the light theme and white in the dark one (`values-night/dsa_colors.xml`).
+- The screensaver, which is always on black, and the widgets keep their own colours.
+
 The clock is allowed to run its alarms while the guest saves power, and is granted its
 notification permission from the first boot, as LineageOS does (`sysconfig` and
 `default_permissions` in `../apps.json`).

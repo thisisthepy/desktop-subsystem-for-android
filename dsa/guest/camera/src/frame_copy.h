@@ -37,6 +37,19 @@ struct Nv12 {
     uint32_t stride = 0;
 };
 
+// A region of the host's picture.
+struct Crop {
+    uint32_t x = 0;
+    uint32_t y = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
+// The region of a `pictureWidth` by `pictureHeight` picture a `width` by `height` buffer is
+// filled from: the largest one of the buffer's shape, at the centre, as Android's centre-only
+// cropping has it, so a 4:3 stream of a 16:9 picture is not stretched.
+Crop centerCrop(uint32_t pictureWidth, uint32_t pictureHeight, uint32_t width, uint32_t height);
+
 // Whether `picture` holds all the bytes its size says.
 bool isWhole(const Nv12& picture);
 

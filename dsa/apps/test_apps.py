@@ -100,6 +100,32 @@ class DefaultAppsTests(unittest.TestCase):
                 self.assertIn("@style/DsaShape.Medium", text)
                 self.assertIn("@style/DsaCollapsingToolbar", text)
 
+    def test_fr42_the_clock_has_no_white_text_in_its_light_theme(self):
+        # Upstream's Clock is dark only. The design moves it to the day and night theme, so
+        # every text, tab and highlight colour that upstream has white must follow the theme,
+        # or it shows white on the light theme's background.
+        text = "".join(p.read_text() for p in apps.patches("deskclock"))
+        self.assertIn('parent="Theme.Material3Expressive.DynamicColors.DayNight.NoActionBar"', text)
+        added = "\n".join(line for line in text.splitlines() if line.startswith("+"))
+        removed = "\n".join(line for line in text.splitlines() if line.startswith("-"))
+        # The styles of the big time, the date, the labels and the empty alarm list.
+        self.assertEqual(removed.count('<item name="android:textColor">@color/white</item>'), 4)
+        self.assertEqual(added.count('<item name="android:textColor">?attr/colorOnSurface</item>'), 4)
+        self.assertIn('<item name="android:textColor">?attr/colorOnSurfaceVariant</item>', added)
+        # The inactive tabs, the city list, and the alarm screen, which has the window's colour.
+        self.assertIn('<item android:color="?attr/colorOnSurfaceVariant" />', added)
+        self.assertEqual(added.count('android:textColor="?attr/colorOnSurface"'), 5)
+        self.assertNotIn('android:textColor="@color/white"', added)
+        self.assertNotIn('android:textColor="@android:color/white"', added)
+        for java in ("mMarkerColor = Color.WHITE;", "dayButton.setTextColor(Color.WHITE);",
+                     "getButtonAnimator(mSnoozeButton, Color.WHITE)"):
+            self.assertIn(java, removed)
+        # The translucent colours are black in the light theme and white in the dark one.
+        self.assertIn('<color name="white_08p">#14000000</color>', added)
+        self.assertIn('<color name="no_alarms">#4C000000</color>', added)
+        self.assertIn('<color name="white_08p">#14FFFFFF</color>', added)
+        self.assertIn("+++ b/res/values-night/dsa_colors.xml", text)
+
     def test_fr42_an_app_with_a_title_area_starts_it_folded_in_a_low_window(self):
         for name in ("deskclock", "gallery", "camera", "music", "recorder", "documentsui"):
             with self.subTest(app=name):

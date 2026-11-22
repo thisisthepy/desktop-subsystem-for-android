@@ -171,10 +171,10 @@ ndk::ScopedAStatus Session::configureStreams(const device::StreamConfiguration& 
     for (const device::Stream& stream : in_requestedConfiguration.streams) {
         device::HalStream hal;
         hal.id = stream.id;
-        // Preview and video buffers are YUV the HAL writes; stills and YUV are as asked.
-        hal.overrideFormat = stream.format == graphics::PixelFormat::IMPLEMENTATION_DEFINED
-                                 ? graphics::PixelFormat::YCBCR_420_888
-                                 : stream.format;
+        // Preview buffers the screen shows are RGBA, video buffers YUV; stills and YUV are as
+        // asked.
+        hal.overrideFormat = static_cast<graphics::PixelFormat>(
+            overrideFormatFor(static_cast<int32_t>(stream.format), static_cast<uint64_t>(stream.usage)));
         hal.producerUsage = static_cast<graphics::BufferUsage>(kProducerUsage);
         hal.consumerUsage = static_cast<graphics::BufferUsage>(0);
         hal.maxBuffers = kMaxBuffers;

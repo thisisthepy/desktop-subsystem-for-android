@@ -216,11 +216,63 @@ class SystemSettingsSyncTest {
         val palette = TonalPalette.of(0xFF0078D4.toInt())
         assertEquals(0xFFFFFFFF.toInt(), palette["system_accent1_0"])
         assertEquals(0xFF000000.toInt(), palette["system_accent1_1000"])
-        val (hue, _, _) = TonalPalette.hsl(palette.getValue("system_accent1_500"))
-        val (seedHue, _, _) = TonalPalette.hsl(0xFF0078D4.toInt())
+        val (_, _, hue) = TonalPalette.lch(palette.getValue("system_accent1_500"))
+        val (_, _, seedHue) = TonalPalette.lch(0xFF0078D4.toInt())
         assertEquals(seedHue, hue, 3.0)
         // The neutrals are nearly grey.
         val (_, saturation, _) = TonalPalette.hsl(palette.getValue("system_neutral1_500"))
         assertTrue(saturation < 0.1)
+    }
+
+    private fun contrast(one: Int, other: Int): Double {
+        val (dark, light) = listOf(TonalPalette.luminance(one), TonalPalette.luminance(other)).sorted()
+        return (light + 0.05) / (dark + 0.05)
+    }
+
+    @Test
+    fun fr34_every_palette_of_an_accent_runs_from_white_to_black_in_order() {
+        for (seed in listOf(0xFF0078D4.toInt(), 0xFFE81123.toInt(), 0xFF107C10.toInt(), 0xFFFFB900.toInt(), 0xFF808080.toInt())) {
+            val palette = TonalPalette.of(seed)
+            for (name in listOf("accent1", "accent2", "accent3", "neutral1", "neutral2")) {
+                val lights = TonalPalette.SHADES.map { (shade, _) -> TonalPalette.luminance(palette.getValue("system_${name}_$shade")) }
+                assertEquals("$name of ${"%08X".format(seed)}", lights.sortedDescending(), lights)
+                assertEquals(lights.size, lights.toSet().size)
+            }
+        }
+    }
+
+    @Test
+    fun fr34_text_on_every_colour_role_of_an_accent_is_readable() {
+        val pairs = listOf(
+            "primary" to "on_primary", "primary_container" to "on_primary_container",
+            "secondary" to "on_secondary", "secondary_container" to "on_secondary_container",
+            "tertiary" to "on_tertiary", "tertiary_container" to "on_tertiary_container",
+            "surface_variant" to "on_surface_variant", "inverse_surface" to "inverse_on_surface",
+        )
+        for (seed in listOf(0xFF0078D4.toInt(), 0xFFE81123.toInt(), 0xFF107C10.toInt(), 0xFFFFB900.toInt(), 0xFF808080.toInt())) {
+            val palette = TonalPalette.of(seed)
+            for (theme in listOf("light", "dark")) {
+                for ((back, text) in pairs) {
+                    val ratio = contrast(palette.getValue("system_${back}_$theme"), palette.getValue("system_${text}_$theme"))
+                    assertTrue("$back $theme of ${"%08X".format(seed)}: $ratio", ratio >= 4.5)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun fr34_an_accent_sets_every_colour_role_the_image_sets() {
+        val palette = TonalPalette.of(0xFF0078D4.toInt())
+        for (role in TonalPalette.LIGHT_ROLES.keys) assertTrue(role, "system_${role}_light" in palette)
+        for (role in TonalPalette.DARK_ROLES.keys) assertTrue(role, "system_${role}_dark" in palette)
+        assertTrue("system_on_tertiary_fixed_variant" in palette)
+        // The page and card surfaces stay the image's greys.
+        assertFalse("system_surface_light" in palette)
+        assertFalse("system_surface_container_dark" in palette)
+        // DSA's blue gives the colours the image is made with (make-image.py's dynamic_scheme).
+        val blue = TonalPalette.of(0xFF2B6EF2.toInt())
+        assertEquals(0xFFD4E3FE.toInt(), blue["system_secondary_container_light"])
+        assertEquals(0xFF2F696D.toInt(), blue["system_tertiary_light"])
+        assertEquals(0xFF191C1F.toInt(), blue["system_on_surface_light"])
     }
 }
