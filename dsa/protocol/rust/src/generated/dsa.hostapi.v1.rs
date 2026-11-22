@@ -204,6 +204,13 @@ pub struct SetTaskFullScreen {
     #[prost(bool, tag = "2")]
     pub in_window: bool,
 }
+/// Asks the caller's Android for the current frame of a task whose window has none yet, as a
+/// window reopened after the agent restarted: the frame is sent even when nothing changed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RequestTaskFrame {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
 /// Turns the connection into a stream of input for the caller's Android: after the answer
 /// (Done), the client sends only PointerEvent, KeyEvent and text input frames, which the
 /// service passes on as they come, without answering them. Input is never waited on, so a pointer that moves
@@ -3320,7 +3327,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -3406,6 +3413,8 @@ pub mod request {
         SetTaskCaption(super::SetTaskCaption),
         #[prost(message, tag = "48")]
         SetTaskFullScreen(super::SetTaskFullScreen),
+        #[prost(message, tag = "716")]
+        RequestTaskFrame(super::RequestTaskFrame),
         #[prost(message, tag = "70")]
         WatchLog(super::WatchLog),
         #[prost(message, tag = "71")]

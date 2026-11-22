@@ -25,6 +25,8 @@ ChannelEvent decodeChannelFrame(const uint8_t* data, size_t size) {
         }
         case v1::Envelope::kTaskRemoved:
             return TaskEnd{envelope.task_removed().task_id()};
+        case v1::Envelope::kRequestTaskFrame:
+            return FrameRequest{envelope.request_task_frame().task_id()};
         default:
             return std::monostate{};
     }

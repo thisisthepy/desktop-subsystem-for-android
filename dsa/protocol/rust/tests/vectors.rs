@@ -12,15 +12,15 @@ use dsa_protocol::control::{
     envelope::Body, AccessibilityAction, AccessibilityActionResult, AccessibilityAnnouncement,
     AccessibilityListening, AccessibilityNode, AccessibilityTree, AccessibilityWatch,
     AgentConnected, ApkChunk, AppInfo, AuthChallenge, AuthProof, CancelInstall, ClipboardImage,
-    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope, FileAction, FileChunk,
-    FileProgress, GuestBoot, GuestMemory, GuestNotification, Hello, HelloAccepted, HelloRejected,
-    ImeCommit, ImeComposition, ImeCursor, ImeEditor, ImeInputKind, ImeSetComposingRegion,
-    ImeSetSelection, InstallApk, InstallPart, InstallProgress, InstallResult, InstallStatus,
-    KeyAction, KeyEvent, LaunchApp, LinkHandling, NodeAction, NodeRange, NotificationClicked,
-    NotificationDismissed, NotificationRemoved, OpenFile, OpenLink, PackageState, PointerAction,
-    PointerEvent, PointerTool, PowerHint, PowerHintKind, PowerState, ProcessMemory, QueryPackage,
-    Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity,
-    TaskFrames, TaskRemoved, TaskUpdated,
+    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope,
+    FileAction, FileChunk, FileProgress, GuestBoot, GuestMemory, GuestNotification, Hello,
+    HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, ImeEditor, ImeInputKind,
+    ImeSetComposingRegion, ImeSetSelection, InstallApk, InstallPart, InstallProgress,
+    InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp, LinkHandling, NodeAction,
+    NodeRange, NotificationClicked, NotificationDismissed, NotificationRemoved, OpenFile, OpenLink,
+    PackageState, PointerAction, PointerEvent, PointerTool, PowerHint, PowerHintKind, PowerState,
+    ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory, RequestTaskFrame,
+    ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, ReconfigureWidget, RemoveWidget, ResizeWidget, WidgetAdded,
@@ -370,6 +370,10 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "close_task",
             wrap(Body::CloseTask(CloseTask { task_id: 42 })),
+        ),
+        (
+            "request_task_frame",
+            wrap(Body::RequestTaskFrame(RequestTaskFrame { task_id: 42 })),
         ),
         (
             "launch_app",

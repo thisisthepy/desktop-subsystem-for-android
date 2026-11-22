@@ -258,6 +258,12 @@ message SetTaskFullScreen {
   bool in_window = 2;
 }
 
+// Asks the caller's Android for the current frame of a task whose window has none yet, as a
+// window reopened after the agent restarted: the frame is sent even when nothing changed.
+message RequestTaskFrame {
+  int32 task_id = 1;
+}
+
 // Turns the connection into a stream of input for the caller's Android: after the answer
 // (Done), the client sends only PointerEvent, KeyEvent and text input frames, which the
 // service passes on as they come, without answering them. Input is never waited on, so a pointer that moves
@@ -3000,6 +3006,7 @@ message Request {
     UninstallApp uninstall_app = 38;
     SetTaskCaption set_task_caption = 45;
     SetTaskFullScreen set_task_full_screen = 48;
+    RequestTaskFrame request_task_frame = 716;
     WatchLog watch_log = 70;
     CollectDiagnostics collect_diagnostics = 71;
     StopApp stop_app = 37;

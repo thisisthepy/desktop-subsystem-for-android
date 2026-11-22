@@ -10,6 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use super::caption::{reported_tone, CaptionBand, CaptionTone};
+use super::frame_requests::FrameRequests;
+use super::resize_queue::DrawnFrames;
 use super::window_mode::WindowMode;
 use super::window_sizing::{
     density_for_dpi, scale_between, to_task_length, to_window_rect, to_window_size, Scale,
@@ -417,6 +419,10 @@ pub struct TaskWindows {
     /// of what the host asks of a task (a size, a density, a title bar, an end) is ever asked
     /// of an overlay, whose app alone moves, sizes and removes it.
     overlays: BTreeMap<i32, Overlay>,
+    /// The windows that have no frame yet, and when each asks the guest for one.
+    frame_requests: FrameRequests,
+    /// Where the frames that reached a window are reported; `None` until the platform says.
+    drawn: Option<DrawnFrames>,
 }
 
 /// `size` as `WxH`, or "none" when there is no limit.
@@ -737,6 +743,71 @@ impl TaskWindows {
                 return self.apply(&TaskEvent::Updated(kept));
             }
         }
+        let changes = self.apply_event(event);
+        self.track_frames(&changes)
+    }
+
+    /// Where the platform reports each frame that reaches a window
+    /// ([`DrawnFrames::frame_drawn`], [`DrawnFrames::frame_arrived`]): a window that has no
+    /// frame yet asks the guest for one until a frame arrives ([`TaskWindows::reconfigures`]).
+    pub fn watch_frames(&mut self, drawn: DrawnFrames) {
+        self.drawn = Some(drawn);
+    }
+
+    /// Notes which windows open, and so have no frame yet, and which close.
+    fn track_frames(&mut self, changes: &[WindowChange]) -> Vec<WindowChange> {
+        for change in changes {
+            match change {
+                WindowChange::Open { task_id, .. } => self.frame_requests.opened(*task_id),
+                WindowChange::Close { task_id } => self.frame_requests.closed(*task_id),
+                _ => {}
+            }
+        }
+        changes.to_vec()
+    }
+
+    /// The requests that ask the guest for the frame of each window that has none yet: once
+    /// when the window is open and its task's display is known, and again while none arrives,
+    /// a bounded number of times.
+    fn frame_asks(&mut self, now: Instant) -> Vec<TaskRequest> {
+        // A window manager that never says which frames arrived could not tell when to stop.
+        let Some(drawn) = &self.drawn else {
+            return Vec::new();
+        };
+        for task_id in drawn.take_arrived() {
+            self.frame_requests.arrived(task_id);
+        }
+        let known: BTreeSet<i32> = self
+            .tasks
+            .keys()
+            .chain(self.overlays.keys())
+            .copied()
+            .collect();
+        // A task that ended while its window was closing waits for nothing.
+        self.frame_requests
+            .retain(|task_id| known.contains(&task_id));
+        let windows: BTreeSet<i32> = self
+            .displays
+            .keys()
+            .copied()
+            .filter(|task_id| self.has_window(*task_id))
+            .collect();
+        let (ask, given_up) = self
+            .frame_requests
+            .due(now, |task_id| windows.contains(&task_id));
+        for task_id in given_up {
+            self.notes.push(format!(
+                "task {task_id}'s window got no frame after it was asked for {} times; it \
+                 shows the task's next frame when its app draws",
+                super::frame_requests::FRAME_ASKS
+            ));
+        }
+        ask.into_iter()
+            .map(|task_id| TaskRequest::RequestFrame { task_id })
+            .collect()
+    }
+
+    fn apply_event(&mut self, event: &TaskEvent) -> Vec<WindowChange> {
         match event {
             TaskEvent::Updated(task) if task.is_overlay() => self.overlay_updated(task),
             TaskEvent::Removed { task_id } if self.overlays.contains_key(task_id) => {
@@ -993,12 +1064,14 @@ impl TaskWindows {
         if let Some(overlay) = self.overlays.get_mut(&task_id).filter(|o| o.window) {
             // The new window says which monitor it is on.
             overlay.dpi = 0;
-            return overlay.open_changes();
+            let changes = overlay.open_changes();
+            return self.track_frames(&changes);
         }
         if !self.has_window(task_id) {
             return Vec::new();
         }
-        self.open_window(task_id)
+        let changes = self.open_window(task_id);
+        self.track_frames(&changes)
     }
 
     /// The request to end a task the user closed did not reach the guest, so the task is
@@ -1010,7 +1083,8 @@ impl TaskWindows {
         if !self.tasks.contains_key(&task_id) {
             return Vec::new();
         }
-        self.open_window(task_id)
+        let changes = self.open_window(task_id);
+        self.track_frames(&changes)
     }
 
     /// The changes that tell the task's window its task size, limits and scale, when they
@@ -1297,7 +1371,7 @@ impl TaskWindows {
         for task_id in rescaled {
             changes.extend(self.task_size_change(task_id));
         }
-        changes
+        self.track_frames(&changes)
     }
 
     /// The requests that reconfigure each task for a size its window gave it live outside a
@@ -1315,6 +1389,7 @@ impl TaskWindows {
         );
         requests.extend(self.full_screen_requests());
         requests.extend(self.size_reconfigures(now));
+        requests.extend(self.frame_asks(now));
         requests
     }
 
@@ -1435,6 +1510,7 @@ impl TaskWindows {
         self.bands.clear();
         self.told_full_screen.clear();
         self.overlays.clear();
+        self.frame_requests.clear();
         // The service that comes back may have a guest that was never told.
         self.told_below_title_bar = None;
         changes
@@ -1468,6 +1544,8 @@ impl TaskWindows {
         self.cursors.retain(|task_id, _| present.contains(task_id));
         self.bands.retain(|task_id, _| present.contains(task_id));
         self.overlays.retain(|task_id, _| present.contains(task_id));
+        self.frame_requests
+            .retain(|task_id| present.contains(&task_id));
         self.told_full_screen.clear();
         // A new watch may be of an Android that started again and was never told.
         self.told_below_title_bar = None;
@@ -3491,6 +3569,102 @@ mod tests {
         let again = windows.reopen(LYRICS);
         assert!(matches!(again[0], WindowChange::Open { width: 508, .. }));
         assert_eq!(again[2], placed(158, 82, false, true));
+    }
+
+    fn frame_asks(requests: &[TaskRequest]) -> Vec<i32> {
+        requests
+            .iter()
+            .filter_map(|request| match request {
+                TaskRequest::RequestFrame { task_id } => Some(*task_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fr3_a_window_reopened_after_the_agent_restarted_asks_for_its_frame_once() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        // The next agent reports the task again, and the host gives it its display back.
+        let opened = windows.apply(&updated(5, "Settings"));
+        assert!(matches!(opened[0], WindowChange::Open { task_id: 5, .. }));
+        windows.apply(&frames(5, 3));
+        assert_eq!(frame_asks(&windows.reconfigures(start)), vec![5]);
+        // However often the windows are asked before the retry is due, nothing more goes.
+        for ms in [1, 16, 100, 900] {
+            let later = start + std::time::Duration::from_millis(ms);
+            assert!(frame_asks(&windows.reconfigures(later)).is_empty());
+        }
+    }
+
+    #[test]
+    fn fr3_a_frame_reaching_the_reopened_window_stops_its_requests() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        assert_eq!(frame_asks(&windows.reconfigures(start)), vec![5]);
+        drawn.frame_drawn(5, (720, 1280));
+        let later = start + super::super::frame_requests::FRAME_RETRY * 5;
+        assert!(frame_asks(&windows.reconfigures(later)).is_empty());
+    }
+
+    #[test]
+    fn fr3_a_frame_kept_for_a_window_not_ready_yet_counts_as_arrived() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        windows.reconfigures(start);
+        drawn.frame_arrived(5);
+        let later = start + super::super::frame_requests::FRAME_RETRY * 2;
+        assert!(frame_asks(&windows.reconfigures(later)).is_empty());
+    }
+
+    #[test]
+    fn fr3_a_window_without_a_frame_asks_again_until_the_bound() {
+        let start = Instant::now();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(DrawnFrames::new());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        let retry = super::super::frame_requests::FRAME_RETRY;
+        let asks: usize = (0..10u32)
+            .map(|step| frame_asks(&windows.reconfigures(start + retry * step)).len())
+            .sum();
+        assert_eq!(asks, super::super::frame_requests::FRAME_ASKS as usize);
+    }
+
+    #[test]
+    fn fr3_a_window_that_crashed_and_opened_again_asks_again() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        windows.reconfigures(start);
+        drawn.frame_drawn(5, (720, 1280));
+        windows.reconfigures(start);
+        windows.reopen(5);
+        assert_eq!(frame_asks(&windows.reconfigures(start)), vec![5]);
+    }
+
+    #[test]
+    fn fr3_a_closed_window_asks_for_nothing() {
+        let start = Instant::now();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(DrawnFrames::new());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        windows.user_closed(5);
+        assert!(frame_asks(&windows.reconfigures(start)).is_empty());
     }
 
     #[test]

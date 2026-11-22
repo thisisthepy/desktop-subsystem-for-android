@@ -475,6 +475,10 @@ pub enum TaskRequest {
     },
     /// The user's answer to an app's request to put a shortcut on the desktop.
     AnswerPinShortcut { request_id: u32, accepted: bool },
+    /// The task's window has no frame yet, as a window reopened after the agent restarted:
+    /// the guest presents once and sends the task's current frame even when nothing in it
+    /// changed, so a still app's window shows it at once.
+    RequestFrame { task_id: i32 },
 }
 
 impl TaskRequest {
@@ -547,6 +551,9 @@ impl TaskRequest {
                 request_id,
                 accepted: false,
             } => format!("decline the shortcut of request {request_id}"),
+            TaskRequest::RequestFrame { task_id } => {
+                format!("send the current frame of task {task_id}")
+            }
         }
     }
 }
@@ -594,6 +601,10 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                 (TaskRequest::WindowsShown { .. }, TaskRequest::WindowsShown { .. }) => true,
                 (TaskRequest::TasksShown { .. }, TaskRequest::TasksShown { .. }) => true,
                 (TaskRequest::CaptionCompat { .. }, TaskRequest::CaptionCompat { .. }) => true,
+                (
+                    TaskRequest::RequestFrame { task_id: a },
+                    TaskRequest::RequestFrame { task_id: b },
+                ) => a == b,
                 _ => false,
             })
     };

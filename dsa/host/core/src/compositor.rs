@@ -27,6 +27,7 @@ pub mod caption_icon;
 pub mod early_frames;
 pub mod frame_buffers;
 pub mod frame_follow;
+pub mod frame_requests;
 pub mod frame_stall;
 pub mod gpu_reset;
 pub mod overlay_windows;

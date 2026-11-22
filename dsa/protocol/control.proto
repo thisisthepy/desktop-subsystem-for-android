@@ -281,6 +281,15 @@ message TaskFrames {
   uint32 display_id = 2;
 }
 
+// Host to guest, to the hwcomposer: the host opened a window for the task that has no frame
+// yet, as after the agent restarted. The hwcomposer presents once and sends the task's
+// current frame even when nothing in it changed, since an app that is still (a dialog, a
+// settings page) would otherwise never draw into the new window. The host asks again, a
+// bounded number of times, while no frame arrives.
+message RequestTaskFrame {
+  int32 task_id = 1;
+}
+
 // Host to guest: the user closed the task's window; the agent ends the task.
 message CloseTask {
   int32 task_id = 1;
@@ -3518,6 +3527,7 @@ message Envelope {
     NotificationClicked notification_clicked = 72;
     NotificationDismissed notification_dismissed = 73;
     NotificationButtonClicked notification_button_clicked = 730;
+    RequestTaskFrame request_task_frame = 731;
     BackgroundApp background_app = 74;
     BackgroundAppGone background_app_gone = 75;
     BackgroundAppAction background_app_action = 76;

@@ -97,6 +97,7 @@ public  final class Envelope extends
     NOTIFICATION_CLICKED(72),
     NOTIFICATION_DISMISSED(73),
     NOTIFICATION_BUTTON_CLICKED(730),
+    REQUEST_TASK_FRAME(731),
     BACKGROUND_APP(74),
     BACKGROUND_APP_GONE(75),
     BACKGROUND_APP_ACTION(76),
@@ -317,6 +318,7 @@ public  final class Envelope extends
         case 72: return NOTIFICATION_CLICKED;
         case 73: return NOTIFICATION_DISMISSED;
         case 730: return NOTIFICATION_BUTTON_CLICKED;
+        case 731: return REQUEST_TASK_FRAME;
         case 74: return BACKGROUND_APP;
         case 75: return BACKGROUND_APP_GONE;
         case 76: return BACKGROUND_APP_ACTION;
@@ -4311,6 +4313,56 @@ public  final class Envelope extends
    */
   private void clearNotificationButtonClicked() {
     if (bodyCase_ == 730) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int REQUEST_TASK_FRAME_FIELD_NUMBER = 731;
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  @java.lang.Override
+  public boolean hasRequestTaskFrame() {
+    return bodyCase_ == 731;
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.RequestTaskFrame getRequestTaskFrame() {
+    if (bodyCase_ == 731) {
+       return (io.github.thisisthepy.dsa.control.v1.RequestTaskFrame) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  private void setRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 731;
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  private void mergeRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+    value.getClass();
+  if (bodyCase_ == 731 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.newBuilder((io.github.thisisthepy.dsa.control.v1.RequestTaskFrame) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 731;
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  private void clearRequestTaskFrame() {
+    if (bodyCase_ == 731) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -14524,6 +14576,54 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    @java.lang.Override
+    public boolean hasRequestTaskFrame() {
+      return instance.hasRequestTaskFrame();
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.RequestTaskFrame getRequestTaskFrame() {
+      return instance.getRequestTaskFrame();
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder setRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+      copyOnWrite();
+      instance.setRequestTaskFrame(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder setRequestTaskFrame(
+        io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.Builder builderForValue) {
+      copyOnWrite();
+      instance.setRequestTaskFrame(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder mergeRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+      copyOnWrite();
+      instance.mergeRequestTaskFrame(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder clearRequestTaskFrame() {
+      copyOnWrite();
+      instance.clearRequestTaskFrame();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.BackgroundApp background_app = 74;</code>
      */
     @java.lang.Override
@@ -20890,9 +20990,10 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.LaunchPlacement.class,
             io.github.thisisthepy.dsa.control.v1.CaptionCompat.class,
             io.github.thisisthepy.dsa.control.v1.NotificationButtonClicked.class,
+            io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.class,
           };
           java.lang.String info =
-              "\u0000\u00cd\u0001\u0000\u0001\u02da\u00cd\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u00ce\u0001\u0000\u0001\u02db\u00ce\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
               "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
@@ -20920,7 +21021,7 @@ public  final class Envelope extends
               "<\u0000\u0286<\u0000\u0287<\u0000\u0288<\u0000\u0289<\u0000\u028a<\u0000\u028b<\u0000" +
               "\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290<\u0000\u0291<\u0000\u0292" +
               "<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000\u02ac<\u0000\u02b2<\u0000" +
-              "\u02b3<\u0000\u02c6<\u0000\u02cb<\u0000\u02da<\u0000";
+              "\u02b3<\u0000\u02c6<\u0000\u02cb<\u0000\u02da<\u0000\u02db<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

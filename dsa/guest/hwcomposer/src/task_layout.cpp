@@ -287,11 +287,14 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
 
 bool leavesLastFrame(bool layerMissing, bool hasFrame) { return layerMissing && hasFrame; }
 
-std::vector<int64_t> resendAfterReport(bool boundsChanged, bool posted) {
-    if (boundsChanged || !posted) {
-        return {};
+bool reportAsksForFrame(bool boundsChanged) { return boundsChanged; }
+
+uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int next) {
+    if (!posted || !onHost) {
+        return 0;
     }
-    return {0, kResendLateMs};
+    // Each post flips `next`, so the last one composed is the other target.
+    return targets[(next ^ 1) & 1];
 }
 
 bool leavesLastFrameUndrawn(const std::vector<LayerFill>& layers, bool hasFrame) {

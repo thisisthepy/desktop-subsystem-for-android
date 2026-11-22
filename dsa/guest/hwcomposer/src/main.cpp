@@ -38,6 +38,8 @@ int main() {
                 tasks->taskUpdated(*update);
             } else if (const auto* end = std::get_if<TaskEnd>(&event)) {
                 tasks->taskEnded(end->id);
+            } else if (const auto* request = std::get_if<FrameRequest>(&event)) {
+                tasks->frameRequested(request->id);
             }
         },
         [tasks] { tasks->channelConnected(); });

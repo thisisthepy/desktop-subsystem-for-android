@@ -78,9 +78,12 @@ logged, in case nothing else changes.
 
 When the agent restarts, it reports every task again and the host reopens their windows,
 which have no frame yet. SurfaceFlinger presents only when something changes, so a still app
-would leave its window on the host's splash. So a task reported again with the bounds it had,
-whose frame was sent before, is sent again at once and once more 1.5 s later
-(`resendAfterReport`), the second for a window the host reopens after the first arrived.
+would leave its window on the host's splash. So the host asks for the frame of each window it
+opens without one (`RequestTaskFrame`), once, and again after a second while none arrives, at
+most three times. The hwcomposer posts the last frame it composed for the task to the task's
+host display again at once (`lastPostedTarget`), and asks SurfaceFlinger for a new one. A
+report with the bounds the task had (a new title, the focus) asks for no frame
+(`reportAsksForFrame`), so it costs no frame of the whole display.
 
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that

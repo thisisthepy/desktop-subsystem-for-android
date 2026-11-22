@@ -224,6 +224,7 @@ std::map<std::string, v1::Envelope> Cases() {
     frames->set_display_id(3);
   }
   cases["close_task"].mutable_close_task()->set_task_id(42);
+  cases["request_task_frame"].mutable_request_task_frame()->set_task_id(42);
   cases["launch_app"].mutable_launch_app()->set_package_name("com.example.notes");
   {
     v1::AppInfo* app = cases["app_info"].mutable_app_info();

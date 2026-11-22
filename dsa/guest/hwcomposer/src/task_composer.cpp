@@ -116,7 +116,6 @@ void TaskComposer::send(const std::vector<std::vector<uint8_t>>& outbox) {
 
 void TaskComposer::taskUpdated(const TaskUpdate& update) {
     bool changed;
-    std::vector<int64_t> resend;
     {
         std::lock_guard<std::mutex> lock(mMutex);
         changed = mTasks.update(update.id, update.bounds, update.overlay);
@@ -124,27 +123,35 @@ void TaskComposer::taskUpdated(const TaskUpdate& update) {
             logTrace(mTrace.boundsChanged(update.id, update.bounds.width(),
                                           update.bounds.height(), traceMonoMs(), traceWallMs()));
         }
-        const auto output = mOutputs.find(update.id);
-        resend = resendAfterReport(changed, output != mOutputs.end() && output->second.posted);
     }
-    if (resend.size() > 1) {
-        // The later frame, for a window the host reopens only after the first one arrived.
-        std::lock_guard<std::mutex> lock(mReconnectMutex);
-        const int64_t due = std::max<int64_t>(steadyMs() + resend.back(), 1);
-        mRefreshAtMs = mRefreshAtMs == 0 ? due : std::min(mRefreshAtMs, due);
-        mReconnectWake.notify_all();
-    }
-    if (changed || !resend.empty()) {
+    if (reportAsksForFrame(changed)) {
         // The window's frame has to follow its new place now, not at the next app redraw.
-        RefreshRequest refresh;
-        {
-            std::lock_guard<std::mutex> lock(mCallbackMutex);
-            refresh = mRefresh;
-        }
-        if (refresh) {
-            refresh();
+        refreshNow();
+    }
+}
+
+void TaskComposer::frameRequested(int32_t task) {
+    bool sent = false;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        const auto it = mOutputs.find(task);
+        if (it != mOutputs.end() && mHost.connected() && mHost.generation() == mGeneration) {
+            Output& output = it->second;
+            const uint32_t last =
+                lastPostedTarget(output.posted, output.onHost, output.targets, output.next);
+            if (last != 0) {
+                // The host shows a display's frames in the window its task has now: the frame
+                // the window missed goes to it as it is, whatever SurfaceFlinger does next.
+                mHost.post(output.display, last);
+                sent = true;
+            }
         }
     }
+    HWC_LOGI("the host asked for task %d's frame: %s", task,
+             sent ? "the last one was sent again, and a new one asked for"
+                  : "none was sent yet, a new one is asked for");
+    // A frame composed now, in case the app changed since the last one, or none was sent yet.
+    refreshNow();
 }
 
 void TaskComposer::taskEnded(int32_t task) {

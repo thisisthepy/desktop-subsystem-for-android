@@ -218,6 +218,9 @@ public final class VectorsTest {
         cases.put("close_task", Envelope.newBuilder()
                 .setCloseTask(CloseTask.newBuilder().setTaskId(42))
                 .build());
+        cases.put("request_task_frame", Envelope.newBuilder()
+                .setRequestTaskFrame(RequestTaskFrame.newBuilder().setTaskId(42))
+                .build());
         cases.put("launch_app", Envelope.newBuilder()
                 .setLaunchApp(LaunchApp.newBuilder().setPackageName("com.example.notes"))
                 .build());

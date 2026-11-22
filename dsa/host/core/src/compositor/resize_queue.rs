@@ -7,6 +7,7 @@
 //! drawn seconds after the mouse went up. So only the latest size of a task is kept, and it
 //! goes once a frame of the size before has been drawn (or after a short patience).
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -23,9 +24,12 @@ pub const PACE_TICK: Duration = Duration::from_millis(4);
 ///
 /// Clones share one list: the thread that receives the frames keeps a clone and reports each
 /// one, and the [`ResizeQueue`] made from another clone sees them. Two lists never mix.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct DrawnFrames {
     drawn: Arc<Mutex<Vec<DrawnSize>>>,
+    /// The tasks a frame reached a window of since the window manager last looked
+    /// ([`DrawnFrames::take_arrived`]), apart from the sizes the request thread takes.
+    arrived: Arc<Mutex<BTreeSet<i32>>>,
 }
 
 impl DrawnFrames {
@@ -41,6 +45,22 @@ impl DrawnFrames {
             Some(entry) => entry.1 = size,
             None => drawn.push((task_id, size)),
         }
+        drop(drawn);
+        self.frame_arrived(task_id);
+    }
+
+    /// A frame of `task_id` reached its window, or is kept to be shown the moment the window
+    /// is ready: the window has a frame, and need not ask the guest for one.
+    pub fn frame_arrived(&self, task_id: i32) {
+        self.arrived
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(task_id);
+    }
+
+    /// The tasks a frame arrived for since the last call.
+    pub fn take_arrived(&self) -> BTreeSet<i32> {
+        std::mem::take(&mut *self.arrived.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     fn take(&self) -> Vec<DrawnSize> {

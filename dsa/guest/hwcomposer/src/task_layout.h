@@ -183,18 +183,19 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
 // that one; a first frame has nothing better to show.
 bool leavesLastFrame(bool layerMissing, bool hasFrame);
 
-// When the frames of a task reported again with the bounds it already had are sent again, as
-// milliseconds from the report; empty when they are not. The agent reports every task again
-// when it restarts, and the host then reopens the task's window, which has no frame of its own
-// yet. SurfaceFlinger presents only when something changes, so a still app (a dialog, a
-// settings page) would leave that window showing the host's splash until it drew again. So a
-// task whose frame was sent before gets its frame again at once, and once more a while later,
-// as the host may not have reopened the window by the time the first one arrives. A report
-// with new bounds asks for a frame anyway, and a task never sent has nothing to repeat.
-std::vector<int64_t> resendAfterReport(bool boundsChanged, bool posted);
+// Whether a task's report has the hwcomposer ask SurfaceFlinger for a frame: only when its
+// bounds changed, since the window's frame must follow the task's new place at once. A report
+// with the bounds it had (a new title, the focus) asks for nothing, which would cost a frame of
+// the whole display each time. A window that needs the task's frame, as one the host reopened
+// after the agent restarted, asks for it itself (RequestTaskFrame).
+bool reportAsksForFrame(bool boundsChanged);
 
-// How long after a repeated report the second frame is asked for.
-constexpr int64_t kResendLateMs = 1500;
+// The ColorBuffer holding the last frame composed and posted for a task, which the host is sent
+// again when it asks for the task's frame (RequestTaskFrame), so a still app's window shows it
+// without waiting for SurfaceFlinger. 0 when there is none to send: nothing was posted on this
+// connection, or the last post was the app's own buffer (an overlay shown uncomposed), which the
+// app may have drawn into since. `next` is the target the next frame is composed into.
+uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int next);
 
 // Whether a frame goes unsent because nothing in it shows what the app drew: no layer of the
 // task shows a buffer, or every one that does is fully transparent. That is the task as it

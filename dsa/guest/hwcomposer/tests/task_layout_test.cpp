@@ -827,20 +827,32 @@ TEST(fr41_the_registry_keeps_whether_a_task_is_an_overlay) {
     EXPECT_TRUE(tasks[1].overlay && tasks[1].id == kLyrics);
 }
 
-TEST(fr3_a_task_reported_again_is_sent_again_for_its_reopened_window) {
-    // The agent restarted and reported a still app's task with the bounds it had: the host
-    // reopened its window, which needs a frame though the app draws nothing new.
-    const std::vector<int64_t> resend = resendAfterReport(false, true);
-    EXPECT_EQ(resend.size(), static_cast<size_t>(2));
-    EXPECT_EQ(resend[0], static_cast<int64_t>(0));
-    EXPECT_TRUE(resend[1] > 0);
+TEST(fr3_a_plain_report_asks_for_no_frame) {
+    // A report with the bounds the task had (a new title, the focus) costs no frame of the
+    // whole display; a window that needs the task's frame asks for it (RequestTaskFrame).
+    EXPECT_TRUE(!reportAsksForFrame(false));
+    // New bounds: the window's frame follows the task's new place at once.
+    EXPECT_TRUE(reportAsksForFrame(true));
 }
 
-TEST(fr3_only_a_task_with_a_frame_sent_is_sent_again_on_a_report) {
-    // New bounds ask for a frame anyway; a task never sent has no window waiting for it.
-    EXPECT_TRUE(resendAfterReport(true, true).empty());
-    EXPECT_TRUE(resendAfterReport(false, false).empty());
-    EXPECT_TRUE(resendAfterReport(true, false).empty());
+TEST(fr3_a_frame_request_sends_the_tasks_last_frame) {
+    // Two frames were posted: the first from target 11, the second from 22, so the next is
+    // composed into 11 again. The last frame is the one in 22.
+    const uint32_t targets[2] = {11, 22};
+    EXPECT_EQ(lastPostedTarget(true, true, targets, 0), static_cast<uint32_t>(22));
+    // One frame posted, from 11: the next goes to 22.
+    EXPECT_EQ(lastPostedTarget(true, true, targets, 1), static_cast<uint32_t>(11));
+}
+
+TEST(fr3_a_frame_request_sends_nothing_old_when_there_is_no_frame) {
+    const uint32_t targets[2] = {11, 22};
+    // Nothing posted on this connection yet: a new frame is asked for instead.
+    EXPECT_EQ(lastPostedTarget(false, true, targets, 0), static_cast<uint32_t>(0));
+    // The display is gone from the host (a new connection).
+    EXPECT_EQ(lastPostedTarget(true, false, targets, 0), static_cast<uint32_t>(0));
+    // An overlay shown from its app's own buffer has no composed frame to send again.
+    const uint32_t none[2] = {0, 0};
+    EXPECT_EQ(lastPostedTarget(true, true, none, 0), static_cast<uint32_t>(0));
 }
 
 int main() { return ::dsa::test::runAll(); }

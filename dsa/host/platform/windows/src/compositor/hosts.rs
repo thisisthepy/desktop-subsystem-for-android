@@ -642,7 +642,10 @@ impl FrameTarget for RemoteWindow {
                 return;
             }
             if !state.early.frame((width, height)) {
-                // No window host yet: the frame stays in the texture until one connects.
+                // No window host yet: the frame stays in the texture until one connects, and
+                // is shown then, so the window need not ask the guest for one.
+                self.drawn
+                    .frame_arrived(self.drawing.load(Ordering::Relaxed));
                 return;
             }
             let Some(link) = state.link.clone() else {
@@ -978,6 +981,8 @@ pub fn manage(setup: ManagerSetup) {
         front: false,
         setup,
     };
+    // A window that opens with no frame asks the guest for its task's frame until one arrives.
+    manager.windows.watch_frames(manager.setup.drawn.clone());
     let mut last_tick = Instant::now();
     while !manager.setup.stop.load(Ordering::Relaxed) {
         match manager.setup.events.recv_timeout(TICK) {

@@ -92,6 +92,10 @@ class TaskComposer {
 
     void taskUpdated(const TaskUpdate& update);
     void taskEnded(int32_t task);
+    // The host opened a window for the task that has no frame yet (RequestTaskFrame): the last
+    // frame composed for it is posted again at once, and SurfaceFlinger is asked for a new one,
+    // so the window shows the task even when its app is still and draws nothing.
+    void frameRequested(int32_t task);
     // The control channel came (back) up: tell the host every pairing again, since it may
     // have missed them.
     void channelConnected();

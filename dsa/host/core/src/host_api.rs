@@ -5524,6 +5524,12 @@ impl HostApiService {
                     in_window: full.in_window,
                 },
             ),
+            Some(request::Body::RequestTaskFrame(frame)) => self.request(
+                peer,
+                TaskRequest::RequestFrame {
+                    task_id: frame.task_id,
+                },
+            ),
             Some(request::Body::SetWindowsShown(shown)) => {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
@@ -5693,7 +5699,8 @@ impl HostApiService {
                         | request::Body::WatchShares(_)
                         | request::Body::ReportShare(_)
                         | request::Body::WatchAppAudio(_)
-                        | request::Body::SetAppVolume(_) => unreachable!("answered above"),
+                        | request::Body::SetAppVolume(_)
+                        | request::Body::RequestTaskFrame(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -8279,6 +8286,14 @@ impl HostApiClient {
         }))
     }
 
+    /// Asks the caller's Android for the current frame of a task whose window has none yet:
+    /// it is sent even when nothing in it changed.
+    pub fn request_task_frame(&mut self, task_id: i32) -> Result<(), ClientError> {
+        self.done(request::Body::RequestTaskFrame(types::RequestTaskFrame {
+            task_id,
+        }))
+    }
+
     /// Carries out `request` against the caller's Android.
     pub fn request(&mut self, request: &TaskRequest) -> Result<(), ClientError> {
         match request {
@@ -8307,6 +8322,7 @@ impl HostApiClient {
             TaskRequest::SetFullScreen { task_id, in_window } => {
                 self.set_task_full_screen(*task_id, *in_window)
             }
+            TaskRequest::RequestFrame { task_id } => self.request_task_frame(*task_id),
             TaskRequest::CaptionCompat { below_title_bar } => {
                 self.set_caption_compat(below_title_bar)
             }

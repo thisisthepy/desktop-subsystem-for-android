@@ -855,6 +855,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.NotificationButtonClicked getNotificationButtonClicked();
 
   /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   * @return Whether the requestTaskFrame field is set.
+   */
+  boolean hasRequestTaskFrame();
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   * @return The requestTaskFrame.
+   */
+  io.github.thisisthepy.dsa.control.v1.RequestTaskFrame getRequestTaskFrame();
+
+  /**
    * <code>.dsa.control.v1.BackgroundApp background_app = 74;</code>
    * @return Whether the backgroundApp field is set.
    */

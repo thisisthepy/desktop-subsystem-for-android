@@ -28,9 +28,15 @@ struct TaskEnd {
     int32_t id = 0;
 };
 
+// The host opened a window for the task that has no frame yet (RequestTaskFrame): the task's
+// current frame goes to it even when nothing changed.
+struct FrameRequest {
+    int32_t id = 0;
+};
+
 // What a frame from the channel means to the hwcomposer. std::monostate for frames it has
-// no use for (the host's messages, its own TaskFrames) and frames it cannot decode.
-using ChannelEvent = std::variant<std::monostate, TaskUpdate, TaskEnd>;
+// no use for (the host's other messages, its own TaskFrames) and frames it cannot decode.
+using ChannelEvent = std::variant<std::monostate, TaskUpdate, TaskEnd, FrameRequest>;
 
 ChannelEvent decodeChannelFrame(const uint8_t* data, size_t size);
 
