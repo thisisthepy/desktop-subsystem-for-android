@@ -97,17 +97,26 @@ int32_t overrideFormatFor(int32_t format, uint64_t consumerUsage) {
     if (format != kFormatImplementationDefined) {
         return format;
     }
-    // The guest's allocator makes no YUV buffer the GPU or the composer reads, so a stream
-    // for the screen (a SurfaceView or a TextureView) gets RGBA; a video encoder gets YUV.
-    constexpr uint64_t kGpuTexture = 0x100;
-    constexpr uint64_t kGpuRenderTarget = 0x200;
-    constexpr uint64_t kComposerOverlay = 0x800;
-    constexpr uint64_t kVideoEncoder = 0x10000;
-    if ((consumerUsage & kVideoEncoder) == 0 &&
-        (consumerUsage & (kGpuTexture | kGpuRenderTarget | kComposerOverlay)) != 0) {
+    // The guest's allocator makes no YUV buffer the composer may show, so a stream the
+    // composer shows (a SurfaceView) gets RGBA, even when a video encoder shares it: the
+    // allocator drops the encoder's bit for RGBA but never adds the composer's to YUV. A
+    // stream the GPU samples (a TextureView) gets RGBA too, unless it goes to an encoder,
+    // which takes YUV.
+    if ((consumerUsage & kUsageComposerOverlay) != 0) {
+        return kFormatRgba8888;
+    }
+    if ((consumerUsage & kUsageVideoEncoder) == 0 &&
+        (consumerUsage & (kUsageGpuTexture | kUsageGpuRenderTarget)) != 0) {
         return kFormatRgba8888;
     }
     return kFormatYcbcr420;
+}
+
+uint64_t producerUsageFor(int32_t format) {
+    if (format == kFormatRgba8888) {
+        return kUsageCpuWriteOften;
+    }
+    return kUsageCpuWriteOften | kUsageCameraOutput;
 }
 
 std::vector<std::pair<int32_t, int32_t>> fpsRanges(const HostCamera& camera) {

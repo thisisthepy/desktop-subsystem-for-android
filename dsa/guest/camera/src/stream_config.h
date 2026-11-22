@@ -44,11 +44,25 @@ std::vector<StreamSize> modeSizes(const HostCamera& camera);
 // stream of such a size is cut from the picture of a larger mode.
 std::vector<StreamSize> streamSizes(const HostCamera& camera);
 
+// Gralloc usage bits (android.hardware.graphics.common.BufferUsage) the HAL sets or reads.
+constexpr uint64_t kUsageCpuWriteOften = 0x30;
+constexpr uint64_t kUsageGpuTexture = 0x100;
+constexpr uint64_t kUsageGpuRenderTarget = 0x200;
+constexpr uint64_t kUsageComposerOverlay = 0x800;
+constexpr uint64_t kUsageVideoEncoder = 0x10000;
+constexpr uint64_t kUsageCameraOutput = 0x20000;
+
 // The format the HAL fills a stream with. A preview or video stream
-// (IMPLEMENTATION_DEFINED) is the HAL's choice: RGBA when the screen shows it, since the
-// guest's allocator makes no YUV buffer the GPU or the composer reads, else YUV. Other
-// formats stay as asked.
+// (IMPLEMENTATION_DEFINED) is the HAL's choice: RGBA when the composer shows it, or when the
+// GPU samples it and no video encoder takes it, since the guest's allocator makes no YUV
+// buffer the composer may show; else YUV. Other formats stay as asked.
 int32_t overrideFormatFor(int32_t format, uint64_t consumerUsage);
+
+// The usage the HAL writes a stream of `format` with: CPU_WRITE_OFTEN, since the HAL copies
+// every picture in by CPU, and CAMERA_OUTPUT only on formats the guest's allocator makes with
+// it. The allocator has no RGBA buffer with CAMERA_OUTPUT, so an RGBA stream leaves it out:
+// with it, every preview buffer failed to allocate and the screen showed no picture.
+uint64_t producerUsageFor(int32_t format);
 
 // The frame rate ranges (lowest, highest) a camera offers: every fixed rate its modes reach,
 // and each mode's own range, without repeats, in increasing order.

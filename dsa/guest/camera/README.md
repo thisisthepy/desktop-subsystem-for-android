@@ -24,8 +24,10 @@ the host: a camera the user has blocked there is not offered to Android at all.
    the modes the host camera has, and the sizes apps ask for without looking (320x240 to
    1920x1080, CameraX's defaults among them) that one of those modes is at least as large as.
    A preview the screen shows (a SurfaceView or TextureView) is RGBA, because the guest's
-   allocator makes no YUV buffer the GPU or the composer reads; video and the streams apps
-   read are YUV, stills are JPEG.
+   allocator (minigbm on vkms, its dumb driver) makes no YUV buffer the composer may show;
+   video and the streams apps read are YUV, stills are JPEG. The HAL writes every stream by
+   CPU, and asks for `CAMERA_OUTPUT` only on YUV and JPEG: the allocator makes no RGBA buffer
+   with it, so a preview with it got no buffers.
 3. When an app configures its streams, the session opens its own connection and starts the
    host camera at the smallest mode its largest picture stream fits in, one of the stream's
    shape first. A stream of another shape is cropped at the centre, not stretched. The host holds the camera open

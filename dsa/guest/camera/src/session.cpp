@@ -26,9 +26,6 @@ constexpr int kFenceWaitMs = 1000;
 // Buffers the framework may hand each stream at once.
 constexpr int32_t kMaxBuffers = 4;
 
-// gralloc usage the HAL writes buffers with: CPU_WRITE_OFTEN and CAMERA_OUTPUT.
-constexpr int64_t kProducerUsage = 0x30 | (1 << 17);
-
 ndk::ScopedAStatus error(common::Status status) {
     return ndk::ScopedAStatus::fromServiceSpecificError(static_cast<int32_t>(status));
 }
@@ -172,10 +169,12 @@ ndk::ScopedAStatus Session::configureStreams(const device::StreamConfiguration& 
         device::HalStream hal;
         hal.id = stream.id;
         // Preview buffers the screen shows are RGBA, video buffers YUV; stills and YUV are as
-        // asked.
-        hal.overrideFormat = static_cast<graphics::PixelFormat>(
-            overrideFormatFor(static_cast<int32_t>(stream.format), static_cast<uint64_t>(stream.usage)));
-        hal.producerUsage = static_cast<graphics::BufferUsage>(kProducerUsage);
+        // asked. The usage is one the guest's allocator makes buffers of that format with.
+        const int32_t format =
+            overrideFormatFor(static_cast<int32_t>(stream.format), static_cast<uint64_t>(stream.usage));
+        const uint64_t producerUsage = producerUsageFor(format);
+        hal.overrideFormat = static_cast<graphics::PixelFormat>(format);
+        hal.producerUsage = static_cast<graphics::BufferUsage>(producerUsage);
         hal.consumerUsage = static_cast<graphics::BufferUsage>(0);
         hal.maxBuffers = kMaxBuffers;
         hal.overrideDataSpace = stream.dataSpace;
@@ -186,7 +185,7 @@ ndk::ScopedAStatus Session::configureStreams(const device::StreamConfiguration& 
         info.width = static_cast<uint32_t>(stream.width);
         info.height = static_cast<uint32_t>(stream.height);
         info.format = static_cast<int32_t>(hal.overrideFormat);
-        info.usage = static_cast<uint64_t>(stream.usage) | static_cast<uint64_t>(kProducerUsage);
+        info.usage = static_cast<uint64_t>(stream.usage) | producerUsage;
         info.bufferSize = stream.bufferSize > 0 ? static_cast<size_t>(stream.bufferSize)
                                                 : static_cast<size_t>(jpegMaxSize(mCamera));
         streams[stream.id] = info;

@@ -214,6 +214,8 @@ TEST(fr26_a_preview_the_screen_shows_is_rgba_and_video_is_yuv) {
     // cannot make in YUV.
     EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x900), kFormatRgba8888);
     EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x100), kFormatRgba8888);
+    // A SurfaceView a video encoder shares stays RGBA: YUV is never shown by the composer.
+    EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x10900), kFormatRgba8888);
     // A video encoder, or a consumer that reads by CPU, gets YUV.
     EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x10000), kFormatYcbcr420);
     EXPECT_EQ(overrideFormatFor(kFormatImplementationDefined, 0x10100), kFormatYcbcr420);
@@ -221,6 +223,254 @@ TEST(fr26_a_preview_the_screen_shows_is_rgba_and_video_is_yuv) {
     // Formats an app names stay as named.
     EXPECT_EQ(overrideFormatFor(kFormatYcbcr420, 0x900), kFormatYcbcr420);
     EXPECT_EQ(overrideFormatFor(kFormatBlob, 0x3), kFormatBlob);
+}
+
+namespace {
+
+// The guest's allocator, minigbm (the Cuttlefish build in the com.google.cf.gralloc APEX,
+// external/minigbm at android-17.0.0_r1), as far as it decides whether a buffer of a format
+// and a usage can be made. The guest has no virtio-gpu: its DRM devices are vgem, which
+// minigbm has no backend for, and vkms, whose backend is the dumb driver. The rules below
+// follow those files line by line; a change to them means the image's minigbm changed.
+namespace minigbm {
+
+// BO_USE_* (drv.h).
+constexpr uint64_t kScanout = 1ull << 0;
+constexpr uint64_t kCursor = 1ull << 1;
+constexpr uint64_t kRendering = 1ull << 2;
+constexpr uint64_t kLinear = 1ull << 4;
+constexpr uint64_t kTexture = 1ull << 5;
+constexpr uint64_t kCameraWrite = 1ull << 6;
+constexpr uint64_t kCameraRead = 1ull << 7;
+constexpr uint64_t kProtected = 1ull << 8;
+constexpr uint64_t kSwReadOften = 1ull << 9;
+constexpr uint64_t kSwReadRarely = 1ull << 10;
+constexpr uint64_t kSwWriteOften = 1ull << 11;
+constexpr uint64_t kSwWriteRarely = 1ull << 12;
+constexpr uint64_t kVideoDecoder = 1ull << 13;
+constexpr uint64_t kVideoEncoder = 1ull << 14;
+constexpr uint64_t kFrontRendering = 1ull << 16;
+constexpr uint64_t kRenderscript = 1ull << 17;
+constexpr uint64_t kGpuDataBuffer = 1ull << 18;
+constexpr uint64_t kSensorDirectData = 1ull << 19;
+
+// BO_USE_RENDER_MASK and BO_USE_TEXTURE_MASK (drv_priv.h).
+constexpr uint64_t kRenderMask = kLinear | kRendering | kRenderscript | kSwReadOften | kSwWriteOften |
+                                 kSwReadRarely | kSwWriteRarely | kTexture | kFrontRendering;
+constexpr uint64_t kTextureMask =
+    kLinear | kRenderscript | kSwReadOften | kSwWriteOften | kSwReadRarely | kSwWriteRarely | kTexture | kFrontRendering;
+
+enum class Drm {
+    None,
+    Argb8888,
+    Xrgb8888,
+    Abgr8888,
+    Xbgr8888,
+    Bgr888,
+    Rgb565,
+    R8,
+    Nv12,
+    Nv21,
+    Yvu420,
+    Yvu420Android,
+    FlexImplementationDefined,
+    FlexYcbcr420,
+};
+
+// cros_gralloc_convert_format (cros_gralloc/cros_gralloc_helpers.cc), for the formats a
+// camera stream or a video picture has.
+Drm drmFormat(int32_t android) {
+    switch (android) {
+        case 0x1:  // RGBA_8888
+            return Drm::Abgr8888;
+        case 0x2:  // RGBX_8888
+            return Drm::Xbgr8888;
+        case 0x3:  // RGB_888
+            return Drm::Bgr888;
+        case 0x4:  // RGB_565
+            return Drm::Rgb565;
+        case 0x5:  // BGRA_8888
+            return Drm::Argb8888;
+        case 0x21:  // BLOB
+            return Drm::R8;
+        case 0x22:  // IMPLEMENTATION_DEFINED
+            return Drm::FlexImplementationDefined;
+        case 0x23:  // YCbCr_420_888
+            return Drm::FlexYcbcr420;
+        case 0x32315659:  // YV12
+            return Drm::Yvu420Android;
+        default:
+            return Drm::None;
+    }
+}
+
+// cros_gralloc_convert_usage (cros_gralloc/cros_gralloc_helpers.cc), in its order: a bit
+// group counts only when all its bits are set, and a usage with a bit left over is refused.
+uint64_t useFlags(uint64_t usage) {
+    uint64_t flags = 0;
+    const auto take = [&](uint64_t mask, uint64_t bo) {
+        if ((usage & mask) == mask) {
+            usage &= ~mask;
+            flags |= bo;
+        }
+    };
+    take(0x3, kSwReadOften);         // SW_READ_OFTEN
+    take(0x2, kSwReadRarely);        // SW_READ_RARELY
+    take(0x30, kSwWriteOften);       // SW_WRITE_OFTEN
+    take(0x20, kSwWriteRarely);      // SW_WRITE_RARELY
+    take(0x100, kTexture);           // HW_TEXTURE
+    take(0x200, kRendering);         // HW_RENDER
+    take(0x400, kRendering);         // HW_2D
+    take(0x800, kScanout | kTexture);  // HW_COMPOSER
+    take(0x1000, 0);                 // HW_FB
+    take(0x2000, 0);                 // EXTERNAL_DISP
+    take(0x4000, kProtected);        // PROTECTED (Android 15 and later)
+    take(0x8000, kCursor);           // CURSOR (Android 15 and later)
+    take(0x10000, kVideoEncoder | kSwReadOften);  // HW_VIDEO_ENCODER
+    take(0x20000, kCameraWrite);     // HW_CAMERA_WRITE
+    take(0x40000, kCameraRead);      // HW_CAMERA_READ
+    take(0x100000, kRenderscript);   // RENDERSCRIPT
+    take(1ull << 22, kVideoDecoder);  // VIDEO_DECODER
+    take(1ull << 23, kSensorDirectData);
+    take(1ull << 24, kGpuDataBuffer);
+    return usage != 0 ? 0 : flags;
+}
+
+struct Combination {
+    Drm format;
+    uint64_t flags;
+};
+
+// dumb_driver_init (dumb_driver.c), the vkms backend's table, with
+// drv_modify_linear_combinations (drv_helpers.c) at its end.
+std::vector<Combination> dumbDriverTable() {
+    std::vector<Combination> table;
+    for (Drm format : {Drm::Argb8888, Drm::Xrgb8888, Drm::Abgr8888, Drm::Xbgr8888, Drm::Bgr888, Drm::Rgb565}) {
+        table.push_back({format, kRenderMask | kScanout});
+    }
+    for (Drm format : {Drm::R8, Drm::Nv12, Drm::Nv21, Drm::Yvu420, Drm::Yvu420Android}) {
+        table.push_back({format, kTextureMask});
+    }
+    const auto modify = [&](Drm format, uint64_t flags) {
+        for (Combination& combination : table) {
+            if (combination.format == format) {
+                combination.flags |= flags;
+            }
+        }
+    };
+    modify(Drm::R8, kVideoEncoder | kVideoDecoder | kCameraRead | kCameraWrite | kGpuDataBuffer | kSensorDirectData);
+    modify(Drm::Nv12, kVideoEncoder | kVideoDecoder | kCameraRead | kCameraWrite);
+    modify(Drm::Nv21, kVideoEncoder);
+    modify(Drm::Xrgb8888, kCursor | kScanout);
+    modify(Drm::Argb8888, kCursor | kScanout);
+    return table;
+}
+
+// drv_resolve_format_and_use_flags_helper (drv_helpers.c), the dumb driver's.
+void resolve(Drm* format, uint64_t* flags) {
+    switch (*format) {
+        case Drm::FlexImplementationDefined:
+            if ((*flags & (kCameraRead | kCameraWrite)) != 0) {
+                *format = Drm::Nv12;
+            } else {
+                *format = Drm::Xbgr8888;
+                *flags &= ~kVideoEncoder;
+            }
+            break;
+        case Drm::FlexYcbcr420:
+            *format = Drm::Nv12;
+            break;
+        case Drm::Yvu420Android:
+            *flags &= ~kScanout;
+            break;
+        default:
+            break;
+    }
+}
+
+// drv_get_combination (drv.c): a combination of the format that has every flag asked.
+bool hasCombination(Drm format, uint64_t flags) {
+    if (format == Drm::None || flags == 0) {
+        return false;
+    }
+    for (const Combination& combination : dumbDriverTable()) {
+        if (combination.format == format && (combination.flags & flags) == flags) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// cros_gralloc_driver::get_resolved_format_and_use_flags (cros_gralloc/cros_gralloc_driver.cc):
+// whether the allocator makes a buffer of `format` with `usage`. A format other than
+// YCbCr_420_888 refused with a video encoder's bit is tried again without it.
+bool allocates(int32_t format, uint64_t usage) {
+    Drm drm = drmFormat(format);
+    uint64_t flags = useFlags(usage);
+    resolve(&drm, &flags);
+    if (hasCombination(drm, flags)) {
+        return true;
+    }
+    if ((usage & 0x10000) != 0 && format != kFormatYcbcr420) {
+        return hasCombination(drm, flags & ~kVideoEncoder);
+    }
+    return false;
+}
+
+}  // namespace minigbm
+
+// A stream an app opens: the format it asks for and its consumer's usage.
+struct AppStream {
+    const char* what;
+    int32_t format;
+    uint64_t consumerUsage;
+};
+
+// What Aperture and CameraX open, and the usage each one's consumer sets.
+const AppStream kAppStreams[] = {
+    {"a SurfaceView preview", kFormatImplementationDefined, 0x900},
+    {"a TextureView preview", kFormatImplementationDefined, 0x100},
+    {"a SurfaceView preview a video encoder shares", kFormatImplementationDefined, 0x10900},
+    {"a video encoder's input surface", kFormatImplementationDefined, 0x10000},
+    {"a video encoder's input surface the GPU samples", kFormatImplementationDefined, 0x10100},
+    {"a private ImageReader", kFormatImplementationDefined, 0x3},
+    {"ImageAnalysis's YUV ImageReader", kFormatYcbcr420, 0x3},
+    {"a JPEG still's ImageReader", kFormatBlob, 0x3},
+};
+
+}  // namespace
+
+TEST(fr26_the_allocator_rules_refuse_what_the_guest_refused) {
+    // The rules match the guest's logcat: the RGBA preview with CAMERA_OUTPUT (usage 0x20930)
+    // failed to allocate, and so did YUV for the same SurfaceView before it.
+    EXPECT_TRUE(!minigbm::allocates(kFormatRgba8888, 0x20930));
+    EXPECT_TRUE(!minigbm::allocates(kFormatYcbcr420, 0x20930));
+    // While an app's own window buffers, and the video decoder's YV12 pictures, are made.
+    EXPECT_TRUE(minigbm::allocates(kFormatRgba8888, 0xB00));
+    EXPECT_TRUE(minigbm::allocates(kFormatRgba8888, 0x930));
+    EXPECT_TRUE(minigbm::allocates(0x32315659, 0x933));
+}
+
+TEST(fr26_every_stream_an_app_opens_gets_buffers_the_allocator_makes) {
+    for (const AppStream& stream : kAppStreams) {
+        const int32_t format = overrideFormatFor(stream.format, stream.consumerUsage);
+        const uint64_t usage = stream.consumerUsage | producerUsageFor(format);
+        if (!minigbm::allocates(format, usage)) {
+            ::dsa::test::fail(__FILE__, __LINE__,
+                              std::string(stream.what) + ": the allocator makes no buffer of format " +
+                                  std::to_string(format) + " with usage " + std::to_string(usage));
+        }
+    }
+}
+
+TEST(fr26_the_hal_writes_every_stream_by_cpu) {
+    for (int32_t format : {kFormatRgba8888, kFormatYcbcr420, kFormatBlob}) {
+        EXPECT_EQ(producerUsageFor(format) & kUsageCpuWriteOften, kUsageCpuWriteOften);
+    }
+    // CAMERA_OUTPUT stays on the formats the allocator makes with it, and off RGBA.
+    EXPECT_EQ(producerUsageFor(kFormatRgba8888) & kUsageCameraOutput, 0u);
+    EXPECT_EQ(producerUsageFor(kFormatYcbcr420) & kUsageCameraOutput, kUsageCameraOutput);
+    EXPECT_EQ(producerUsageFor(kFormatBlob) & kUsageCameraOutput, kUsageCameraOutput);
 }
 
 TEST(fr26_a_stream_of_another_shape_is_cropped_at_the_centre_not_stretched) {
