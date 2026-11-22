@@ -1252,12 +1252,17 @@ ANDROID_XMLNS = 'xmlns:android="http://schemas.android.com/apk/res/android"'
 APP_XMLNS = 'xmlns:app="http://schemas.android.com/apk/res-auto"'
 
 
-def overlay_manifest(package, target, resource_map=False, priority=100, required_property=None):
+def overlay_manifest(package, target, resource_map=False, priority=100, required_property=None,
+                     target_name=None):
     """The manifest of a static overlay of `target` with no code; with `resource_map`, its
     resource map (SYSTEM_OVERLAY_MAP) names what it replaces, and only that. With
     `required_property` (a name and a value), the package manager applies the overlay only
-    while that read-only property has that value when it scans the packages at boot."""
-    mapping = f'\n        android:resourcesMap="@xml/{SYSTEM_OVERLAY_MAP}"' if resource_map else ""
+    while that read-only property has that value when it scans the packages at boot. With
+    `target_name`, it names the target's overlayable set it replaces resources of: a package
+    that declares overlayable sets lets an overlay replace only resources of the set it names,
+    and idmap2 maps none of an overlay that names no set, which then never applies."""
+    mapping = f'\n        android:targetName="{target_name}"' if target_name else ""
+    mapping += f'\n        android:resourcesMap="@xml/{SYSTEM_OVERLAY_MAP}"' if resource_map else ""
     if required_property:
         name, value = required_property
         mapping += (f'\n        android:requiredSystemPropertyName="{name}"'
@@ -1769,7 +1774,8 @@ def design_overlay_sources(dest, apk, record=None):
     write_overlay_files(dest, {
         "AndroidManifest.xml": overlay_manifest(overlay["package"], overlay["target"], resource_map=True,
                                                 priority=overlay.get("priority", 100),
-                                                required_property=overlay.get("required_property")),
+                                                required_property=overlay.get("required_property"),
+                                                target_name=overlay.get("overlayable")),
         **files,
         f"res/xml/{SYSTEM_OVERLAY_MAP}.xml": overlay_map(mapping),
     })
@@ -2045,6 +2051,90 @@ def arsc_resources(table):
     return resources
 
 
+# A package's overlayable sets: a chunk per set, with its name and actor (256 UTF-16 units
+# each), holding a chunk per policy: the policy's flags, then the IDs of its resources.
+ARSC_OVERLAYABLE = 0x0204
+ARSC_OVERLAYABLE_POLICY = 0x0205
+# The policy an overlay in /vendor/overlay meets: its partition's.
+OVERLAYABLE_POLICY_VENDOR = 0x00000004
+
+
+def arsc_overlayables(table):
+    """Each overlayable set a compiled resource table declares, by name: the policies of the
+    set (their flags, combined) and its resources ("type/name") under each policy, as
+    {name: [(flags, {"type/name"})]}. A table that declares none gives {}."""
+    chunk_type, header_size, _ = struct.unpack_from("<HHI", table, 0)
+    if chunk_type != ARSC_TABLE:
+        raise ValueError("not a compiled resource table")
+    found = {}
+    offset = header_size
+    while offset < len(table):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", table, offset)
+        if chunk_type == ARSC_PACKAGE:
+            package_id = struct.unpack_from("<I", table, offset + 8)[0]
+            type_strings, _, key_strings = struct.unpack_from("<III", table, offset + 8 + 4 + 256)
+            types = xml_strings(table, offset + type_strings)
+            keys = xml_strings(table, offset + key_strings)
+            names, sets = {}, []
+            child = offset + header_size
+            while child < offset + size:
+                kind, child_header, child_size = struct.unpack_from("<HHI", table, child)
+                if kind == ARSC_TYPE:
+                    type_id, flags, _, count, entries_start = struct.unpack_from("<BBHII", table, child + 8)
+                    kind_name = types[type_id - 1]
+                    for index, entry in _arsc_entry_offsets(table, child + child_header, flags, count):
+                        at = child + entries_start + entry
+                        first, entry_flags = struct.unpack_from("<HH", table, at)
+                        key = first if entry_flags & ARSC_ENTRY_COMPACT else struct.unpack_from("<I", table, at + 4)[0]
+                        names[(package_id << 24) | (type_id << 16) | index] = f"{kind_name}/{keys[key]}"
+                elif kind == ARSC_OVERLAYABLE:
+                    name = table[child + 8:child + 8 + 512].decode("utf-16-le").split("\0", 1)[0]
+                    policies = []
+                    inner = child + child_header
+                    while inner < child + child_size:
+                        inner_kind, inner_header, inner_size = struct.unpack_from("<HHI", table, inner)
+                        if inner_kind == ARSC_OVERLAYABLE_POLICY:
+                            flags, count = struct.unpack_from("<II", table, inner + 8)
+                            policies.append((flags, struct.unpack_from(f"<{count}I", table, inner + inner_header)))
+                        inner += inner_size
+                    sets.append((name, policies))
+                child += child_size
+            for name, policies in sets:
+                found.setdefault(name, []).extend(
+                    (flags, {names.get(ref, f"0x{ref:08x}") for ref in refs}) for flags, refs in policies)
+        offset += size
+    return found
+
+
+def overlayable_problems(overlay, overlaid, table):
+    """What keeps the overlay `overlay` (an entry of SYSTEM_OVERLAYS) from replacing
+    `overlaid` ("type/name") in the package whose resource table is `table`. A package that
+    declares overlayable sets lets an overlay replace only resources of the set its manifest
+    names, under a policy the overlay meets (/vendor/overlay: the vendor partition's); idmap2
+    maps nothing of an overlay that names no set or another one, and it is never applied. A
+    package that declares none lets a preinstalled overlay replace anything, whatever it names."""
+    sets = arsc_overlayables(table)
+    name = overlay.get("overlayable")
+    if not sets:
+        return []
+    if not name:
+        return [f"{overlay['target']} declares overlayable sets ({', '.join(sorted(sets))}) and the overlay "
+                "names none, so idmap2 maps none of its resources"]
+    if name not in sets:
+        return [f"it names the overlayable set {name}, which {overlay['target']} does not declare "
+                f"(it declares {', '.join(sorted(sets))})"]
+    allowed = set().union(*(names for flags, names in sets[name] if flags & OVERLAYABLE_POLICY_VENDOR))
+    listed = set().union(*(names for _, names in sets[name]))
+    problems = []
+    for resource in sorted(overlaid):
+        if resource not in listed:
+            problems.append(f"{resource} is not in {overlay['target']}'s overlayable set {name}")
+        elif resource not in allowed:
+            problems.append(f"{resource} is in {overlay['target']}'s overlayable set {name}, but not under the "
+                            "vendor partition's policy an overlay in /vendor/overlay meets")
+    return problems
+
+
 # What an overlay's sources name of the framework: android: attributes on elements and in
 # style items, and @android:, @*android: and ?android: references.
 FRAMEWORK_ATTRIBUTE = re.compile(r'(?<![\w:])android:(\w+)\s*=')
@@ -2186,6 +2276,9 @@ def build_system_overlays(aapt2, framework_res, work, tables):
         if missing:
             raise ValueError(f"{apk} replaces {', '.join(missing)}, which {overlay['target']} in this "
                              "image does not have: the overlay was written for another build of it")
+        refused = overlayable_problems(overlay, overlaid_resources(apk), tables[apk])
+        if refused:
+            raise ValueError(f"{apk} would never be applied, so {overlay['without']}: {'; '.join(refused)}")
         records[apk] = overlay_record(overlay["target"], framework_table, tables[apk])
         # Every overlay's references are checked before any is linked, so one run names them
         # all, where aapt2 would stop at the first.
@@ -5846,7 +5939,8 @@ SYSTEM_OVERLAY_MAP = "dsa_overlay"
 FRAMEWORK_RES = "SYSTEM/framework/framework-res.apk"
 # Each overlay: its file in /vendor/overlay, its package, the package it overlays, where that
 # package's APK is in target_files (a path suffix, or the permission APEX), and what is wrong
-# with an image that lacks it.
+# with an image that lacks it. An overlay of a package that declares overlayable sets names
+# the set its resources are in ("overlayable"), or it never applies (overlay_manifest).
 SYSTEM_OVERLAYS = [
     {"apk": "DsaFrameworkOverlay.apk", "package": FRAMEWORK_OVERLAY_PACKAGE, "target": "android",
      "target_apk": FRAMEWORK_RES,
@@ -5860,15 +5954,18 @@ SYSTEM_OVERLAYS = [
                 "has no large title or rounded cards"},
     {"apk": "DsaDocumentsUiOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.documentsui",
      "target": "com.android.documentsui", "target_apk": "/priv-app/DocumentsUI/DocumentsUI.apk",
+     "overlayable": "DocumentsUICustomization",
      "without": "Files keeps its old look instead of the rounded one"},
     {"apk": "DsaPermissionControllerOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.permissioncontroller",
      "target": "com.android.permissioncontroller", "target_apk": None,
+     "overlayable": "PermissionControllerStyles",
      "without": "the permission dialog's title is not bold"},
     {"apk": "DsaPackageInstallerOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.packageinstaller",
      "target": "com.android.packageinstaller", "target_apk": "/priv-app/PackageInstaller/PackageInstaller.apk",
      "without": "the install dialog's title is not bold"},
     {"apk": "DsaIntentResolverOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.intentresolver",
      "target": "com.android.intentresolver", "target_apk": "/priv-app/IntentResolver/IntentResolver.apk",
+     "overlayable": "IntentResolver",
      "without": "the share sheet's headline keeps its small size"},
     {"apk": "DsaFrameworkGappsOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.framework.gapps",
      "target": "android", "target_apk": FRAMEWORK_RES,

@@ -126,6 +126,38 @@ class DefaultAppsTests(unittest.TestCase):
         self.assertIn('<color name="white_08p">#14FFFFFF</color>', added)
         self.assertIn("+++ b/res/values-night/dsa_colors.xml", text)
 
+    def test_fr42_the_clocks_icons_take_their_colour_from_the_theme(self):
+        # Upstream's Clock is dark only, and these icons are vector drawables filled white that
+        # the places showing them do not tint: the toolbar's settings action, the alarm's
+        # ringtone, vibrate and delete icons, the alarm volume setting, the alarm screen's alarm
+        # button and the analog clock. In the light theme they showed white on a light page.
+        patch = HERE / "deskclock/patches/0003-tint-the-icons-from-the-theme.patch"
+        self.assertIn(patch, apps.patches("deskclock"))
+        sections = dict(re.findall(r"(?ms)^\+\+\+ b/(\S+)\n(.*?)(?=^diff |\Z)", patch.read_text()))
+        controls = ("ic_settings", "ic_ringtone", "ic_ringtone_silent", "ic_vibrate", "ic_delete_small",
+                    "ic_alarm_small")
+        on_surface = ("ic_fab_alarm", "clock_analog_dial", "clock_analog_hour", "clock_analog_minute")
+        for name, tint in [*((n, "?attr/colorControlNormal") for n in controls),
+                           *((n, "?attr/colorOnSurface") for n in on_surface)]:
+            with self.subTest(icon=name):
+                body = sections.get(f"res/drawable/{name}.xml", "")
+                self.assertIn(f'+<vector android:tint="{tint}"', body)
+        # The caret and the timer's close button are white on a grey disc, which reads in both
+        # themes; a tint from the theme would put a grey glyph on it.
+        for name in ("ic_caret_down", "ic_caret_up", "ic_close_circle"):
+            self.assertNotIn(f"res/drawable/{name}.xml", sections)
+        # The alarm screen: the dismiss icon takes the window's colour, so its circle takes the
+        # on-surface colour; the snooze circle is the secondary colour, so its icon takes the
+        # colour that reads on it.
+        self.assertIn('+            app:backgroundTint="?attr/colorOnSurface"', sections["res/layout/alarm_activity.xml"])
+        java = sections["src/com/android/deskclock/alarms/AlarmActivity.java"]
+        self.assertIn("-                ThemeUtils.resolveColor(this, R.attr.colorOnSurface));", java)
+        self.assertIn("+                ThemeUtils.resolveColor(this, R.attr.colorOnSecondary));", java)
+        # The screensaver is on black in both themes, so its date, next alarm and analog clock
+        # take the dark theme's colours rather than the light theme's dark text.
+        self.assertIn('+    android:theme="@style/ThemeOverlay.Material3.Dark">',
+                      sections["res/layout/desk_clock_saver.xml"])
+
     def test_fr42_an_app_with_a_title_area_starts_it_folded_in_a_low_window(self):
         for name in ("deskclock", "gallery", "camera", "music", "recorder", "documentsui"):
             with self.subTest(app=name):

@@ -5573,12 +5573,13 @@ def string_pool(strings):
     return header + b"".join(struct.pack("<I", offset) for offset in offsets) + data
 
 
-def resource_table(resources, layout="full", public=()):
+def resource_table(resources, layout="full", public=(), overlayable=None):
     """A compiled resource table of package 0x7f with `resources` ({type: [name]}), one spec
     chunk and one type chunk per type in the default configuration, with the resources
     `public` names ("type/name") public. `layout` is how aapt2 lays the entries out: "full"
     (32-bit offsets, with one empty entry), "compact" (16-bit offsets and compact entries,
-    with one empty entry) or "sparse" (index and offset pairs)."""
+    with one empty entry) or "sparse" (index and offset pairs). `overlayable` declares
+    overlayable sets, {name: [(policy flags, ["type/name"])]}, after the types, as aapt2 does."""
     types = list(resources)
     keys = [name for names in resources.values() for name in names]
     type_pool, key_pool = string_pool(types), string_pool(keys)
@@ -5612,6 +5613,16 @@ def resource_table(resources, layout="full", public=()):
         header_size = 8 + 12 + len(config)
         body = struct.pack("<BBHII", type_id, flags, 0, count, header_size + len(array)) + config + array + entries
         chunks += struct.pack("<HHI", 0x0201, header_size, 8 + len(body)) + body
+    for set_name, policies in (overlayable or {}).items():
+        inner = b""
+        for flags, names in policies:
+            refs = [(0x7F << 24) | ((types.index(n.split("/", 1)[0]) + 1) << 16)
+                    | resources[n.split("/", 1)[0]].index(n.split("/", 1)[1]) for n in names]
+            policy_body = struct.pack("<II", flags, len(refs)) + b"".join(struct.pack("<I", r) for r in refs)
+            inner += struct.pack("<HHI", make_image.ARSC_OVERLAYABLE_POLICY, 16, 8 + len(policy_body)) + policy_body
+        head = set_name.encode("utf-16-le").ljust(512, b"\0") + "".encode("utf-16-le").ljust(512, b"\0")
+        chunks += struct.pack("<HHI", make_image.ARSC_OVERLAYABLE, 8 + len(head), 8 + len(head) + len(inner)) \
+            + head + inner
     name = "com.example".encode("utf-16-le").ljust(256, b"\0")
     package_body = (struct.pack("<I", 0x7F) + name
                     + struct.pack("<IIIII", 288, len(types), 288 + len(type_pool), len(keys), 0)
@@ -5621,14 +5632,14 @@ def resource_table(resources, layout="full", public=()):
     return struct.pack("<HHII", 0x0002, 12, 12 + len(globals_pool) + len(package), 1) + globals_pool + package
 
 
-def table_of(names, public=()):
+def table_of(names, public=(), overlayable=None, layout="full"):
     """A resource table that defines exactly `names` ("type/name"), with those `public`
-    names public."""
+    names public and the overlayable sets `overlayable` (see resource_table)."""
     resources = {}
     for name in names:
         kind, entry = name.split("/", 1)
         resources.setdefault(kind, []).append(entry)
-    return resource_table(resources, public=public)
+    return resource_table(resources, layout=layout, public=public, overlayable=overlayable)
 
 
 # Every framework resource the system screen overlays name, as checked in the framework-res
@@ -5650,7 +5661,7 @@ FRAMEWORK_PUBLIC_CHECKED = {
     "attr/maxLines", "attr/maxWidth", "attr/minHeight", "attr/minSdkVersion", "attr/orientation",
     "attr/paddingBottom", "attr/paddingEnd", "attr/paddingStart", "attr/paddingTop", "attr/pathData",
     "attr/priority", "attr/radius", "attr/requiredSystemPropertyName", "attr/requiredSystemPropertyValue",
-    "attr/resourcesMap", "attr/scrollIndicators",
+    "attr/resourcesMap", "attr/scrollIndicators", "attr/targetName",
     "attr/scrollbarAlwaysDrawVerticalTrack", "attr/selectableItemBackground", "attr/shape", "attr/src",
     "attr/start", "attr/strokeColor", "attr/strokeLineCap", "attr/strokeWidth", "attr/targetPackage",
     "attr/targetSdkVersion", "attr/text", "attr/textAppearance", "attr/textColor", "attr/textColorPrimary",
@@ -5968,6 +5979,86 @@ class SystemScreenDesignTests(unittest.TestCase):
              if name != "style/SettingsLibTheme.CollapsingToolbar.Expressive"])
         with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run"):
             with self.assertRaisesRegex(ValueError, "SettingsLibTheme.CollapsingToolbar.Expressive"):
+                make_image.build_system_overlays(Path("/sdk/aapt2"), Path(tmp) / "framework-res.apk",
+                                                 Path(tmp), tables)
+
+    # The overlayable set each app the image overlays declares the overlaid resources in, as
+    # aapt2 dump overlayable shows them in the Android 17 (16373615) image's DocumentsUI,
+    # PermissionController and IntentResolver. framework-res, Settings and PackageInstaller
+    # declare none.
+    OVERLAYABLE_SETS = {
+        "DsaDocumentsUiOverlay.apk": "DocumentsUICustomization",
+        "DsaPermissionControllerOverlay.apk": "PermissionControllerStyles",
+        "DsaIntentResolverOverlay.apk": "IntentResolver",
+    }
+    # product|system|vendor, DocumentsUI's policy.
+    VENDOR_POLICY = 0x02 | 0x04 | 0x08
+
+    def target_with_sets(self, apk, name=None, policy=None, leave_out=()):
+        """A table of the app `apk` overlays that declares its overlayable set (`name`, or the
+        app's own), with the overlaid resources in it but `leave_out`, under `policy`."""
+        overlaid = make_image.overlaid_resources(apk)
+        return table_of(overlaid + ["id/not_overlayable"], overlayable={
+            name or self.OVERLAYABLE_SETS[apk]: [(self.VENDOR_POLICY if policy is None else policy,
+                                                  [r for r in overlaid if r not in leave_out])],
+            "Another": [(self.VENDOR_POLICY, ["id/not_overlayable"])]})
+
+    def test_fr42_an_overlayable_set_is_read_from_a_resource_table(self):
+        names = ["bool/force_material3", "color/primary", "dimen/grid_item_radius"]
+        for layout in ("full", "compact", "sparse"):
+            table = table_of(names, overlayable={"DocumentsUICustomization": [
+                (0x0E, ["bool/force_material3", "color/primary"]), (0x10, ["dimen/grid_item_radius"])]},
+                layout=layout)
+            self.assertEqual(make_image.arsc_overlayables(table), {"DocumentsUICustomization": [
+                (0x0E, {"bool/force_material3", "color/primary"}), (0x10, {"dimen/grid_item_radius"})]}, layout)
+        self.assertEqual(make_image.arsc_overlayables(table_of(names)), {})
+
+    def test_fr42_each_overlay_names_the_overlayable_set_of_the_app_it_overlays(self):
+        # DocumentsUI, PermissionController and IntentResolver declare overlayable sets, so
+        # idmap2 maps an overlay of theirs only when its manifest names the set: without it
+        # Files kept its old look and none of the image's blue scheme (the overlay was listed
+        # but never enabled, and force_material3 stayed false).
+        named = {overlay["apk"]: overlay.get("overlayable") for overlay in make_image.SYSTEM_OVERLAYS}
+        self.assertEqual({apk: name for apk, name in named.items() if name}, self.OVERLAYABLE_SETS)
+        for apk, files in self.every_overlay().items():
+            element = ET.fromstring(files["AndroidManifest.xml"]).find("overlay")
+            self.assertEqual(element.get(NS + "targetName"), self.OVERLAYABLE_SETS.get(apk), apk)
+
+    def test_fr42_an_overlay_idmap2_would_map_nothing_of_is_refused(self):
+        for apk in self.OVERLAYABLE_SETS:
+            overlay = make_image.system_overlay(apk)
+            overlaid = make_image.overlaid_resources(apk)
+            with self.subTest(apk=apk):
+                self.assertEqual(make_image.overlayable_problems(overlay, overlaid, self.target_with_sets(apk)), [])
+                unnamed = {**overlay, "overlayable": None}
+                self.assertIn("names none", " ".join(
+                    make_image.overlayable_problems(unnamed, overlaid, self.target_with_sets(apk))))
+                self.assertIn("does not declare", " ".join(make_image.overlayable_problems(
+                    overlay, overlaid, self.target_with_sets(apk, name="SomethingElse"))))
+                self.assertIn(f"is not in {overlay['target']}'s overlayable set", " ".join(
+                    make_image.overlayable_problems(overlay, overlaid,
+                                                    self.target_with_sets(apk, leave_out=overlaid[:1]))))
+                # Signature only: an overlay in /vendor/overlay is not signed with the app's key.
+                self.assertIn("vendor partition's policy", " ".join(make_image.overlayable_problems(
+                    overlay, overlaid, self.target_with_sets(apk, policy=0x10))))
+        # An app that declares no set takes a preinstalled overlay whatever it names.
+        overlay = make_image.system_overlay("DsaPackageInstallerOverlay.apk")
+        overlaid = make_image.overlaid_resources("DsaPackageInstallerOverlay.apk")
+        self.assertEqual(make_image.overlayable_problems(overlay, overlaid, table_of(overlaid)), [])
+
+    def test_fr42_an_overlay_that_would_never_be_applied_stops_the_image(self):
+        tables = {apk: table_of(make_image.overlaid_resources(apk)) for apk in make_image.SYSTEM_OVERLAY_FILES}
+        tables["DsaFrameworkOverlay.apk"] = linkable_framework_table(
+            overlaid=make_image.overlaid_resources("DsaFrameworkOverlay.apk"))
+        for apk in self.OVERLAYABLE_SETS:
+            tables[apk] = self.target_with_sets(apk)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run"):
+            make_image.build_system_overlays(Path("/sdk/aapt2"), Path(tmp) / "framework-res.apk", Path(tmp), tables)
+        overlays = [{**o, "overlayable": None} if o["apk"] == "DsaDocumentsUiOverlay.apk" else o
+                    for o in make_image.SYSTEM_OVERLAYS]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run"), \
+                patch.object(make_image, "SYSTEM_OVERLAYS", overlays):
+            with self.assertRaisesRegex(ValueError, "DsaDocumentsUiOverlay.apk would never be applied"):
                 make_image.build_system_overlays(Path("/sdk/aapt2"), Path(tmp) / "framework-res.apk",
                                                  Path(tmp), tables)
 

@@ -196,7 +196,12 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
     checked against that framework-res before any is built: one that names a resource it
     lacks, or a private one other than through `@*android:`, stops the image with all of
     them listed, since aapt2 links an overlay only to the framework's public resources and
-    would stop at the first. It records the SHA-256 of the two resource tables
+    would stop at the first. Files, PermissionController and the share sheet declare
+    overlayable sets, and idmap2 maps an overlay of such an app only when its manifest names
+    the set (`android:targetName`) and the set lets the vendor partition replace what the
+    overlay replaces; otherwise the overlay is listed but never applied. So each of their
+    overlays names its set, and an overlay that names none, names another, or replaces a
+    resource outside it stops the image. It records the SHA-256 of the two resource tables
     in `assets/dsa-overlay.json`; `check-image.py` fails an image with an overlay missing, or
     one built against another framework-res or another build of its app.
   - What no overlay can reach is edited in the app. SettingsLib's toolbar layouts start the
