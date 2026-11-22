@@ -2639,7 +2639,7 @@ Android가 설치를 거부합니다.</value>
     <value>대체 스토어</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 스토어는 앱 목록에서 제거합니다.</value>
+    <value>DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 설치한 스토어는 다른 앱처럼 앱 목록에 보이며, 지울 때도 앱 목록에서 지웁니다.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>설치되지 않음</value>

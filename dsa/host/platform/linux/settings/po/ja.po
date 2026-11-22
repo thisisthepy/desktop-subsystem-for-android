@@ -1845,8 +1845,8 @@ msgstr "Android を停止してから、もう一度起動します。\n\nアプ
 msgid "Alternative stores"
 msgstr "代替ストア"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。"
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。インストールしたストアは他のアプリと同じようにアプリの一覧に表示され、削除もアプリの一覧から行います。"
 
 msgid "Installed, version {0}"
 msgstr "インストール済み、バージョン {0}"

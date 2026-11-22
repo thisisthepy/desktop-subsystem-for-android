@@ -2641,7 +2641,7 @@ Laden Sie den x86_64- oder arm64-v8a-Build der App herunter.</value>
     <value>Alternative Stores</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA lädt einen Store von seiner offiziellen Website herunter, prüft, wer ihn signiert hat, und installiert ihn wie jede andere App. DSA liefert diese Stores nicht mit, und jeder Name ist eine Marke seines Inhabers. Ein Store wird über die App-Liste entfernt.</value>
+    <value>DSA lädt einen Store von seiner offiziellen Website herunter, prüft, wer ihn signiert hat, und installiert ihn wie jede andere App. DSA liefert diese Stores nicht mit, und jeder Name ist eine Marke seines Inhabers. Installierte Stores erscheinen wie jede andere App in der App-Liste, und dort deinstallieren Sie sie auch.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Nicht installiert</value>

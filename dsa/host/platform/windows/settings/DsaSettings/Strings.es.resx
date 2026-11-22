@@ -2641,7 +2641,7 @@ Obtenga la compilación x86_64 o arm64-v8a de la aplicación.</value>
     <value>Tiendas alternativas</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA descarga una tienda desde su sitio oficial, comprueba quién la firmó y la instala como cualquier otra app. DSA no incluye estas tiendas y cada nombre es una marca de su propietario. Una tienda se quita desde la lista de apps.</value>
+    <value>DSA descarga una tienda desde su sitio oficial, comprueba quién la firmó y la instala como cualquier otra app. DSA no incluye estas tiendas y cada nombre es una marca de su propietario. Las tiendas instaladas aparecen en la lista de apps como cualquier otra app, y se desinstalan desde allí.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>No instalada</value>

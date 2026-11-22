@@ -2641,7 +2641,7 @@ Hãy lấy bản dựng x86_64 hoặc arm64-v8a của ứng dụng.</value>
     <value>Cửa hàng thay thế</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng.</value>
+    <value>DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Các cửa hàng đã cài xuất hiện trong danh sách ứng dụng như mọi ứng dụng khác, và bạn gỡ chúng ngay tại đó.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Chưa cài đặt</value>

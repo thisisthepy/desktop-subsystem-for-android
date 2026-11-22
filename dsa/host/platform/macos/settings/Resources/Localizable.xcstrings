@@ -62311,85 +62311,85 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA lädt einen Store von seiner offiziellen Website herunter, prüft, wer ihn signiert hat, und installiert ihn wie jede andere App. DSA liefert diese Stores nicht mit, und jeder Name ist eine Marke seines Inhabers. Ein Store wird über die App-Liste entfernt."
+            "value": "DSA lädt einen Store von seiner offiziellen Website herunter, prüft, wer ihn signiert hat, und installiert ihn wie jede andere App. DSA liefert diese Stores nicht mit, und jeder Name ist eine Marke seines Inhabers. Installierte Stores erscheinen wie jede andere App in der App-Liste, und dort deinstallieren Sie sie auch."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+            "value": "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA descarga una tienda desde su sitio oficial, comprueba quién la firmó y la instala como cualquier otra app. DSA no incluye estas tiendas y cada nombre es una marca de su propietario. Una tienda se quita desde la lista de apps."
+            "value": "DSA descarga una tienda desde su sitio oficial, comprueba quién la firmó y la instala como cualquier otra app. DSA no incluye estas tiendas y cada nombre es una marca de su propietario. Las tiendas instaladas aparecen en la lista de apps como cualquier otra app, y se desinstalan desde allí."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Un magasin se supprime depuis la liste des apps."
+            "value": "DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Les magasins installés apparaissent dans la liste des apps comme toute autre app, et vous les désinstallez depuis cette liste."
           }
         },
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi."
+            "value": "DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Toko yang terpasang muncul di daftar aplikasi seperti aplikasi lain, dan Anda mencopotnya dari sana."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA scarica uno store dal suo sito ufficiale, controlla chi lo ha firmato e lo installa come qualsiasi altra app. DSA non include questi store e ogni nome è un marchio del suo proprietario. Uno store si rimuove dall'elenco delle app."
+            "value": "DSA scarica uno store dal suo sito ufficiale, controlla chi lo ha firmato e lo installa come qualsiasi altra app. DSA non include questi store e ogni nome è un marchio del suo proprietario. Gli store installati compaiono nell'elenco delle app come qualsiasi altra app, e si disinstallano da lì."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。"
+            "value": "DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。インストールしたストアは他のアプリと同じようにアプリの一覧に表示され、削除もアプリの一覧から行います。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 스토어는 앱 목록에서 제거합니다."
+            "value": "DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 설치한 스토어는 다른 앱처럼 앱 목록에 보이며, 지울 때도 앱 목록에서 지웁니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. Remova uma loja pela lista de apps."
+            "value": "O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. As lojas instaladas aparecem na lista de apps como qualquer outro app, e você as desinstala por lá."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Удалить магазин можно в списке приложений."
+            "value": "DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Установленные магазины видны в списке приложений, как любые другие приложения, и удаляются там же."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Bir mağazayı uygulama listesinden kaldırın."
+            "value": "DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Yüklenen mağazalar diğer uygulamalar gibi uygulama listesinde görünür ve oradan kaldırılır."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng."
+            "value": "DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Các cửa hàng đã cài xuất hiện trong danh sách ứng dụng như mọi ứng dụng khác, và bạn gỡ chúng ngay tại đó."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。在应用列表中移除应用商店。"
+            "value": "DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。已安装的应用商店会像其他应用一样显示在应用列表中，卸载也在应用列表中进行。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA 會從官方網站下載應用程式商店，確認簽署者後，像其他應用程式一樣安裝。DSA 不隨附這些商店，各名稱為其所有者的商標。請在應用程式清單中移除商店。"
+            "value": "DSA 會從官方網站下載應用程式商店，確認簽署者後，像其他應用程式一樣安裝。DSA 不隨附這些商店，各名稱為其所有者的商標。已安裝的商店會像其他應用程式一樣顯示在應用程式清單中，解除安裝也在應用程式清單中進行。"
           }
         }
       }

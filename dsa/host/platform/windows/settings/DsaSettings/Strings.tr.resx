@@ -2641,7 +2641,7 @@ Uygulamanın x86_64 veya arm64-v8a derlemesini alın.</value>
     <value>Alternatif mağazalar</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Bir mağazayı uygulama listesinden kaldırın.</value>
+    <value>DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Yüklenen mağazalar diğer uygulamalar gibi uygulama listesinde görünür ve oradan kaldırılır.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Yüklü değil</value>

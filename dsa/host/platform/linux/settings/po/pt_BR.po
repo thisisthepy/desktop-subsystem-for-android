@@ -1845,8 +1845,8 @@ msgstr "O Android para e inicia novamente.\n\nAs janelas dos apps são fechadas.
 msgid "Alternative stores"
 msgstr "Lojas alternativas"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. Remova uma loja pela lista de apps."
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. As lojas instaladas aparecem na lista de apps como qualquer outro app, e você as desinstala por lá."
 
 msgid "Installed, version {0}"
 msgstr "Instalada, versão {0}"

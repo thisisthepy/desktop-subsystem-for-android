@@ -2641,7 +2641,7 @@ Obtenha a versão x86_64 ou arm64-v8a do app.</value>
     <value>Lojas alternativas</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. Remova uma loja pela lista de apps.</value>
+    <value>O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. As lojas instaladas aparecem na lista de apps como qualquer outro app, e você as desinstala por lá.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Não instalada</value>

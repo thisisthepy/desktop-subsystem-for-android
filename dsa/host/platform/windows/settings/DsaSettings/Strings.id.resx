@@ -2641,7 +2641,7 @@ Dapatkan build x86_64 atau arm64-v8a dari aplikasi tersebut.</value>
     <value>Toko alternatif</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi.</value>
+    <value>DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Toko yang terpasang muncul di daftar aplikasi seperti aplikasi lain, dan Anda mencopotnya dari sana.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Tidak terpasang</value>

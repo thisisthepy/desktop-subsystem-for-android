@@ -1845,8 +1845,8 @@ msgstr "Android durur ve yeniden başlar.\n\nUygulama pencereleri kapanır. Baş
 msgid "Alternative stores"
 msgstr "Alternatif mağazalar"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Bir mağazayı uygulama listesinden kaldırın."
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Yüklenen mağazalar diğer uygulamalar gibi uygulama listesinde görünür ve oradan kaldırılır."
 
 msgid "Installed, version {0}"
 msgstr "Yüklü, sürüm {0}"

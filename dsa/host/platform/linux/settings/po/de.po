@@ -1845,8 +1845,8 @@ msgstr "Android wird beendet und neu gestartet.\n\nSeine App-Fenster werden gesc
 msgid "Alternative stores"
 msgstr "Alternative Stores"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA lädt einen Store von seiner offiziellen Website herunter, prüft, wer ihn signiert hat, und installiert ihn wie jede andere App. DSA liefert diese Stores nicht mit, und jeder Name ist eine Marke seines Inhabers. Ein Store wird über die App-Liste entfernt."
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA lädt einen Store von seiner offiziellen Website herunter, prüft, wer ihn signiert hat, und installiert ihn wie jede andere App. DSA liefert diese Stores nicht mit, und jeder Name ist eine Marke seines Inhabers. Installierte Stores erscheinen wie jede andere App in der App-Liste, und dort deinstallieren Sie sie auch."
 
 msgid "Installed, version {0}"
 msgstr "Installiert, Version {0}"

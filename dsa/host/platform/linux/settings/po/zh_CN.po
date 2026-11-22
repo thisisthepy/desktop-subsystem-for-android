@@ -1845,8 +1845,8 @@ msgstr "Android 会停止并重新启动。\n\n它的应用窗口会关闭。启
 msgid "Alternative stores"
 msgstr "其他应用商店"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。在应用列表中移除应用商店。"
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。已安装的应用商店会像其他应用一样显示在应用列表中，卸载也在应用列表中进行。"
 
 msgid "Installed, version {0}"
 msgstr "已安装，版本 {0}"

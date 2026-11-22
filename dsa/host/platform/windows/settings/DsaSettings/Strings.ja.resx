@@ -2641,7 +2641,7 @@ Android はこれを拒否します。</value>
     <value>代替ストア</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。</value>
+    <value>DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。インストールしたストアは他のアプリと同じようにアプリの一覧に表示され、削除もアプリの一覧から行います。</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>未インストール</value>

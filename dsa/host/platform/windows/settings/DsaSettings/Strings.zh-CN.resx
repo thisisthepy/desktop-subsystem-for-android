@@ -2641,7 +2641,7 @@ Android 会拒绝安装它。</value>
     <value>其他应用商店</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。在应用列表中移除应用商店。</value>
+    <value>DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。已安装的应用商店会像其他应用一样显示在应用列表中，卸载也在应用列表中进行。</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>未安装</value>
