@@ -152,6 +152,19 @@ class HiddenAppsTest {
         assertEquals(emptyList<String>(), port.trims)
     }
 
+    @Test
+    fun nfr1_a_task_opened_after_the_hosts_last_word_counts_as_seen() {
+        // NAVER reopened as task 148 on build 1.0.1-dev.12 was logged out of sight as its
+        // window opened: the host's last list of seen windows predated the task.
+        apps.tasks(mapOf(3 to NOTES))
+        apps.shown(setOf(3))
+        apps.tasks(mapOf(3 to NOTES, 148 to MAPS))
+        assertTrue(log.lines.toString(), log.lines.none { it.startsWith("info: $MAPS is out of the user's sight") })
+        // The host's next word counts.
+        apps.shown(setOf(3))
+        assertTrue(log.lines.toString(), log.lines.any { it.startsWith("info: $MAPS is out of the user's sight") })
+    }
+
     private companion object {
         const val AGENT = "io.github.thisisthepy.dsa.agent"
         const val NOTES = "org.example.notes"

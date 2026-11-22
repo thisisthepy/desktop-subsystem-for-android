@@ -1313,6 +1313,24 @@ pub fn frame_rect(request: FrameRectRequest) -> (i32, i32, i32, i32) {
     )
 }
 
+/// The rectangle a proposal (`proposed`, x, y, width, height) stands for while the user drags
+/// an edge: the one the pointer last asked for (`pointer`, as the desktop reported it while
+/// sizing). Windows ends a size loop with one more proposal built from a rectangle the window
+/// was held to earlier in the drag (the size of a frame it showed then), not from where the
+/// pointer let go. Taken as it is, the guest was asked for that smaller, older size and the
+/// window shrank to it after the release. Outside an edge drag, or before the pointer asked
+/// for anything, the proposal stands.
+pub fn edge_drag_proposal(
+    pointer: Option<(i32, i32, i32, i32)>,
+    proposed: (i32, i32, i32, i32),
+    edge_drag: bool,
+) -> (i32, i32, i32, i32) {
+    match pointer {
+        Some(pointer) if edge_drag => pointer,
+        _ => proposed,
+    }
+}
+
 /// What a window does when a frame of another size than its own is kept for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeptFrame {
@@ -1586,6 +1604,44 @@ mod tests {
             max_height: 1080,
             ..Task::default()
         }
+    }
+
+    /// FLO, task 149, a right edge drag on build 1.0.1-dev.12: the pointer asked for 1069x891
+    /// while the window was held to the 1041x891 frame, the 1069 frame arrived and the window
+    /// took it, and the size loop ended with a proposal of 1041x891. The guest was asked for
+    /// 1041 and the window shrank to it 150 ms after the release.
+    #[test]
+    fn fr4_the_release_of_an_edge_drag_keeps_the_size_the_pointer_left() {
+        let mut pointer = None;
+        let mut shown = (343, 343, 1027, 891);
+        // Each step: the pointer's rectangle (WM_SIZING), then Windows' proposal for it.
+        for asked in [1041, 1055, 1069] {
+            pointer = Some((343, 343, asked, 891));
+            let taken = edge_drag_proposal(pointer, (343, 343, asked, 891), true);
+            assert_eq!(taken, (343, 343, asked, 891));
+            // Held to the frame shown, as keep_to_frame does.
+            shown = frame_rect(FrameRectRequest {
+                requested: taken,
+                frame_outer: Some((shown.2, shown.3)),
+                edge_drag: true,
+                moves: (false, false),
+            });
+        }
+        // The 1069 frame arrives and the window takes it.
+        shown = (343, 343, 1069, 891);
+        // The release: Windows proposes a rectangle the window was held to mid-drag.
+        let released = edge_drag_proposal(pointer, (343, 343, 1041, 891), true);
+        assert_eq!(released, (343, 343, 1069, 891));
+        assert_eq!((released.2, released.3), (shown.2, shown.3));
+        // Outside a drag a proposal is the desktop's and stands.
+        assert_eq!(
+            edge_drag_proposal(pointer, (0, 0, 800, 600), false),
+            (0, 0, 800, 600)
+        );
+        assert_eq!(
+            edge_drag_proposal(None, (343, 343, 1041, 891), true),
+            (343, 343, 1041, 891)
+        );
     }
 
     #[test]

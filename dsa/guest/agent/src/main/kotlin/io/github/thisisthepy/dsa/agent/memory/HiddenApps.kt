@@ -68,8 +68,12 @@ class HiddenApps(
     /** Takes the tasks whose window the user can see now. */
     fun shown(taskIds: Set<Int>) {
         seenTasks = taskIds
+        answeredFor = tasks.keys
         follow()
     }
+
+    /** The tasks there were when the host last said which can be seen. */
+    private var answeredFor: Set<Int> = emptySet()
 
     /** Takes whether the host shows any task window. */
     fun screen(on: Boolean) {
@@ -82,7 +86,12 @@ class HiddenApps(
         val packages = tasks.values.filter { it.isNotEmpty() && it != ownPackage }.toSet()
         val seen = when {
             !screenOn -> emptySet()
-            else -> seenTasks?.let { ids -> tasks.filterKeys { it in ids }.values.toSet() } ?: packages
+            // A task newer than the host's last word is opening its window: seen until the host
+            // says otherwise. Counted hidden, a reopened app was logged out of sight as its
+            // window opened, and trimmed if the host's word came late.
+            else -> seenTasks?.let { ids ->
+                tasks.filterKeys { it in ids || it !in answeredFor }.values.toSet()
+            } ?: packages
         }
         val nowHidden = packages - seen
         hidden.keys.retainAll(nowHidden)

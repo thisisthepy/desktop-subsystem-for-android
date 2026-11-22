@@ -68,6 +68,7 @@ class ClosedAppsTest {
     fun nfr2_an_app_whose_last_window_closed_is_ended_and_its_return_logged() {
         processes.running["org.example.notes"] = mutableMapOf(41 to 40L * 1024, 42 to 20L * 1024)
         apps.tasks(setOf("org.example.notes", "org.example.clock"))
+        apps.closing("org.example.notes")
         apps.tasks(setOf("org.example.clock"))
         assertEquals(listOf("org.example.notes"), processes.stopped)
         scheduler.advance(ClosedApps.SETTLE_MILLIS)
@@ -76,7 +77,7 @@ class ClosedAppsTest {
             log.lines.contains(
                 "info: closed org.example.notes: its 2 processes held 60 MiB (PSS, 0 MiB of it in zram) and ended; " +
                     "the guest's free memory rose 60 MiB (available memory +60 MiB) in ${ClosedApps.SETTLE_MILLIS} ms, " +
-                    "counted from the end of its processes",
+                    "counted from the window's close",
             ),
         )
     }
@@ -127,9 +128,15 @@ class ClosedAppsTest {
         apps.tasks(setOf(dialog), inTasks = setOf(dialog, app))
         scheduler.advance(ClosedApps.SETTLE_MILLIS * (ClosedApps.MAX_RECHECKS + 1))
         assertTrue(processes.stopped.toString(), processes.stopped.isEmpty())
-        // The dialog answered and the task closed: the app is ended then.
+        // The dialog answered and the task ended by itself: no window was closed by the user,
+        // so neither is stopped (build 1.0.1-dev.12 stopped both).
         apps.tasks(emptySet(), inTasks = emptySet())
-        assertEquals(listOf(dialog, app), processes.stopped)
+        assertTrue(processes.stopped.toString(), processes.stopped.isEmpty())
+        // The user closes the window of a task of the app: it is ended then.
+        apps.tasks(setOf(app), inTasks = setOf(app))
+        apps.closing(app)
+        apps.tasks(emptySet(), inTasks = emptySet())
+        assertEquals(listOf(app), processes.stopped)
         assertTrue(log.lines.toString(), log.lines.contains("info: force-stopping $app: it has no task window and no activity in any task"))
     }
 
@@ -142,6 +149,7 @@ class ClosedAppsTest {
         processes.running[settings] = mutableMapOf(5629 to 76L * 1024)
         processes.stubborn += settings
         apps.tasks(setOf(settings, probe), inTasks = setOf(settings, probe))
+        apps.closing(settings)
         apps.tasks(setOf(probe), inTasks = setOf(probe))
         assertEquals(listOf(settings), processes.stopped)
         processes.running[settings] = mutableMapOf(5673 to 76L * 1024)
@@ -155,6 +163,7 @@ class ClosedAppsTest {
         processes.running["org.example.notes"] = mutableMapOf(41 to 40L * 1024)
         processes.visible += "org.example.notes"
         apps.tasks(setOf("org.example.notes"))
+        apps.closing("org.example.notes")
         apps.tasks(emptySet())
         assertTrue(processes.stopped.isEmpty())
         processes.visible.clear()
@@ -167,6 +176,8 @@ class ClosedAppsTest {
         widgets += "org.example.clock"
         processes.foreground += "org.example.music"
         apps.tasks(setOf("org.example.clock", "org.example.music"))
+        apps.closing("org.example.clock")
+        apps.closing("org.example.music")
         apps.tasks(emptySet())
         assertTrue(processes.stopped.isEmpty())
     }
@@ -184,6 +195,32 @@ class ClosedAppsTest {
         apps.configure()
         assertEquals(ClosedApps.MAX_CACHED_PROCESSES, processes.cachedLimit)
         assertEquals(listOf("com.android.google.gce.gceservice", "com.android.devicelockcontroller"), processes.disabled)
+    }
+
+    @Test
+    fun nfr2_an_app_whose_task_ends_without_the_users_close_is_never_stopped() {
+        // Build 1.0.1-dev.12 force-stopped the permission controller, the credential manager
+        // and ONE store's helper as their tasks ended on their own.
+        for (packageName in listOf("com.android.permissioncontroller", "com.android.credentialmanager", "com.skt.skaf.OA00018282")) {
+            apps.tasks(setOf(packageName), inTasks = setOf(packageName))
+            apps.tasks(emptySet())
+        }
+        scheduler.advance(ClosedApps.SETTLE_MILLIS * (ClosedApps.MAX_RECHECKS + 1))
+        assertTrue(processes.stopped.toString(), processes.stopped.isEmpty())
+    }
+
+    @Test
+    fun nfr2_an_app_reopened_while_its_close_waits_on_a_shown_activity_is_not_stopped() {
+        // NAVER: closed, then opened again within moments.
+        val naver = "com.nhn.android.search"
+        processes.visible += naver
+        apps.tasks(setOf(naver))
+        apps.closing(naver)
+        apps.tasks(emptySet())
+        apps.tasks(setOf(naver))
+        processes.visible.clear()
+        scheduler.advance(ClosedApps.SETTLE_MILLIS * (ClosedApps.MAX_RECHECKS + 1))
+        assertTrue(processes.stopped.toString(), processes.stopped.isEmpty())
     }
 
     @Test

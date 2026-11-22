@@ -59,9 +59,10 @@ use dsa_host_core::compositor::window_mode::{
     caption_revealed, picture_in_picture_place, ModeState, WindowMode,
 };
 use dsa_host_core::compositor::window_sizing::{
-    frame_rect, is_edge_drag, kept_frame_action, maximized_outer, maximized_position,
-    min_client_size, rescaled_rect, size_is_held, to_task_position, to_task_size,
-    to_window_position, FrameRectRequest, KeptFrame, LoopKind, MoveLoop, SizeProposal,
+    edge_drag_proposal, frame_rect, is_edge_drag, kept_frame_action, maximized_outer,
+    maximized_position, min_client_size, rescaled_rect, size_is_held, to_task_position,
+    to_task_size, to_window_position, FrameRectRequest, KeptFrame, LoopKind, MoveLoop,
+    SizeProposal,
 };
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::ime::ImeCursor;
@@ -343,6 +344,8 @@ struct WindowData {
     /// Which edges the user drags (left, top), so a window that takes the size of a frame
     /// keeps the other edges where they are.
     drag_edges: Cell<(bool, bool)>,
+    /// The rectangle the pointer last asked for in an edge drag (WM_SIZING); `None` outside one.
+    drag_pointer: Cell<Option<(i32, i32, i32, i32)>>,
     /// Whether the move loop has moved the window or dragged an edge yet: only then is the
     /// user dragging it.
     move_loop: Cell<MoveLoop>,
@@ -820,6 +823,7 @@ unsafe extern "system" fn task_window_proc(
                 if message == WM_ENTERSIZEMOVE {
                     data.drag_edges.set((false, false));
                 }
+                data.drag_pointer.set(None);
                 // WM_SIZING says when the drag is of an edge.
                 data.sizing.set(false);
                 if message == WM_EXITSIZEMOVE {
@@ -887,7 +891,15 @@ unsafe extern "system" fn task_window_proc(
                     ));
                 }
             }
-            DefWindowProcW(hwnd, message, wparam, lparam)
+            let result = DefWindowProcW(hwnd, message, wparam, lparam);
+            // Where the pointer has the window now: the size loop's last proposal may come from
+            // an older rectangle (edge_drag_proposal).
+            if let Some(data) = window_data(hwnd).filter(|data| data.sizing.get()) {
+                let (pos, size) = rect_parts(&*(lparam as *const RECT));
+                data.drag_pointer
+                    .set(Some((pos.0, pos.1, size.0 as i32, size.1 as i32)));
+            }
+            result
         }
         WM_APP_FRAME_READY => {
             if let Some(data) = window_data(hwnd) {
@@ -998,6 +1010,24 @@ unsafe extern "system" fn task_window_proc(
                     // A maximised, snapped or full screen window keeps the size proposed,
                     // whatever size the guest gives its task. A new monitor scale changes
                     // nothing about that.
+                    // In the user's edge drag the window goes where the pointer has it, the
+                    // size loop's closing proposal included, which Windows may build from a
+                    // rectangle the window was held to earlier in the drag.
+                    let user_drag = data.sizing.get()
+                        && !data.self_sizing.get()
+                        && !data.following.get()
+                        && !data.rescaling.get();
+                    let (x, y, cx, cy) = edge_drag_proposal(
+                        data.drag_pointer.get(),
+                        (pos.x, pos.y, pos.cx, pos.cy),
+                        user_drag,
+                    );
+                    if pos.flags & SWP_NOMOVE == 0 {
+                        pos.x = x;
+                        pos.y = y;
+                    }
+                    pos.cx = cx;
+                    pos.cy = cy;
                     if !data.rescaling.get() {
                         set_held(hwnd, data, holds_proposed_size(hwnd, data, pos));
                     }
@@ -2573,6 +2603,7 @@ impl Ui {
                 self.setup.input.clone(),
             ),
             drag_edges: Cell::new((false, false)),
+            drag_pointer: Cell::new(None),
             move_loop: Cell::new(MoveLoop::default()),
             in_move_loop: Cell::new(false),
             loop_kind: Cell::new(LoopKind::None),

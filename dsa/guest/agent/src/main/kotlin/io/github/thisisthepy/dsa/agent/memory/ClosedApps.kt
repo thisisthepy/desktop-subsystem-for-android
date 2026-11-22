@@ -58,7 +58,10 @@ interface AppProcesses {
 }
 
 /**
- * Ends an app's processes as soon as its last task window closes, instead of leaving them
+ * Ends an app's processes as soon as the user closes its last task window on the host
+ * ([closing], then the task's end), and never for a task that ended any other way. Right
+ * before the stop it looks again: an app with a window, an activity in a task, or one that
+ * shows is kept. Otherwise this ends them instead of leaving them
  * cached as a phone does: on a desktop a closed window means the user is done with the app,
  * and memory a cached process holds is memory the host does not get back. The guest's
  * control daemon sees the same task end and drops the caches a moment later, so what the
@@ -134,10 +137,24 @@ class ClosedApps(
         val now = packages + inTasks
         val closed = open - now
         open = now
-        for (packageName in closed) stop(packageName, force = false)
+        for (packageName in closed) {
+            // Only the user's close of the app's last window ends it. A task that ended by
+            // itself (a dialog the app answered, an activity that finished, a task the framework
+            // renamed or moved between displays for a moment) says nothing about whether the
+            // user is done with the app; its idle processes go with the cached process limit.
+            if (!closedByHost(packageName)) {
+                log.info("closed $packageName: its task ended without the user closing its window, so it is not stopped")
+                continue
+            }
+            stop(packageName, force = false)
+        }
         // A close that left the app a window (another task of it) is forgotten.
         closing.keys.retainAll { it !in now }
     }
+
+    /** Whether the host closed [packageName]'s last window a moment ago. */
+    private fun closedByHost(packageName: String): Boolean =
+        closing[packageName]?.let { it.at + BEFORE_KEPT_MILLIS >= clock() } == true
 
     /** How many times an app that still showed an activity has been looked at again, by package. */
     private val rechecks = HashMap<String, Int>()
@@ -164,6 +181,14 @@ class ClosedApps(
             }
             if (shows(packageName)) {
                 keepWhileShown(packageName)
+                return false
+            }
+            // Looked at again right before the stop: a window or an activity in a task that
+            // came back meanwhile (the app reopened) keeps it.
+            if (packageName in open) {
+                rechecks.remove(packageName)
+                closing.remove(packageName)
+                log.info("closed $packageName: not stopped because it has a window or an activity in a task again")
                 return false
             }
         }
