@@ -807,8 +807,11 @@ unsafe extern "system" fn task_window_proc(
                         place_ime_cursor(hwnd, data);
                     }
                     // The buttons stay at the right end, and a maximized window's middle
-                    // button restores it.
-                    if titled(data) {
+                    // button restores it. A window taking the rectangle of a new monitor scale
+                    // has its title bar drawn once its SetWindowPos returns (WM_DPICHANGED):
+                    // drawn here as well, the title at the new scale and the call to the window
+                    // manager held up the desktop's move of the window.
+                    if titled(data) && !data.rescaling.get() {
                         data.caption.paint(hwnd, data.presenter.borrow().as_deref());
                     }
                     // The buttons move with the right edge, the middle one is Restore while
