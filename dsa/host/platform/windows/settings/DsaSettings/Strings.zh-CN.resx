@@ -1094,6 +1094,15 @@ DSA 不分发它们。只有在你要求时，DSA 才会下载公开的 LiteGapp
   <data name="Widgets_Removed" xml:space="preserve">
     <value>已从桌面删除 {0}。</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} 个小部件</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 个小部件</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>再显示 {0} 个</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK 安装程序</value>
   </data>

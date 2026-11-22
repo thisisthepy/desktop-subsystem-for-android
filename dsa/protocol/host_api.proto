@@ -906,7 +906,48 @@ message SetAppVolume {
 
 // Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 // Needs the caller's Android to be running.
-message ListWidgetProviders {}
+message ListWidgetProviders {
+  // Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+  // icon comes once, in `app_icons`, instead. A gallery that groups the widgets by app and
+  // shows only those of the apps the user opens asks so, and asks for their previews with
+  // GetWidgetPreviews: an app may offer hundreds of widgets.
+  bool lazy_previews = 1;
+}
+
+// Where a widget's preview comes from, best first: the layout its app gives for a preview,
+// drawn at the widget's default size; the app's preview image; else the app's icon.
+enum WidgetPreviewSource {
+  WIDGET_PREVIEW_SOURCE_UNSPECIFIED = 0;
+  WIDGET_PREVIEW_SOURCE_LAYOUT = 1;
+  WIDGET_PREVIEW_SOURCE_IMAGE = 2;
+  WIDGET_PREVIEW_SOURCE_ICON = 3;
+}
+
+// An app's icon, a PNG image of at most 160 pixels on a side.
+message WidgetAppIcon {
+  string package_name = 1;
+  bytes icon_png = 2;
+}
+
+// Asks for the previews of some widgets on offer, at most 64 at once. The answer is
+// WidgetPreviews. Needs the caller's Android to be running.
+message GetWidgetPreviews {
+  // The providers' components, as `package/class`.
+  repeated string providers = 1;
+}
+
+// One widget's preview, a PNG image of at most 256 pixels on a side; empty for none.
+message WidgetPreview {
+  string provider = 1;
+  bytes preview_png = 2;
+  WidgetPreviewSource source = 3;
+}
+
+// The answer to GetWidgetPreviews, in the order asked, each widget once. A widget that is not
+// on offer has no entry.
+message WidgetPreviews {
+  repeated WidgetPreview previews = 1;
+}
 
 // One widget an app in the caller's Android offers.
 message WidgetProvider {
@@ -938,6 +979,8 @@ message WidgetProvider {
 // The answer to ListWidgetProviders, in label order.
 message WidgetProviders {
   repeated WidgetProvider providers = 1;
+  // With `lazy_previews`: the icon of each app that offers a widget, each app once.
+  repeated WidgetAppIcon app_icons = 2;
 }
 
 // Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
@@ -3072,6 +3115,7 @@ message Request {
     RemoveWidevine remove_widevine = 702;
     LaunchPlacement launch_placement = 710;
     SetCaptionCompat set_caption_compat = 715;
+    GetWidgetPreviews get_widget_previews = 740;
   }
 }
 
@@ -3111,6 +3155,7 @@ message Response {
     KeyProtection key_protection = 622;
     AppAudio app_audio = 660;
     Widevine widevine = 700;
+    WidgetPreviews widget_previews = 740;
   }
 }
 

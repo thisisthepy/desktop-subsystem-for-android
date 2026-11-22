@@ -1094,6 +1094,15 @@ DSA tidak berafiliasi dengan, tidak didukung oleh, dan tidak disponsori oleh Mic
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} telah dihapus dari desktop Anda.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widget</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Tampilkan {0} lagi</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK Installer</value>
   </data>

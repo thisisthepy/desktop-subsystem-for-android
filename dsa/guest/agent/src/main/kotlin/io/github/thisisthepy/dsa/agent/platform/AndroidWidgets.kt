@@ -53,6 +53,7 @@ import io.github.thisisthepy.dsa.agent.accessibility.RangeInfo
 import io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.widgets.FrameGate
+import io.github.thisisthepy.dsa.agent.widgets.PreviewKinds
 import io.github.thisisthepy.dsa.agent.widgets.WidgetFit
 import io.github.thisisthepy.dsa.agent.widgets.WidgetInfo
 import io.github.thisisthepy.dsa.agent.widgets.WidgetManager
@@ -63,6 +64,7 @@ import io.github.thisisthepy.dsa.agent.widgets.WidgetStore
 import io.github.thisisthepy.dsa.agent.widgets.allClear
 import io.github.thisisthepy.dsa.control.v1.NodeAction
 import io.github.thisisthepy.dsa.control.v1.PointerAction
+import io.github.thisisthepy.dsa.control.v1.WidgetPreviewSource
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
@@ -150,12 +152,12 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
      * Runs [work] on the main thread, where the widgets' views live, and waits for it at most
      * [MAIN_WAIT_MILLIS]: [otherwise] when it did not run in time.
      */
-    private fun <T> onMain(otherwise: T, work: () -> T): T {
+    private fun <T> onMain(otherwise: T, waitMillis: Long = MAIN_WAIT_MILLIS, work: () -> T): T {
         if (Looper.myLooper() == Looper.getMainLooper()) return work()
         val task = FutureTask(Callable { work() })
         if (!main.post(task)) return otherwise
         return try {
-            task.get(MAIN_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+            task.get(waitMillis, TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
             task.cancel(false)
             otherwise
@@ -315,7 +317,99 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
     }
 
     override fun providers(): List<WidgetInfo> =
-        manager.installedProviders.map(::describe).sortedBy { it.label.lowercase() }
+        manager.installedProviders.map { describe(it) }.sortedBy { it.label.lowercase() }
+
+    override fun galleryProviders(): List<WidgetInfo> =
+        manager.installedProviders.map { describe(it, withPreview = false) }.sortedBy { it.label.lowercase() }
+
+    override fun appIcon(packageName: String): ByteArray {
+        val icon = try {
+            context.packageManager.getApplicationIcon(packageName)
+        } catch (e: PackageManager.NameNotFoundException) {
+            return ByteArray(0)
+        }
+        return drawablePng(icon, WidgetManager.PREVIEW_PIXELS) ?: ByteArray(0)
+    }
+
+    /**
+     * The providers the last [previewKinds] read, by provider, which [drawPreview] draws from
+     * without reading every installed widget again. Only their descriptions: no image.
+     */
+    @Volatile
+    private var previewInfos: Map<String, AppWidgetProviderInfo> = emptyMap()
+
+    override fun previewKinds(providers: List<String>): Map<String, PreviewKinds> {
+        val wanted = providers.toSet()
+        val infos = manager.installedProviders
+            .filter { it.provider.flattenToString() in wanted }
+            .associateBy { it.provider.flattenToString() }
+        previewInfos = infos
+        return infos.mapValues { (_, info) -> PreviewKinds(layout = info.previewLayout != 0, image = info.previewImage != 0) }
+    }
+
+    override fun drawPreview(provider: String, source: WidgetPreviewSource, maxPixels: Int): ByteArray? {
+        val info = previewInfos[provider]
+            ?: manager.installedProviders.firstOrNull { it.provider.flattenToString() == provider }
+            ?: return null
+        val density = context.resources.displayMetrics.densityDpi
+        return when (source) {
+            WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT ->
+                if (info.previewLayout == 0) null else onMain(null, PREVIEW_WAIT_MILLIS) { drawPreviewLayout(info, maxPixels) }
+            WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE ->
+                if (info.previewImage == 0) null else info.loadPreviewImage(context, density)?.let { drawablePng(it, maxPixels) }
+            WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON -> info.loadIcon(context, density)?.let { drawablePng(it, maxPixels) }
+            else -> null
+        }
+    }
+
+    /**
+     * The widget's preview layout drawn as Android's launcher draws it: the layout, which the
+     * app gives as its preview from Android 12 on, applied as the widget's views to a widget
+     * view of its own, laid out at the widget's default size, and drawn shrunk to at most
+     * [maxPixels] on a side. The view is laid out at a density of 160, where a dp is a pixel,
+     * so its bitmap is never larger than the image sent. The view is registered with no widget
+     * host and opens no window, so nothing of it outlives this call. Null when the layout does
+     * not apply or draws nothing, so the next source is tried. Runs on the main thread.
+     */
+    private fun drawPreviewLayout(info: AppWidgetProviderInfo, maxPixels: Int): ByteArray? {
+        val (widthDp, heightDp) = defaultSizeDp(info)
+        val view = WidgetView(densityContext(PREVIEW_DENSITY_DPI)) {}
+        view.setAppWidget(View.NO_ID, info)
+        view.updateAppWidget(RemoteViews(info.provider.packageName, info.previewLayout))
+        val width = widthDp.coerceIn(1, WidgetManager.MAX_SIDE)
+        val height = heightDp.coerceIn(1, WidgetManager.MAX_SIDE)
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+        )
+        view.layout(0, 0, width, height)
+        val scale = minOf(1f, maxPixels.toFloat() / maxOf(width, height))
+        val bitmap = Bitmap.createBitmap(
+            ceil(width * scale).toInt().coerceAtLeast(1),
+            ceil(height * scale).toInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+        )
+        return try {
+            bitmap.eraseColor(Color.TRANSPARENT)
+            val canvas = Canvas(bitmap)
+            canvas.scale(scale, scale)
+            view.draw(canvas)
+            if (isClear(bitmap)) null else encode(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    /** The size a widget is placed at, in dp, as [describe] tells the host. */
+    private fun defaultSizeDp(info: AppWidgetProviderInfo): Pair<Int, Int> {
+        val density = context.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+        val dp = { px: Int -> ceil(px / density).toInt().coerceAtLeast(0) }
+        val minWidth = dp(if (info.minResizeWidth > 0) minOf(info.minResizeWidth, info.minWidth) else info.minWidth)
+        val minHeight = dp(if (info.minResizeHeight > 0) minOf(info.minResizeHeight, info.minHeight) else info.minHeight)
+        val width = WidgetInfo.launcherSide(dp(info.minWidth), info.targetCellWidth, dp(info.maxResizeWidth))
+        val height = WidgetInfo.launcherSide(dp(info.minHeight), info.targetCellHeight, dp(info.maxResizeHeight))
+        return maxOf(width, minWidth) to maxOf(height, minHeight)
+    }
 
     override fun placedIds(): List<Int> = host.appWidgetIds.toList()
 
@@ -459,25 +553,27 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         main.post { for (renderer in renderers.values) renderer.gate.dozing = dozing }
     }
 
-    /** A widget as a gallery shows it. The framework gives its sizes in this display's pixels. */
-    private fun describe(info: AppWidgetProviderInfo): WidgetInfo {
+    /**
+     * A widget as a gallery shows it, with its preview unless [withPreview] is false. The
+     * framework gives its sizes in this display's pixels.
+     */
+    private fun describe(info: AppWidgetProviderInfo, withPreview: Boolean = true): WidgetInfo {
         val density = context.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
         val dp = { px: Int -> ceil(px / density).toInt().coerceAtLeast(0) }
         val minWidth = dp(if (info.minResizeWidth > 0) minOf(info.minResizeWidth, info.minWidth) else info.minWidth)
         val minHeight = dp(if (info.minResizeHeight > 0) minOf(info.minResizeHeight, info.minHeight) else info.minHeight)
         // Placed as a launcher places it: in whole cells that hold its minimum, not at the
         // bare minimum, which leaves its text no room to spare.
-        val defaultWidth = WidgetInfo.launcherSide(dp(info.minWidth), info.targetCellWidth, dp(info.maxResizeWidth))
-        val defaultHeight = WidgetInfo.launcherSide(dp(info.minHeight), info.targetCellHeight, dp(info.maxResizeHeight))
+        val (defaultWidth, defaultHeight) = defaultSizeDp(info)
         return WidgetInfo(
             provider = info.provider.flattenToString(),
             packageName = info.provider.packageName,
             label = info.loadLabel(context.packageManager)?.toString().orEmpty(),
-            previewPng = preview(info),
+            previewPng = if (withPreview) preview(info) else ByteArray(0),
             minWidthDp = minWidth,
             minHeightDp = minHeight,
-            defaultWidthDp = maxOf(defaultWidth, minWidth),
-            defaultHeightDp = maxOf(defaultHeight, minHeight),
+            defaultWidthDp = defaultWidth,
+            defaultHeightDp = defaultHeight,
             maxWidthDp = dp(info.maxResizeWidth),
             maxHeightDp = dp(info.maxResizeHeight),
             resizeMode = info.resizeMode and (AppWidgetProviderInfo.RESIZE_HORIZONTAL or AppWidgetProviderInfo.RESIZE_VERTICAL),
@@ -495,7 +591,11 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         ""
     }
 
-    /** The widget's preview, else its app's icon, as a PNG within the gallery's limits. */
+    /**
+     * The widget's preview image, else its app's icon, as a PNG within the gallery's limits:
+     * what the plain list carries. A widget whose app gives only a preview layout shows its
+     * icon here; a gallery by app asks for the drawn layout instead ([drawPreview]).
+     */
     private fun preview(info: AppWidgetProviderInfo): ByteArray {
         val density = context.resources.displayMetrics.densityDpi
         val drawable: Drawable = try {
@@ -503,22 +603,28 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         } catch (e: Exception) {
             null
         } ?: return ByteArray(0)
-        return try {
-            val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: WidgetManager.PREVIEW_PIXELS
-            val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: WidgetManager.PREVIEW_PIXELS
-            val scale = minOf(1f, WidgetManager.PREVIEW_PIXELS.toFloat() / maxOf(w, h))
-            val bw = (w * scale).toInt().coerceAtLeast(1)
-            val bh = (h * scale).toInt().coerceAtLeast(1)
-            val bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        val png = drawablePng(drawable, WidgetManager.PREVIEW_PIXELS) ?: return ByteArray(0)
+        return if (png.size <= WidgetManager.MAX_PREVIEW_BYTES) png else ByteArray(0)
+    }
+
+    /** [drawable] drawn at its own size, shrunk to at most [maxPixels] on a side, as a PNG. */
+    private fun drawablePng(drawable: Drawable, maxPixels: Int): ByteArray? = try {
+        val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: maxPixels
+        val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: maxPixels
+        val scale = minOf(1f, maxPixels.toFloat() / maxOf(w, h))
+        val bw = (w * scale).toInt().coerceAtLeast(1)
+        val bh = (h * scale).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        try {
             drawable.setBounds(0, 0, bw, bh)
             drawable.draw(Canvas(bitmap))
-            val png = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+            encode(bitmap)
+        } finally {
             bitmap.recycle()
-            if (png.size <= WidgetManager.MAX_PREVIEW_BYTES) png else ByteArray(0)
-        } catch (e: Exception) {
-            log.warn("drawing the preview of ${info.provider.flattenToShortString()} failed", e)
-            ByteArray(0)
         }
+    } catch (e: Exception) {
+        log.warn("drawing a widget's preview or an app's icon failed", e)
+        null
     }
 
     /**
@@ -1061,6 +1167,15 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
 
         /** The longest a read of a widget's views, or an action on one, waits for the main thread. */
         const val MAIN_WAIT_MILLIS = 500L
+
+        /**
+         * The longest drawing one preview layout waits for the main thread: inflating an app's
+         * layout the first time loads its resources, which takes longer than a read of views.
+         */
+        const val PREVIEW_WAIT_MILLIS = 3_000L
+
+        /** The density a preview layout is laid out at: 160, where a dp is one pixel. */
+        const val PREVIEW_DENSITY_DPI = 160
 
         /** The node actions a widget's view can do, as the accessibility framework names them. */
         val VIEW_ACTIONS = listOf(

@@ -330,6 +330,9 @@ extern GeocodeRequestDefaultTypeInternal _GeocodeRequest_default_instance_;
 class GeocodeResult;
 struct GeocodeResultDefaultTypeInternal;
 extern GeocodeResultDefaultTypeInternal _GeocodeResult_default_instance_;
+class GetWidgetPreviews;
+struct GetWidgetPreviewsDefaultTypeInternal;
+extern GetWidgetPreviewsDefaultTypeInternal _GetWidgetPreviews_default_instance_;
 class GoogleDeviceId;
 struct GoogleDeviceIdDefaultTypeInternal;
 extern GoogleDeviceIdDefaultTypeInternal _GoogleDeviceId_default_instance_;
@@ -726,6 +729,9 @@ extern VideoSlotReturnedDefaultTypeInternal _VideoSlotReturned_default_instance_
 class WidgetAdded;
 struct WidgetAddedDefaultTypeInternal;
 extern WidgetAddedDefaultTypeInternal _WidgetAdded_default_instance_;
+class WidgetAppIcon;
+struct WidgetAppIconDefaultTypeInternal;
+extern WidgetAppIconDefaultTypeInternal _WidgetAppIcon_default_instance_;
 class WidgetFrame;
 struct WidgetFrameDefaultTypeInternal;
 extern WidgetFrameDefaultTypeInternal _WidgetFrame_default_instance_;
@@ -735,6 +741,12 @@ extern WidgetListDefaultTypeInternal _WidgetList_default_instance_;
 class WidgetPointer;
 struct WidgetPointerDefaultTypeInternal;
 extern WidgetPointerDefaultTypeInternal _WidgetPointer_default_instance_;
+class WidgetPreview;
+struct WidgetPreviewDefaultTypeInternal;
+extern WidgetPreviewDefaultTypeInternal _WidgetPreview_default_instance_;
+class WidgetPreviews;
+struct WidgetPreviewsDefaultTypeInternal;
+extern WidgetPreviewsDefaultTypeInternal _WidgetPreviews_default_instance_;
 class WidgetProvider;
 struct WidgetProviderDefaultTypeInternal;
 extern WidgetProviderDefaultTypeInternal _WidgetProvider_default_instance_;
@@ -846,6 +858,7 @@ template<> ::dsa::control::v1::GappsState* Arena::CreateMaybeMessage<::dsa::cont
 template<> ::dsa::control::v1::GeocodeAddress* Arena::CreateMaybeMessage<::dsa::control::v1::GeocodeAddress>(Arena*);
 template<> ::dsa::control::v1::GeocodeRequest* Arena::CreateMaybeMessage<::dsa::control::v1::GeocodeRequest>(Arena*);
 template<> ::dsa::control::v1::GeocodeResult* Arena::CreateMaybeMessage<::dsa::control::v1::GeocodeResult>(Arena*);
+template<> ::dsa::control::v1::GetWidgetPreviews* Arena::CreateMaybeMessage<::dsa::control::v1::GetWidgetPreviews>(Arena*);
 template<> ::dsa::control::v1::GoogleDeviceId* Arena::CreateMaybeMessage<::dsa::control::v1::GoogleDeviceId>(Arena*);
 template<> ::dsa::control::v1::GoogleDeviceIdQuery* Arena::CreateMaybeMessage<::dsa::control::v1::GoogleDeviceIdQuery>(Arena*);
 template<> ::dsa::control::v1::GuestBoot* Arena::CreateMaybeMessage<::dsa::control::v1::GuestBoot>(Arena*);
@@ -978,9 +991,12 @@ template<> ::dsa::control::v1::VideoFrame* Arena::CreateMaybeMessage<::dsa::cont
 template<> ::dsa::control::v1::VideoPacket* Arena::CreateMaybeMessage<::dsa::control::v1::VideoPacket>(Arena*);
 template<> ::dsa::control::v1::VideoSlotReturned* Arena::CreateMaybeMessage<::dsa::control::v1::VideoSlotReturned>(Arena*);
 template<> ::dsa::control::v1::WidgetAdded* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetAdded>(Arena*);
+template<> ::dsa::control::v1::WidgetAppIcon* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetAppIcon>(Arena*);
 template<> ::dsa::control::v1::WidgetFrame* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetFrame>(Arena*);
 template<> ::dsa::control::v1::WidgetList* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetList>(Arena*);
 template<> ::dsa::control::v1::WidgetPointer* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetPointer>(Arena*);
+template<> ::dsa::control::v1::WidgetPreview* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetPreview>(Arena*);
+template<> ::dsa::control::v1::WidgetPreviews* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetPreviews>(Arena*);
 template<> ::dsa::control::v1::WidgetProvider* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetProvider>(Arena*);
 template<> ::dsa::control::v1::WidgetProviders* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetProviders>(Arena*);
 template<> ::dsa::control::v1::WidgetReconfigured* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetReconfigured>(Arena*);
@@ -1612,6 +1628,29 @@ inline const std::string& SensorKind_Name(T enum_t_value) {
 }
 bool SensorKind_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, SensorKind* value);
+enum WidgetPreviewSource : int {
+  WIDGET_PREVIEW_SOURCE_UNSPECIFIED = 0,
+  WIDGET_PREVIEW_SOURCE_LAYOUT = 1,
+  WIDGET_PREVIEW_SOURCE_IMAGE = 2,
+  WIDGET_PREVIEW_SOURCE_ICON = 3,
+  WidgetPreviewSource_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  WidgetPreviewSource_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool WidgetPreviewSource_IsValid(int value);
+constexpr WidgetPreviewSource WidgetPreviewSource_MIN = WIDGET_PREVIEW_SOURCE_UNSPECIFIED;
+constexpr WidgetPreviewSource WidgetPreviewSource_MAX = WIDGET_PREVIEW_SOURCE_ICON;
+constexpr int WidgetPreviewSource_ARRAYSIZE = WidgetPreviewSource_MAX + 1;
+
+const std::string& WidgetPreviewSource_Name(WidgetPreviewSource value);
+template<typename T>
+inline const std::string& WidgetPreviewSource_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, WidgetPreviewSource>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function WidgetPreviewSource_Name.");
+  return WidgetPreviewSource_Name(static_cast<WidgetPreviewSource>(enum_t_value));
+}
+bool WidgetPreviewSource_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, WidgetPreviewSource* value);
 enum NodeAction : int {
   NODE_ACTION_UNSPECIFIED = 0,
   NODE_ACTION_CLICK = 1,
@@ -24717,6 +24756,7 @@ class ListWidgetProviders final :
 
   enum : int {
     kRequestIdFieldNumber = 1,
+    kLazyPreviewsFieldNumber = 2,
   };
   // uint32 request_id = 1;
   void clear_request_id();
@@ -24725,6 +24765,15 @@ class ListWidgetProviders final :
   private:
   uint32_t _internal_request_id() const;
   void _internal_set_request_id(uint32_t value);
+  public:
+
+  // bool lazy_previews = 2;
+  void clear_lazy_previews();
+  bool lazy_previews() const;
+  void set_lazy_previews(bool value);
+  private:
+  bool _internal_lazy_previews() const;
+  void _internal_set_lazy_previews(bool value);
   public:
 
   // @@protoc_insertion_point(class_scope:dsa.control.v1.ListWidgetProviders)
@@ -24736,6 +24785,637 @@ class ListWidgetProviders final :
   typedef void DestructorSkippable_;
   struct Impl_ {
     uint32_t request_id_;
+    bool lazy_previews_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class WidgetAppIcon final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetAppIcon) */ {
+ public:
+  inline WidgetAppIcon() : WidgetAppIcon(nullptr) {}
+  ~WidgetAppIcon() override;
+  explicit PROTOBUF_CONSTEXPR WidgetAppIcon(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  WidgetAppIcon(const WidgetAppIcon& from);
+  WidgetAppIcon(WidgetAppIcon&& from) noexcept
+    : WidgetAppIcon() {
+    *this = ::std::move(from);
+  }
+
+  inline WidgetAppIcon& operator=(const WidgetAppIcon& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline WidgetAppIcon& operator=(WidgetAppIcon&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const WidgetAppIcon& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const WidgetAppIcon* internal_default_instance() {
+    return reinterpret_cast<const WidgetAppIcon*>(
+               &_WidgetAppIcon_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    138;
+
+  friend void swap(WidgetAppIcon& a, WidgetAppIcon& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(WidgetAppIcon* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(WidgetAppIcon* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  WidgetAppIcon* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<WidgetAppIcon>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const WidgetAppIcon& from);
+  void MergeFrom(const WidgetAppIcon& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(WidgetAppIcon* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.WidgetAppIcon";
+  }
+  protected:
+  explicit WidgetAppIcon(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 1,
+    kIconPngFieldNumber = 2,
+  };
+  // string package_name = 1;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // bytes icon_png = 2;
+  void clear_icon_png();
+  const std::string& icon_png() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_icon_png(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_icon_png();
+  PROTOBUF_NODISCARD std::string* release_icon_png();
+  void set_allocated_icon_png(std::string* icon_png);
+  private:
+  const std::string& _internal_icon_png() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_icon_png(const std::string& value);
+  std::string* _internal_mutable_icon_png();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetAppIcon)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr icon_png_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GetWidgetPreviews final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.GetWidgetPreviews) */ {
+ public:
+  inline GetWidgetPreviews() : GetWidgetPreviews(nullptr) {}
+  ~GetWidgetPreviews() override;
+  explicit PROTOBUF_CONSTEXPR GetWidgetPreviews(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  GetWidgetPreviews(const GetWidgetPreviews& from);
+  GetWidgetPreviews(GetWidgetPreviews&& from) noexcept
+    : GetWidgetPreviews() {
+    *this = ::std::move(from);
+  }
+
+  inline GetWidgetPreviews& operator=(const GetWidgetPreviews& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetWidgetPreviews& operator=(GetWidgetPreviews&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const GetWidgetPreviews& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const GetWidgetPreviews* internal_default_instance() {
+    return reinterpret_cast<const GetWidgetPreviews*>(
+               &_GetWidgetPreviews_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    139;
+
+  friend void swap(GetWidgetPreviews& a, GetWidgetPreviews& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetWidgetPreviews* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(GetWidgetPreviews* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  GetWidgetPreviews* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<GetWidgetPreviews>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const GetWidgetPreviews& from);
+  void MergeFrom(const GetWidgetPreviews& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(GetWidgetPreviews* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.GetWidgetPreviews";
+  }
+  protected:
+  explicit GetWidgetPreviews(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kProvidersFieldNumber = 2,
+    kRequestIdFieldNumber = 1,
+  };
+  // repeated string providers = 2;
+  int providers_size() const;
+  private:
+  int _internal_providers_size() const;
+  public:
+  void clear_providers();
+  const std::string& providers(int index) const;
+  std::string* mutable_providers(int index);
+  void set_providers(int index, const std::string& value);
+  void set_providers(int index, std::string&& value);
+  void set_providers(int index, const char* value);
+  void set_providers(int index, const char* value, size_t size);
+  std::string* add_providers();
+  void add_providers(const std::string& value);
+  void add_providers(std::string&& value);
+  void add_providers(const char* value);
+  void add_providers(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& providers() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_providers();
+  private:
+  const std::string& _internal_providers(int index) const;
+  std::string* _internal_add_providers();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.GetWidgetPreviews)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> providers_;
+    uint32_t request_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class WidgetPreview final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetPreview) */ {
+ public:
+  inline WidgetPreview() : WidgetPreview(nullptr) {}
+  ~WidgetPreview() override;
+  explicit PROTOBUF_CONSTEXPR WidgetPreview(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  WidgetPreview(const WidgetPreview& from);
+  WidgetPreview(WidgetPreview&& from) noexcept
+    : WidgetPreview() {
+    *this = ::std::move(from);
+  }
+
+  inline WidgetPreview& operator=(const WidgetPreview& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline WidgetPreview& operator=(WidgetPreview&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const WidgetPreview& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const WidgetPreview* internal_default_instance() {
+    return reinterpret_cast<const WidgetPreview*>(
+               &_WidgetPreview_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    140;
+
+  friend void swap(WidgetPreview& a, WidgetPreview& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(WidgetPreview* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(WidgetPreview* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  WidgetPreview* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<WidgetPreview>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const WidgetPreview& from);
+  void MergeFrom(const WidgetPreview& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(WidgetPreview* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.WidgetPreview";
+  }
+  protected:
+  explicit WidgetPreview(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kProviderFieldNumber = 1,
+    kPreviewPngFieldNumber = 2,
+    kSourceFieldNumber = 3,
+  };
+  // string provider = 1;
+  void clear_provider();
+  const std::string& provider() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_provider(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_provider();
+  PROTOBUF_NODISCARD std::string* release_provider();
+  void set_allocated_provider(std::string* provider);
+  private:
+  const std::string& _internal_provider() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_provider(const std::string& value);
+  std::string* _internal_mutable_provider();
+  public:
+
+  // bytes preview_png = 2;
+  void clear_preview_png();
+  const std::string& preview_png() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_preview_png(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_preview_png();
+  PROTOBUF_NODISCARD std::string* release_preview_png();
+  void set_allocated_preview_png(std::string* preview_png);
+  private:
+  const std::string& _internal_preview_png() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_preview_png(const std::string& value);
+  std::string* _internal_mutable_preview_png();
+  public:
+
+  // .dsa.control.v1.WidgetPreviewSource source = 3;
+  void clear_source();
+  ::dsa::control::v1::WidgetPreviewSource source() const;
+  void set_source(::dsa::control::v1::WidgetPreviewSource value);
+  private:
+  ::dsa::control::v1::WidgetPreviewSource _internal_source() const;
+  void _internal_set_source(::dsa::control::v1::WidgetPreviewSource value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetPreview)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr provider_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr preview_png_;
+    int source_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class WidgetPreviews final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetPreviews) */ {
+ public:
+  inline WidgetPreviews() : WidgetPreviews(nullptr) {}
+  ~WidgetPreviews() override;
+  explicit PROTOBUF_CONSTEXPR WidgetPreviews(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  WidgetPreviews(const WidgetPreviews& from);
+  WidgetPreviews(WidgetPreviews&& from) noexcept
+    : WidgetPreviews() {
+    *this = ::std::move(from);
+  }
+
+  inline WidgetPreviews& operator=(const WidgetPreviews& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline WidgetPreviews& operator=(WidgetPreviews&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const WidgetPreviews& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const WidgetPreviews* internal_default_instance() {
+    return reinterpret_cast<const WidgetPreviews*>(
+               &_WidgetPreviews_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    141;
+
+  friend void swap(WidgetPreviews& a, WidgetPreviews& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(WidgetPreviews* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(WidgetPreviews* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  WidgetPreviews* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<WidgetPreviews>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const WidgetPreviews& from);
+  void MergeFrom(const WidgetPreviews& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(WidgetPreviews* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.WidgetPreviews";
+  }
+  protected:
+  explicit WidgetPreviews(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPreviewsFieldNumber = 2,
+    kRequestIdFieldNumber = 1,
+    kCompleteFieldNumber = 3,
+  };
+  // repeated .dsa.control.v1.WidgetPreview previews = 2;
+  int previews_size() const;
+  private:
+  int _internal_previews_size() const;
+  public:
+  void clear_previews();
+  ::dsa::control::v1::WidgetPreview* mutable_previews(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetPreview >*
+      mutable_previews();
+  private:
+  const ::dsa::control::v1::WidgetPreview& _internal_previews(int index) const;
+  ::dsa::control::v1::WidgetPreview* _internal_add_previews();
+  public:
+  const ::dsa::control::v1::WidgetPreview& previews(int index) const;
+  ::dsa::control::v1::WidgetPreview* add_previews();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetPreview >&
+      previews() const;
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // bool complete = 3;
+  void clear_complete();
+  bool complete() const;
+  void set_complete(bool value);
+  private:
+  bool _internal_complete() const;
+  void _internal_set_complete(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetPreviews)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetPreview > previews_;
+    uint32_t request_id_;
+    bool complete_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -24782,7 +25462,7 @@ class WidgetProvider final :
                &_WidgetProvider_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    138;
+    142;
 
   friend void swap(WidgetProvider& a, WidgetProvider& b) {
     a.Swap(&b);
@@ -25080,7 +25760,7 @@ class WidgetProviders final :
                &_WidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    139;
+    143;
 
   friend void swap(WidgetProviders& a, WidgetProviders& b) {
     a.Swap(&b);
@@ -25145,6 +25825,7 @@ class WidgetProviders final :
 
   enum : int {
     kProvidersFieldNumber = 2,
+    kAppIconsFieldNumber = 4,
     kRequestIdFieldNumber = 1,
     kCompleteFieldNumber = 3,
   };
@@ -25165,6 +25846,24 @@ class WidgetProviders final :
   ::dsa::control::v1::WidgetProvider* add_providers();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider >&
       providers() const;
+
+  // repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;
+  int app_icons_size() const;
+  private:
+  int _internal_app_icons_size() const;
+  public:
+  void clear_app_icons();
+  ::dsa::control::v1::WidgetAppIcon* mutable_app_icons(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetAppIcon >*
+      mutable_app_icons();
+  private:
+  const ::dsa::control::v1::WidgetAppIcon& _internal_app_icons(int index) const;
+  ::dsa::control::v1::WidgetAppIcon* _internal_add_app_icons();
+  public:
+  const ::dsa::control::v1::WidgetAppIcon& app_icons(int index) const;
+  ::dsa::control::v1::WidgetAppIcon* add_app_icons();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetAppIcon >&
+      app_icons() const;
 
   // uint32 request_id = 1;
   void clear_request_id();
@@ -25193,6 +25892,7 @@ class WidgetProviders final :
   typedef void DestructorSkippable_;
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider > providers_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetAppIcon > app_icons_;
     uint32_t request_id_;
     bool complete_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -25241,7 +25941,7 @@ class AddWidget final :
                &_AddWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    140;
+    144;
 
   friend void swap(AddWidget& a, AddWidget& b) {
     a.Swap(&b);
@@ -25387,7 +26087,7 @@ class WidgetAdded final :
                &_WidgetAdded_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    141;
+    145;
 
   friend void swap(WidgetAdded& a, WidgetAdded& b) {
     a.Swap(&b);
@@ -25544,7 +26244,7 @@ class WidgetUpdated final :
                &_WidgetUpdated_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    142;
+    146;
 
   friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
     a.Swap(&b);
@@ -25694,7 +26394,7 @@ class WidgetList final :
                &_WidgetList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    143;
+    147;
 
   friend void swap(WidgetList& a, WidgetList& b) {
     a.Swap(&b);
@@ -25838,7 +26538,7 @@ class RemoveWidget final :
                &_RemoveWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    144;
+    148;
 
   friend void swap(RemoveWidget& a, RemoveWidget& b) {
     a.Swap(&b);
@@ -25968,7 +26668,7 @@ class ReconfigureWidget final :
                &_ReconfigureWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    145;
+    149;
 
   friend void swap(ReconfigureWidget& a, ReconfigureWidget& b) {
     a.Swap(&b);
@@ -26109,7 +26809,7 @@ class WidgetReconfigured final :
                &_WidgetReconfigured_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    146;
+    150;
 
   friend void swap(WidgetReconfigured& a, WidgetReconfigured& b) {
     a.Swap(&b);
@@ -26277,7 +26977,7 @@ class ResizeWidget final :
                &_ResizeWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    147;
+    151;
 
   friend void swap(ResizeWidget& a, ResizeWidget& b) {
     a.Swap(&b);
@@ -26462,7 +27162,7 @@ class WidgetFrame final :
                &_WidgetFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    148;
+    152;
 
   friend void swap(WidgetFrame& a, WidgetFrame& b) {
     a.Swap(&b);
@@ -26630,7 +27330,7 @@ class WidgetPointer final :
                &_WidgetPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    149;
+    153;
 
   friend void swap(WidgetPointer& a, WidgetPointer& b) {
     a.Swap(&b);
@@ -26804,7 +27504,7 @@ class AccessibilityWatch final :
                &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    150;
+    154;
 
   friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
@@ -26956,7 +27656,7 @@ class AccessibilityListening final :
                &_AccessibilityListening_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    151;
+    155;
 
   friend void swap(AccessibilityListening& a, AccessibilityListening& b) {
     a.Swap(&b);
@@ -27097,7 +27797,7 @@ class NodeCollection final :
                &_NodeCollection_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    152;
+    156;
 
   friend void swap(NodeCollection& a, NodeCollection& b) {
     a.Swap(&b);
@@ -27249,7 +27949,7 @@ class NodeCollectionItem final :
                &_NodeCollectionItem_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    153;
+    157;
 
   friend void swap(NodeCollectionItem& a, NodeCollectionItem& b) {
     a.Swap(&b);
@@ -27423,7 +28123,7 @@ class NodeWindow final :
                &_NodeWindow_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    154;
+    158;
 
   friend void swap(NodeWindow& a, NodeWindow& b) {
     a.Swap(&b);
@@ -27580,7 +28280,7 @@ class NodeRange final :
                &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    155;
+    159;
 
   friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
@@ -27732,7 +28432,7 @@ class AccessibilityNode final :
                &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    156;
+    160;
 
   friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
@@ -28344,7 +29044,7 @@ class AccessibilityAnnouncement final :
                &_AccessibilityAnnouncement_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    157;
+    161;
 
   friend void swap(AccessibilityAnnouncement& a, AccessibilityAnnouncement& b) {
     a.Swap(&b);
@@ -28512,7 +29212,7 @@ class AccessibilityTree final :
                &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    158;
+    162;
 
   friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
@@ -28767,7 +29467,7 @@ class AccessibilityAction final :
                &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    159;
+    163;
 
   friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
@@ -29023,7 +29723,7 @@ class AccessibilityActionResult final :
                &_AccessibilityActionResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    160;
+    164;
 
   friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
     a.Swap(&b);
@@ -29202,7 +29902,7 @@ class AudioOutputOpen final :
                &_AudioOutputOpen_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    161;
+    165;
 
   friend void swap(AudioOutputOpen& a, AudioOutputOpen& b) {
     a.Swap(&b);
@@ -29381,7 +30081,7 @@ class AudioOutputReady final :
                &_AudioOutputReady_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    162;
+    166;
 
   friend void swap(AudioOutputReady& a, AudioOutputReady& b) {
     a.Swap(&b);
@@ -29522,7 +30222,7 @@ class AudioPcm final :
                &_AudioPcm_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    163;
+    167;
 
   friend void swap(AudioPcm& a, AudioPcm& b) {
     a.Swap(&b);
@@ -29668,7 +30368,7 @@ class AudioInputOpen final :
                &_AudioInputOpen_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    164;
+    168;
 
   friend void swap(AudioInputOpen& a, AudioInputOpen& b) {
     a.Swap(&b);
@@ -29847,7 +30547,7 @@ class AudioInputOpened final :
                &_AudioInputOpened_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    165;
+    169;
 
   friend void swap(AudioInputOpened& a, AudioInputOpened& b) {
     a.Swap(&b);
@@ -29993,7 +30693,7 @@ class AudioOutputControl final :
                &_AudioOutputControl_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    166;
+    170;
 
   friend void swap(AudioOutputControl& a, AudioOutputControl& b) {
     a.Swap(&b);
@@ -30123,7 +30823,7 @@ class AppAudioStream final :
                &_AppAudioStream_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    167;
+    171;
 
   friend void swap(AppAudioStream& a, AppAudioStream& b) {
     a.Swap(&b);
@@ -30312,7 +31012,7 @@ class AppAudio final :
                &_AppAudio_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    168;
+    172;
 
   friend void swap(AppAudio& a, AppAudio& b) {
     a.Swap(&b);
@@ -30451,7 +31151,7 @@ class SetAppVolume final :
                &_SetAppVolume_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    169;
+    173;
 
   friend void swap(SetAppVolume& a, SetAppVolume& b) {
     a.Swap(&b);
@@ -30608,7 +31308,7 @@ class LogStream final :
                &_LogStream_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    170;
+    174;
 
   friend void swap(LogStream& a, LogStream& b) {
     a.Swap(&b);
@@ -30771,7 +31471,7 @@ class LogDump final :
                &_LogDump_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    171;
+    175;
 
   friend void swap(LogDump& a, LogDump& b) {
     a.Swap(&b);
@@ -30923,7 +31623,7 @@ class LogRecord final :
                &_LogRecord_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    172;
+    176;
 
   friend void swap(LogRecord& a, LogRecord& b) {
     a.Swap(&b);
@@ -31151,7 +31851,7 @@ class LogRecords final :
                &_LogRecords_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    173;
+    177;
 
   friend void swap(LogRecords& a, LogRecords& b) {
     a.Swap(&b);
@@ -31328,7 +32028,7 @@ class CollectDiagnostics final :
                &_CollectDiagnostics_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    174;
+    178;
 
   friend void swap(CollectDiagnostics& a, CollectDiagnostics& b) {
     a.Swap(&b);
@@ -31458,7 +32158,7 @@ class DiagnosticsFile final :
                &_DiagnosticsFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    175;
+    179;
 
   friend void swap(DiagnosticsFile& a, DiagnosticsFile& b) {
     a.Swap(&b);
@@ -31631,7 +32331,7 @@ class DiagnosticsDone final :
                &_DiagnosticsDone_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    176;
+    180;
 
   friend void swap(DiagnosticsDone& a, DiagnosticsDone& b) {
     a.Swap(&b);
@@ -31777,7 +32477,7 @@ class PrintJob final :
                &_PrintJob_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    177;
+    181;
 
   friend void swap(PrintJob& a, PrintJob& b) {
     a.Swap(&b);
@@ -32043,7 +32743,7 @@ class PrintJobChunk final :
                &_PrintJobChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    178;
+    182;
 
   friend void swap(PrintJobChunk& a, PrintJobChunk& b) {
     a.Swap(&b);
@@ -32200,7 +32900,7 @@ class PrintJobCancel final :
                &_PrintJobCancel_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    179;
+    183;
 
   friend void swap(PrintJobCancel& a, PrintJobCancel& b) {
     a.Swap(&b);
@@ -32330,7 +33030,7 @@ class PrintJobResult final :
                &_PrintJobResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    180;
+    184;
 
   friend void swap(PrintJobResult& a, PrintJobResult& b) {
     a.Swap(&b);
@@ -32487,7 +33187,7 @@ class CameraMode final :
                &_CameraMode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    181;
+    185;
 
   friend void swap(CameraMode& a, CameraMode& b) {
     a.Swap(&b);
@@ -32650,7 +33350,7 @@ class CameraDevice final :
                &_CameraDevice_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    182;
+    186;
 
   friend void swap(CameraDevice& a, CameraDevice& b) {
     a.Swap(&b);
@@ -32843,7 +33543,7 @@ class CameraList final :
                &_CameraList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    183;
+    187;
 
   friend void swap(CameraList& a, CameraList& b) {
     a.Swap(&b);
@@ -32982,7 +33682,7 @@ class CameraOpen final :
                &_CameraOpen_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    184;
+    188;
 
   friend void swap(CameraOpen& a, CameraOpen& b) {
     a.Swap(&b);
@@ -33150,7 +33850,7 @@ class CameraOpened final :
                &_CameraOpened_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    185;
+    189;
 
   friend void swap(CameraOpened& a, CameraOpened& b) {
     a.Swap(&b);
@@ -33329,7 +34029,7 @@ class CameraFrame final :
                &_CameraFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    186;
+    190;
 
   friend void swap(CameraFrame& a, CameraFrame& b) {
     a.Swap(&b);
@@ -33519,7 +34219,7 @@ class CameraStop final :
                &_CameraStop_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    187;
+    191;
 
   friend void swap(CameraStop& a, CameraStop& b) {
     a.Swap(&b);
@@ -33636,7 +34336,7 @@ class CameraStill final :
                &_CameraStill_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    188;
+    192;
 
   friend void swap(CameraStill& a, CameraStill& b) {
     a.Swap(&b);
@@ -33799,7 +34499,7 @@ class CameraStillTaken final :
                &_CameraStillTaken_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    189;
+    193;
 
   friend void swap(CameraStillTaken& a, CameraStillTaken& b) {
     a.Swap(&b);
@@ -33961,7 +34661,7 @@ class CameraError final :
                &_CameraError_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    190;
+    194;
 
   friend void swap(CameraError& a, CameraError& b) {
     a.Swap(&b);
@@ -34096,7 +34796,7 @@ class SystemSettings final :
                &_SystemSettings_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    191;
+    195;
 
   friend void swap(SystemSettings& a, SystemSettings& b) {
     a.Swap(&b);
@@ -34328,7 +35028,7 @@ class DeviceName final :
                &_DeviceName_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    192;
+    196;
 
   friend void swap(DeviceName& a, DeviceName& b) {
     a.Swap(&b);
@@ -34463,7 +35163,7 @@ class GamepadConnected final :
                &_GamepadConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    193;
+    197;
 
   friend void swap(GamepadConnected& a, GamepadConnected& b) {
     a.Swap(&b);
@@ -34642,7 +35342,7 @@ class GamepadDisconnected final :
                &_GamepadDisconnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    194;
+    198;
 
   friend void swap(GamepadDisconnected& a, GamepadDisconnected& b) {
     a.Swap(&b);
@@ -34772,7 +35472,7 @@ class GamepadState final :
                &_GamepadState_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    195;
+    199;
 
   friend void swap(GamepadState& a, GamepadState& b) {
     a.Swap(&b);
@@ -34979,7 +35679,7 @@ class GamepadRumble final :
                &_GamepadRumble_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    196;
+    200;
 
   friend void swap(GamepadRumble& a, GamepadRumble& b) {
     a.Swap(&b);
@@ -35142,7 +35842,7 @@ class BackupUpload final :
                &_BackupUpload_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    197;
+    201;
 
   friend void swap(BackupUpload& a, BackupUpload& b) {
     a.Swap(&b);
@@ -35299,7 +35999,7 @@ class BackupCommit final :
                &_BackupCommit_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    198;
+    202;
 
   friend void swap(BackupCommit& a, BackupCommit& b) {
     a.Swap(&b);
@@ -35531,7 +36231,7 @@ class BackupDiscard final :
                &_BackupDiscard_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    199;
+    203;
 
   friend void swap(BackupDiscard& a, BackupDiscard& b) {
     a.Swap(&b);
@@ -35661,7 +36361,7 @@ class BackupClear final :
                &_BackupClear_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    200;
+    204;
 
   friend void swap(BackupClear& a, BackupClear& b) {
     a.Swap(&b);
@@ -35807,7 +36507,7 @@ class BackupAnswer final :
                &_BackupAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    201;
+    205;
 
   friend void swap(BackupAnswer& a, BackupAnswer& b) {
     a.Swap(&b);
@@ -35975,7 +36675,7 @@ class BackupQuery final :
                &_BackupQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    202;
+    206;
 
   friend void swap(BackupQuery& a, BackupQuery& b) {
     a.Swap(&b);
@@ -36105,7 +36805,7 @@ class BackupPackage final :
                &_BackupPackage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    203;
+    207;
 
   friend void swap(BackupPackage& a, BackupPackage& b) {
     a.Swap(&b);
@@ -36321,7 +37021,7 @@ class BackupContents final :
                &_BackupContents_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    204;
+    208;
 
   friend void swap(BackupContents& a, BackupContents& b) {
     a.Swap(&b);
@@ -36525,7 +37225,7 @@ class BackupFetch final :
                &_BackupFetch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    205;
+    209;
 
   friend void swap(BackupFetch& a, BackupFetch& b) {
     a.Swap(&b);
@@ -36720,7 +37420,7 @@ class BackupFetchData final :
                &_BackupFetchData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    206;
+    210;
 
   friend void swap(BackupFetchData& a, BackupFetchData& b) {
     a.Swap(&b);
@@ -36926,7 +37626,7 @@ class BackupRun final :
                &_BackupRun_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    207;
+    211;
 
   friend void swap(BackupRun& a, BackupRun& b) {
     a.Swap(&b);
@@ -37056,7 +37756,7 @@ class BackupRestore final :
                &_BackupRestore_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    208;
+    212;
 
   friend void swap(BackupRestore& a, BackupRestore& b) {
     a.Swap(&b);
@@ -37223,7 +37923,7 @@ class BackupRunResult final :
                &_BackupRunResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    209;
+    213;
 
   friend void swap(BackupRunResult& a, BackupRunResult& b) {
     a.Swap(&b);
@@ -37402,7 +38102,7 @@ class BackupSetting final :
                &_BackupSetting_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    210;
+    214;
 
   friend void swap(BackupSetting& a, BackupSetting& b) {
     a.Swap(&b);
@@ -37532,7 +38232,7 @@ class HostCertificates final :
                &_HostCertificates_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    211;
+    215;
 
   friend void swap(HostCertificates& a, HostCertificates& b) {
     a.Swap(&b);
@@ -37688,7 +38388,7 @@ class PasskeyRequest final :
                &_PasskeyRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    212;
+    216;
 
   friend void swap(PasskeyRequest& a, PasskeyRequest& b) {
     a.Swap(&b);
@@ -37935,7 +38635,7 @@ class PasskeyResponse final :
                &_PasskeyResponse_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    213;
+    217;
 
   friend void swap(PasskeyResponse& a, PasskeyResponse& b) {
     a.Swap(&b);
@@ -38108,7 +38808,7 @@ class KeyMintRootKeyRequest final :
                &_KeyMintRootKeyRequest_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    214;
+    218;
 
   friend void swap(KeyMintRootKeyRequest& a, KeyMintRootKeyRequest& b) {
     a.Swap(&b);
@@ -38225,7 +38925,7 @@ class KeyMintRootKey final :
                &_KeyMintRootKey_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    215;
+    219;
 
   friend void swap(KeyMintRootKey& a, KeyMintRootKey& b) {
     a.Swap(&b);
@@ -38376,7 +39076,7 @@ class DnsQuery final :
                &_DnsQuery_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    216;
+    220;
 
   friend void swap(DnsQuery& a, DnsQuery& b) {
     a.Swap(&b);
@@ -38533,7 +39233,7 @@ class DnsAnswer final :
                &_DnsAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    217;
+    221;
 
   friend void swap(DnsAnswer& a, DnsAnswer& b) {
     a.Swap(&b);
@@ -38679,7 +39379,7 @@ class ListSpeechVoices final :
                &_ListSpeechVoices_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    218;
+    222;
 
   friend void swap(ListSpeechVoices& a, ListSpeechVoices& b) {
     a.Swap(&b);
@@ -38796,7 +39496,7 @@ class SpeechVoice final :
                &_SpeechVoice_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    219;
+    223;
 
   friend void swap(SpeechVoice& a, SpeechVoice& b) {
     a.Swap(&b);
@@ -38985,7 +39685,7 @@ class SpeechVoices final :
                &_SpeechVoices_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    220;
+    224;
 
   friend void swap(SpeechVoices& a, SpeechVoices& b) {
     a.Swap(&b);
@@ -39151,7 +39851,7 @@ class SpeakText final :
                &_SpeakText_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    221;
+    225;
 
   friend void swap(SpeakText& a, SpeakText& b) {
     a.Swap(&b);
@@ -39351,7 +40051,7 @@ class SpeechAudio final :
                &_SpeechAudio_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    222;
+    226;
 
   friend void swap(SpeechAudio& a, SpeechAudio& b) {
     a.Swap(&b);
@@ -39519,7 +40219,7 @@ class SpeechDone final :
                &_SpeechDone_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    223;
+    227;
 
   friend void swap(SpeechDone& a, SpeechDone& b) {
     a.Swap(&b);
@@ -39676,7 +40376,7 @@ class StopSpeaking final :
                &_StopSpeaking_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    224;
+    228;
 
   friend void swap(StopSpeaking& a, StopSpeaking& b) {
     a.Swap(&b);
@@ -39806,7 +40506,7 @@ class StartRecognition final :
                &_StartRecognition_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    225;
+    229;
 
   friend void swap(StartRecognition& a, StartRecognition& b) {
     a.Swap(&b);
@@ -39985,7 +40685,7 @@ class StopRecognition final :
                &_StopRecognition_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    226;
+    230;
 
   friend void swap(StopRecognition& a, StopRecognition& b) {
     a.Swap(&b);
@@ -40115,7 +40815,7 @@ class CancelRecognition final :
                &_CancelRecognition_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    227;
+    231;
 
   friend void swap(CancelRecognition& a, CancelRecognition& b) {
     a.Swap(&b);
@@ -40245,7 +40945,7 @@ class RecognitionEvent final :
                &_RecognitionEvent_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    228;
+    232;
 
   friend void swap(RecognitionEvent& a, RecognitionEvent& b) {
     a.Swap(&b);
@@ -40463,7 +41163,7 @@ class CheckSpelling final :
                &_CheckSpelling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    229;
+    233;
 
   friend void swap(CheckSpelling& a, CheckSpelling& b) {
     a.Swap(&b);
@@ -40646,7 +41346,7 @@ class SpellingMistake final :
                &_SpellingMistake_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    230;
+    234;
 
   friend void swap(SpellingMistake& a, SpellingMistake& b) {
     a.Swap(&b);
@@ -40824,7 +41524,7 @@ class SpellingText final :
                &_SpellingText_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    231;
+    235;
 
   friend void swap(SpellingText& a, SpellingText& b) {
     a.Swap(&b);
@@ -40963,7 +41663,7 @@ class SpellingResult final :
                &_SpellingResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    232;
+    236;
 
   friend void swap(SpellingResult& a, SpellingResult& b) {
     a.Swap(&b);
@@ -41326,6 +42026,8 @@ class Envelope final :
     kDnsAnswer = 691,
     kLaunchPlacement = 710,
     kCaptionCompat = 715,
+    kGetWidgetPreviews = 740,
+    kWidgetPreviews = 741,
     BODY_NOT_SET = 0,
   };
 
@@ -41334,7 +42036,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    233;
+    237;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -41604,6 +42306,8 @@ class Envelope final :
     kDnsAnswerFieldNumber = 691,
     kLaunchPlacementFieldNumber = 710,
     kCaptionCompatFieldNumber = 715,
+    kGetWidgetPreviewsFieldNumber = 740,
+    kWidgetPreviewsFieldNumber = 741,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -45313,6 +46017,42 @@ class Envelope final :
       ::dsa::control::v1::CaptionCompat* caption_compat);
   ::dsa::control::v1::CaptionCompat* unsafe_arena_release_caption_compat();
 
+  // .dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;
+  bool has_get_widget_previews() const;
+  private:
+  bool _internal_has_get_widget_previews() const;
+  public:
+  void clear_get_widget_previews();
+  const ::dsa::control::v1::GetWidgetPreviews& get_widget_previews() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::GetWidgetPreviews* release_get_widget_previews();
+  ::dsa::control::v1::GetWidgetPreviews* mutable_get_widget_previews();
+  void set_allocated_get_widget_previews(::dsa::control::v1::GetWidgetPreviews* get_widget_previews);
+  private:
+  const ::dsa::control::v1::GetWidgetPreviews& _internal_get_widget_previews() const;
+  ::dsa::control::v1::GetWidgetPreviews* _internal_mutable_get_widget_previews();
+  public:
+  void unsafe_arena_set_allocated_get_widget_previews(
+      ::dsa::control::v1::GetWidgetPreviews* get_widget_previews);
+  ::dsa::control::v1::GetWidgetPreviews* unsafe_arena_release_get_widget_previews();
+
+  // .dsa.control.v1.WidgetPreviews widget_previews = 741;
+  bool has_widget_previews() const;
+  private:
+  bool _internal_has_widget_previews() const;
+  public:
+  void clear_widget_previews();
+  const ::dsa::control::v1::WidgetPreviews& widget_previews() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetPreviews* release_widget_previews();
+  ::dsa::control::v1::WidgetPreviews* mutable_widget_previews();
+  void set_allocated_widget_previews(::dsa::control::v1::WidgetPreviews* widget_previews);
+  private:
+  const ::dsa::control::v1::WidgetPreviews& _internal_widget_previews() const;
+  ::dsa::control::v1::WidgetPreviews* _internal_mutable_widget_previews();
+  public:
+  void unsafe_arena_set_allocated_widget_previews(
+      ::dsa::control::v1::WidgetPreviews* widget_previews);
+  ::dsa::control::v1::WidgetPreviews* unsafe_arena_release_widget_previews();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -45524,6 +46264,8 @@ class Envelope final :
   void set_has_dns_answer();
   void set_has_launch_placement();
   void set_has_caption_compat();
+  void set_has_get_widget_previews();
+  void set_has_widget_previews();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -45741,6 +46483,8 @@ class Envelope final :
       ::dsa::control::v1::DnsAnswer* dns_answer_;
       ::dsa::control::v1::LaunchPlacement* launch_placement_;
       ::dsa::control::v1::CaptionCompat* caption_compat_;
+      ::dsa::control::v1::GetWidgetPreviews* get_widget_previews_;
+      ::dsa::control::v1::WidgetPreviews* widget_previews_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -61287,6 +62031,437 @@ inline void ListWidgetProviders::set_request_id(uint32_t value) {
   // @@protoc_insertion_point(field_set:dsa.control.v1.ListWidgetProviders.request_id)
 }
 
+// bool lazy_previews = 2;
+inline void ListWidgetProviders::clear_lazy_previews() {
+  _impl_.lazy_previews_ = false;
+}
+inline bool ListWidgetProviders::_internal_lazy_previews() const {
+  return _impl_.lazy_previews_;
+}
+inline bool ListWidgetProviders::lazy_previews() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ListWidgetProviders.lazy_previews)
+  return _internal_lazy_previews();
+}
+inline void ListWidgetProviders::_internal_set_lazy_previews(bool value) {
+  
+  _impl_.lazy_previews_ = value;
+}
+inline void ListWidgetProviders::set_lazy_previews(bool value) {
+  _internal_set_lazy_previews(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ListWidgetProviders.lazy_previews)
+}
+
+// -------------------------------------------------------------------
+
+// WidgetAppIcon
+
+// string package_name = 1;
+inline void WidgetAppIcon::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& WidgetAppIcon::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetAppIcon.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void WidgetAppIcon::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetAppIcon.package_name)
+}
+inline std::string* WidgetAppIcon::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetAppIcon.package_name)
+  return _s;
+}
+inline const std::string& WidgetAppIcon::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void WidgetAppIcon::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* WidgetAppIcon::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* WidgetAppIcon::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetAppIcon.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void WidgetAppIcon::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetAppIcon.package_name)
+}
+
+// bytes icon_png = 2;
+inline void WidgetAppIcon::clear_icon_png() {
+  _impl_.icon_png_.ClearToEmpty();
+}
+inline const std::string& WidgetAppIcon::icon_png() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetAppIcon.icon_png)
+  return _internal_icon_png();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void WidgetAppIcon::set_icon_png(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.icon_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetAppIcon.icon_png)
+}
+inline std::string* WidgetAppIcon::mutable_icon_png() {
+  std::string* _s = _internal_mutable_icon_png();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetAppIcon.icon_png)
+  return _s;
+}
+inline const std::string& WidgetAppIcon::_internal_icon_png() const {
+  return _impl_.icon_png_.Get();
+}
+inline void WidgetAppIcon::_internal_set_icon_png(const std::string& value) {
+  
+  _impl_.icon_png_.Set(value, GetArenaForAllocation());
+}
+inline std::string* WidgetAppIcon::_internal_mutable_icon_png() {
+  
+  return _impl_.icon_png_.Mutable(GetArenaForAllocation());
+}
+inline std::string* WidgetAppIcon::release_icon_png() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetAppIcon.icon_png)
+  return _impl_.icon_png_.Release();
+}
+inline void WidgetAppIcon::set_allocated_icon_png(std::string* icon_png) {
+  if (icon_png != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.icon_png_.SetAllocated(icon_png, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.icon_png_.IsDefault()) {
+    _impl_.icon_png_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetAppIcon.icon_png)
+}
+
+// -------------------------------------------------------------------
+
+// GetWidgetPreviews
+
+// uint32 request_id = 1;
+inline void GetWidgetPreviews::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t GetWidgetPreviews::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t GetWidgetPreviews::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GetWidgetPreviews.request_id)
+  return _internal_request_id();
+}
+inline void GetWidgetPreviews::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void GetWidgetPreviews::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GetWidgetPreviews.request_id)
+}
+
+// repeated string providers = 2;
+inline int GetWidgetPreviews::_internal_providers_size() const {
+  return _impl_.providers_.size();
+}
+inline int GetWidgetPreviews::providers_size() const {
+  return _internal_providers_size();
+}
+inline void GetWidgetPreviews::clear_providers() {
+  _impl_.providers_.Clear();
+}
+inline std::string* GetWidgetPreviews::add_providers() {
+  std::string* _s = _internal_add_providers();
+  // @@protoc_insertion_point(field_add_mutable:dsa.control.v1.GetWidgetPreviews.providers)
+  return _s;
+}
+inline const std::string& GetWidgetPreviews::_internal_providers(int index) const {
+  return _impl_.providers_.Get(index);
+}
+inline const std::string& GetWidgetPreviews::providers(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GetWidgetPreviews.providers)
+  return _internal_providers(index);
+}
+inline std::string* GetWidgetPreviews::mutable_providers(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GetWidgetPreviews.providers)
+  return _impl_.providers_.Mutable(index);
+}
+inline void GetWidgetPreviews::set_providers(int index, const std::string& value) {
+  _impl_.providers_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline void GetWidgetPreviews::set_providers(int index, std::string&& value) {
+  _impl_.providers_.Mutable(index)->assign(std::move(value));
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline void GetWidgetPreviews::set_providers(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.providers_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline void GetWidgetPreviews::set_providers(int index, const char* value, size_t size) {
+  _impl_.providers_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline std::string* GetWidgetPreviews::_internal_add_providers() {
+  return _impl_.providers_.Add();
+}
+inline void GetWidgetPreviews::add_providers(const std::string& value) {
+  _impl_.providers_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline void GetWidgetPreviews::add_providers(std::string&& value) {
+  _impl_.providers_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline void GetWidgetPreviews::add_providers(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.providers_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline void GetWidgetPreviews::add_providers(const char* value, size_t size) {
+  _impl_.providers_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:dsa.control.v1.GetWidgetPreviews.providers)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+GetWidgetPreviews::providers() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.GetWidgetPreviews.providers)
+  return _impl_.providers_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+GetWidgetPreviews::mutable_providers() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.GetWidgetPreviews.providers)
+  return &_impl_.providers_;
+}
+
+// -------------------------------------------------------------------
+
+// WidgetPreview
+
+// string provider = 1;
+inline void WidgetPreview::clear_provider() {
+  _impl_.provider_.ClearToEmpty();
+}
+inline const std::string& WidgetPreview::provider() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPreview.provider)
+  return _internal_provider();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void WidgetPreview::set_provider(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.provider_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPreview.provider)
+}
+inline std::string* WidgetPreview::mutable_provider() {
+  std::string* _s = _internal_mutable_provider();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetPreview.provider)
+  return _s;
+}
+inline const std::string& WidgetPreview::_internal_provider() const {
+  return _impl_.provider_.Get();
+}
+inline void WidgetPreview::_internal_set_provider(const std::string& value) {
+  
+  _impl_.provider_.Set(value, GetArenaForAllocation());
+}
+inline std::string* WidgetPreview::_internal_mutable_provider() {
+  
+  return _impl_.provider_.Mutable(GetArenaForAllocation());
+}
+inline std::string* WidgetPreview::release_provider() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetPreview.provider)
+  return _impl_.provider_.Release();
+}
+inline void WidgetPreview::set_allocated_provider(std::string* provider) {
+  if (provider != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.provider_.SetAllocated(provider, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.provider_.IsDefault()) {
+    _impl_.provider_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetPreview.provider)
+}
+
+// bytes preview_png = 2;
+inline void WidgetPreview::clear_preview_png() {
+  _impl_.preview_png_.ClearToEmpty();
+}
+inline const std::string& WidgetPreview::preview_png() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPreview.preview_png)
+  return _internal_preview_png();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void WidgetPreview::set_preview_png(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.preview_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPreview.preview_png)
+}
+inline std::string* WidgetPreview::mutable_preview_png() {
+  std::string* _s = _internal_mutable_preview_png();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetPreview.preview_png)
+  return _s;
+}
+inline const std::string& WidgetPreview::_internal_preview_png() const {
+  return _impl_.preview_png_.Get();
+}
+inline void WidgetPreview::_internal_set_preview_png(const std::string& value) {
+  
+  _impl_.preview_png_.Set(value, GetArenaForAllocation());
+}
+inline std::string* WidgetPreview::_internal_mutable_preview_png() {
+  
+  return _impl_.preview_png_.Mutable(GetArenaForAllocation());
+}
+inline std::string* WidgetPreview::release_preview_png() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetPreview.preview_png)
+  return _impl_.preview_png_.Release();
+}
+inline void WidgetPreview::set_allocated_preview_png(std::string* preview_png) {
+  if (preview_png != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.preview_png_.SetAllocated(preview_png, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.preview_png_.IsDefault()) {
+    _impl_.preview_png_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetPreview.preview_png)
+}
+
+// .dsa.control.v1.WidgetPreviewSource source = 3;
+inline void WidgetPreview::clear_source() {
+  _impl_.source_ = 0;
+}
+inline ::dsa::control::v1::WidgetPreviewSource WidgetPreview::_internal_source() const {
+  return static_cast< ::dsa::control::v1::WidgetPreviewSource >(_impl_.source_);
+}
+inline ::dsa::control::v1::WidgetPreviewSource WidgetPreview::source() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPreview.source)
+  return _internal_source();
+}
+inline void WidgetPreview::_internal_set_source(::dsa::control::v1::WidgetPreviewSource value) {
+  
+  _impl_.source_ = value;
+}
+inline void WidgetPreview::set_source(::dsa::control::v1::WidgetPreviewSource value) {
+  _internal_set_source(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPreview.source)
+}
+
+// -------------------------------------------------------------------
+
+// WidgetPreviews
+
+// uint32 request_id = 1;
+inline void WidgetPreviews::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t WidgetPreviews::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t WidgetPreviews::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPreviews.request_id)
+  return _internal_request_id();
+}
+inline void WidgetPreviews::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void WidgetPreviews::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPreviews.request_id)
+}
+
+// repeated .dsa.control.v1.WidgetPreview previews = 2;
+inline int WidgetPreviews::_internal_previews_size() const {
+  return _impl_.previews_.size();
+}
+inline int WidgetPreviews::previews_size() const {
+  return _internal_previews_size();
+}
+inline void WidgetPreviews::clear_previews() {
+  _impl_.previews_.Clear();
+}
+inline ::dsa::control::v1::WidgetPreview* WidgetPreviews::mutable_previews(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetPreviews.previews)
+  return _impl_.previews_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetPreview >*
+WidgetPreviews::mutable_previews() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.WidgetPreviews.previews)
+  return &_impl_.previews_;
+}
+inline const ::dsa::control::v1::WidgetPreview& WidgetPreviews::_internal_previews(int index) const {
+  return _impl_.previews_.Get(index);
+}
+inline const ::dsa::control::v1::WidgetPreview& WidgetPreviews::previews(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPreviews.previews)
+  return _internal_previews(index);
+}
+inline ::dsa::control::v1::WidgetPreview* WidgetPreviews::_internal_add_previews() {
+  return _impl_.previews_.Add();
+}
+inline ::dsa::control::v1::WidgetPreview* WidgetPreviews::add_previews() {
+  ::dsa::control::v1::WidgetPreview* _add = _internal_add_previews();
+  // @@protoc_insertion_point(field_add:dsa.control.v1.WidgetPreviews.previews)
+  return _add;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetPreview >&
+WidgetPreviews::previews() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.WidgetPreviews.previews)
+  return _impl_.previews_;
+}
+
+// bool complete = 3;
+inline void WidgetPreviews::clear_complete() {
+  _impl_.complete_ = false;
+}
+inline bool WidgetPreviews::_internal_complete() const {
+  return _impl_.complete_;
+}
+inline bool WidgetPreviews::complete() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPreviews.complete)
+  return _internal_complete();
+}
+inline void WidgetPreviews::_internal_set_complete(bool value) {
+  
+  _impl_.complete_ = value;
+}
+inline void WidgetPreviews::set_complete(bool value) {
+  _internal_set_complete(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPreviews.complete)
+}
+
 // -------------------------------------------------------------------
 
 // WidgetProvider
@@ -61803,6 +62978,46 @@ inline void WidgetProviders::_internal_set_complete(bool value) {
 inline void WidgetProviders::set_complete(bool value) {
   _internal_set_complete(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProviders.complete)
+}
+
+// repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;
+inline int WidgetProviders::_internal_app_icons_size() const {
+  return _impl_.app_icons_.size();
+}
+inline int WidgetProviders::app_icons_size() const {
+  return _internal_app_icons_size();
+}
+inline void WidgetProviders::clear_app_icons() {
+  _impl_.app_icons_.Clear();
+}
+inline ::dsa::control::v1::WidgetAppIcon* WidgetProviders::mutable_app_icons(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProviders.app_icons)
+  return _impl_.app_icons_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetAppIcon >*
+WidgetProviders::mutable_app_icons() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.WidgetProviders.app_icons)
+  return &_impl_.app_icons_;
+}
+inline const ::dsa::control::v1::WidgetAppIcon& WidgetProviders::_internal_app_icons(int index) const {
+  return _impl_.app_icons_.Get(index);
+}
+inline const ::dsa::control::v1::WidgetAppIcon& WidgetProviders::app_icons(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProviders.app_icons)
+  return _internal_app_icons(index);
+}
+inline ::dsa::control::v1::WidgetAppIcon* WidgetProviders::_internal_add_app_icons() {
+  return _impl_.app_icons_.Add();
+}
+inline ::dsa::control::v1::WidgetAppIcon* WidgetProviders::add_app_icons() {
+  ::dsa::control::v1::WidgetAppIcon* _add = _internal_add_app_icons();
+  // @@protoc_insertion_point(field_add:dsa.control.v1.WidgetProviders.app_icons)
+  return _add;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetAppIcon >&
+WidgetProviders::app_icons() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.WidgetProviders.app_icons)
+  return _impl_.app_icons_;
 }
 
 // -------------------------------------------------------------------
@@ -88548,6 +89763,154 @@ inline ::dsa::control::v1::CaptionCompat* Envelope::mutable_caption_compat() {
   return _msg;
 }
 
+// .dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;
+inline bool Envelope::_internal_has_get_widget_previews() const {
+  return body_case() == kGetWidgetPreviews;
+}
+inline bool Envelope::has_get_widget_previews() const {
+  return _internal_has_get_widget_previews();
+}
+inline void Envelope::set_has_get_widget_previews() {
+  _impl_._oneof_case_[0] = kGetWidgetPreviews;
+}
+inline void Envelope::clear_get_widget_previews() {
+  if (_internal_has_get_widget_previews()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.get_widget_previews_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::GetWidgetPreviews* Envelope::release_get_widget_previews() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.get_widget_previews)
+  if (_internal_has_get_widget_previews()) {
+    clear_has_body();
+    ::dsa::control::v1::GetWidgetPreviews* temp = _impl_.body_.get_widget_previews_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.get_widget_previews_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::GetWidgetPreviews& Envelope::_internal_get_widget_previews() const {
+  return _internal_has_get_widget_previews()
+      ? *_impl_.body_.get_widget_previews_
+      : reinterpret_cast< ::dsa::control::v1::GetWidgetPreviews&>(::dsa::control::v1::_GetWidgetPreviews_default_instance_);
+}
+inline const ::dsa::control::v1::GetWidgetPreviews& Envelope::get_widget_previews() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.get_widget_previews)
+  return _internal_get_widget_previews();
+}
+inline ::dsa::control::v1::GetWidgetPreviews* Envelope::unsafe_arena_release_get_widget_previews() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.get_widget_previews)
+  if (_internal_has_get_widget_previews()) {
+    clear_has_body();
+    ::dsa::control::v1::GetWidgetPreviews* temp = _impl_.body_.get_widget_previews_;
+    _impl_.body_.get_widget_previews_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_get_widget_previews(::dsa::control::v1::GetWidgetPreviews* get_widget_previews) {
+  clear_body();
+  if (get_widget_previews) {
+    set_has_get_widget_previews();
+    _impl_.body_.get_widget_previews_ = get_widget_previews;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.get_widget_previews)
+}
+inline ::dsa::control::v1::GetWidgetPreviews* Envelope::_internal_mutable_get_widget_previews() {
+  if (!_internal_has_get_widget_previews()) {
+    clear_body();
+    set_has_get_widget_previews();
+    _impl_.body_.get_widget_previews_ = CreateMaybeMessage< ::dsa::control::v1::GetWidgetPreviews >(GetArenaForAllocation());
+  }
+  return _impl_.body_.get_widget_previews_;
+}
+inline ::dsa::control::v1::GetWidgetPreviews* Envelope::mutable_get_widget_previews() {
+  ::dsa::control::v1::GetWidgetPreviews* _msg = _internal_mutable_get_widget_previews();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.get_widget_previews)
+  return _msg;
+}
+
+// .dsa.control.v1.WidgetPreviews widget_previews = 741;
+inline bool Envelope::_internal_has_widget_previews() const {
+  return body_case() == kWidgetPreviews;
+}
+inline bool Envelope::has_widget_previews() const {
+  return _internal_has_widget_previews();
+}
+inline void Envelope::set_has_widget_previews() {
+  _impl_._oneof_case_[0] = kWidgetPreviews;
+}
+inline void Envelope::clear_widget_previews() {
+  if (_internal_has_widget_previews()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.widget_previews_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::WidgetPreviews* Envelope::release_widget_previews() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_previews)
+  if (_internal_has_widget_previews()) {
+    clear_has_body();
+    ::dsa::control::v1::WidgetPreviews* temp = _impl_.body_.widget_previews_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.widget_previews_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::WidgetPreviews& Envelope::_internal_widget_previews() const {
+  return _internal_has_widget_previews()
+      ? *_impl_.body_.widget_previews_
+      : reinterpret_cast< ::dsa::control::v1::WidgetPreviews&>(::dsa::control::v1::_WidgetPreviews_default_instance_);
+}
+inline const ::dsa::control::v1::WidgetPreviews& Envelope::widget_previews() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_previews)
+  return _internal_widget_previews();
+}
+inline ::dsa::control::v1::WidgetPreviews* Envelope::unsafe_arena_release_widget_previews() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_previews)
+  if (_internal_has_widget_previews()) {
+    clear_has_body();
+    ::dsa::control::v1::WidgetPreviews* temp = _impl_.body_.widget_previews_;
+    _impl_.body_.widget_previews_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_widget_previews(::dsa::control::v1::WidgetPreviews* widget_previews) {
+  clear_body();
+  if (widget_previews) {
+    set_has_widget_previews();
+    _impl_.body_.widget_previews_ = widget_previews;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_previews)
+}
+inline ::dsa::control::v1::WidgetPreviews* Envelope::_internal_mutable_widget_previews() {
+  if (!_internal_has_widget_previews()) {
+    clear_body();
+    set_has_widget_previews();
+    _impl_.body_.widget_previews_ = CreateMaybeMessage< ::dsa::control::v1::WidgetPreviews >(GetArenaForAllocation());
+  }
+  return _impl_.body_.widget_previews_;
+}
+inline ::dsa::control::v1::WidgetPreviews* Envelope::mutable_widget_previews() {
+  ::dsa::control::v1::WidgetPreviews* _msg = _internal_mutable_widget_previews();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_previews)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -88560,6 +89923,14 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -89061,6 +90432,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::tr
 template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::VideoCodec> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::SensorKind> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::WidgetPreviewSource> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::NodeAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::AudioSampleFormat> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::AudioOutputCommand> : ::std::true_type {};

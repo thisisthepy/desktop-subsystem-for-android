@@ -2120,6 +2120,56 @@ message ClockAnswer {
 // `complete`.
 message ListWidgetProviders {
   uint32 request_id = 1;
+  // Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+  // icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+  // apps the user opens asks so, and asks for those widgets' previews with
+  // GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+  // front would take seconds and hold hundreds of images.
+  bool lazy_previews = 2;
+}
+
+// Where a widget's preview comes from, best first: the layout the app gives for its
+// preview (drawn by the agent at the widget's default size), the app's preview image, or,
+// when the widget has neither, the app's icon.
+enum WidgetPreviewSource {
+  WIDGET_PREVIEW_SOURCE_UNSPECIFIED = 0;
+  WIDGET_PREVIEW_SOURCE_LAYOUT = 1;
+  WIDGET_PREVIEW_SOURCE_IMAGE = 2;
+  WIDGET_PREVIEW_SOURCE_ICON = 3;
+}
+
+// An app's icon, for a gallery that groups the widgets by the app that offers them.
+message WidgetAppIcon {
+  string package_name = 1;
+  // A PNG image of at most 160 pixels on a side and 48 KiB.
+  bytes icon_png = 2;
+}
+
+// Host to guest: asks the agent for the previews of some widgets on offer, as a gallery
+// shows them when the user opens their app. The agent answers with one or more
+// WidgetPreviews of the same `request_id`, the last one marked `complete`. At most 64
+// providers are asked for at once; the agent leaves out the rest.
+message GetWidgetPreviews {
+  uint32 request_id = 1;
+  // The providers' components, as `package/class`.
+  repeated string providers = 2;
+}
+
+// One widget's preview: the best the widget has (see WidgetPreviewSource), as a PNG image of
+// at most 256 pixels on a side and 48 KiB. Empty when the widget has none, or its app is
+// gone.
+message WidgetPreview {
+  string provider = 1;
+  bytes preview_png = 2;
+  WidgetPreviewSource source = 3;
+}
+
+// Guest to host, from the agent: part of the answer to GetWidgetPreviews. Each message is
+// kept under 256 KiB, so the previews come in several; `complete` marks the last.
+message WidgetPreviews {
+  uint32 request_id = 1;
+  repeated WidgetPreview previews = 2;
+  bool complete = 3;
 }
 
 // One widget an app in the guest offers, as a gallery shows it.
@@ -2158,6 +2208,9 @@ message WidgetProviders {
   uint32 request_id = 1;
   repeated WidgetProvider providers = 2;
   bool complete = 3;
+  // With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+  // once in the whole answer.
+  repeated WidgetAppIcon app_icons = 4;
 }
 
 // Host to guest: place a new widget of `provider`. The agent allocates a widget ID, binds it
@@ -3670,5 +3723,7 @@ message Envelope {
     DnsAnswer dns_answer = 691;
     LaunchPlacement launch_placement = 710;
     CaptionCompat caption_compat = 715;
+    GetWidgetPreviews get_widget_previews = 740;
+    WidgetPreviews widget_previews = 741;
   }
 }

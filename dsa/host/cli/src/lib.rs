@@ -18,7 +18,7 @@
 //! dsa settings device | set device.<field> <value> | reset device[.<field>]
 //! dsa memory [snapshot -o <file.zip>]
 //! dsa gpus
-//! dsa widgets [list | add <provider> | remove <id> | watch]
+//! dsa widgets [list [--by-app] | previews <provider>... | add <provider> | remove <id> | watch]
 //! dsa apps [list | info <package> | uninstall <package> | settings [<package>] |
 //!     run-as-arm <package> on|off [--erase-data] | root <package> off|ask|remember]
 //! dsa background [list | open <package> | stop <package>]
@@ -172,6 +172,16 @@
 //! offers it) and `widgets` (each with `id`, `provider`, `label`, `app` and its
 //! `placement`), `add` and `settings` print the widget, and `remove` prints `removed` with
 //! the widget's ID.
+//!
+//! `dsa widgets list --by-app` lists the widgets grouped by the app that offers them, one
+//! entry per app in name order, without the widgets' previews, so an app with hundreds of
+//! widgets sends no hundreds of images. With `--json` it prints `apps` (each with `package`,
+//! `app`, `icon_png` in base64 and `widgets`, each widget as above with an empty
+//! `preview_png`) and `widgets`. `dsa widgets previews <provider>...` draws the previews of
+//! up to 64 widgets, each the best its app gives: the layout it gives for a preview, drawn at
+//! the widget's default size, else its preview image, else its icon. With `--json` it prints
+//! `previews`, each with `provider`, `source` (`layout`, `image`, `icon` or `none`) and
+//! `preview_png` in base64, in the order asked.
 //!
 //! `dsa widgets watch` prints the placed widgets, then a line each time one is placed or
 //! removed, until it is stopped or Android stops. With `--json` each line is one JSON
@@ -475,7 +485,9 @@ use dsa_host_core::touch_gestures::TouchGesturesState;
 use dsa_host_core::update::store::Fetch;
 use dsa_host_core::update::versions::{Channel, VersionReport};
 use dsa_host_core::widevine::{self, WidevineStatus};
-use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
+use dsa_host_core::widgets::{
+    group_by_app, Widget, WidgetApp, WidgetEvent, WidgetPreview, WidgetProvider,
+};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
@@ -485,7 +497,8 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      tasks | settings [set <name> <value> | device | reset device[.<field>]] | \
      memory [snapshot -o <file.zip>] | \
      network | gpus | \
-     widgets [list | add <provider> | settings <id> | remove <id> | watch] | \
+     widgets [list [--by-app] | previews <provider>... | add <provider> | settings <id> | \
+     remove <id> | watch] | \
      apps [list | info <package> | uninstall <package> | settings [<package>] | \
      run-as-arm <package> on|off [--erase-data] | root <package> off|ask|remember | \
      shortcut <package> <id> | desktop-shortcut <package>] | \
@@ -696,6 +709,10 @@ pub enum AppsAction {
 pub enum WidgetAction {
     /// List the widgets on offer and the ones placed.
     List,
+    /// List the widgets on offer grouped by app, without their previews, and the ones placed.
+    ListByApp,
+    /// Draw the previews of these widgets.
+    Previews(Vec<String>),
     /// Place a widget of this provider.
     Add(String),
     /// Remove the widget with this ID.
@@ -1465,6 +1482,38 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             "list" if command == Some(Command::Widgets) && widgets.is_none() => {
                 widgets = Some(WidgetAction::List);
             }
+            "--by-app" if command == Some(Command::Widgets) => match widgets {
+                None | Some(WidgetAction::List) | Some(WidgetAction::ListByApp) => {
+                    widgets = Some(WidgetAction::ListByApp);
+                }
+                _ => return Err("--by-app goes with dsa widgets list".into()),
+            },
+            "previews" if command == Some(Command::Widgets) && widgets.is_none() => {
+                let mut providers = Vec::new();
+                while let Some(provider) = args.next_if(|arg| !arg.starts_with('-')) {
+                    if !dsa_host_core::widgets::valid_provider_name(provider) {
+                        return Err(format!(
+                            "{provider:?} is not a widget's provider; dsa widgets list shows \
+                             them, such as com.example.clock/.ClockWidget"
+                        ));
+                    }
+                    providers.push(provider.clone());
+                }
+                if providers.is_empty() {
+                    return Err(
+                        "dsa widgets previews needs the widgets' providers; dsa widgets list \
+                         shows them"
+                            .into(),
+                    );
+                }
+                if providers.len() > dsa_host_core::widgets::MAX_PREVIEWS_ASKED {
+                    return Err(format!(
+                        "dsa widgets previews draws at most {} previews at once",
+                        dsa_host_core::widgets::MAX_PREVIEWS_ASKED
+                    ));
+                }
+                widgets = Some(WidgetAction::Previews(providers));
+            }
             "watch" if command == Some(Command::Widgets) && widgets.is_none() => {
                 widgets = Some(WidgetAction::Watch);
             }
@@ -1775,6 +1824,90 @@ pub fn provider_json(provider: &WidgetProvider) -> Value {
     })
 }
 
+/// An app that offers widgets, with its widgets, as one JSON object.
+pub fn widget_app_json(app: &WidgetApp) -> Value {
+    json!({
+        "package": app.package_name,
+        "app": app.app_label,
+        "icon_png": base64(&app.icon_png),
+        "widgets": app.widgets.iter().map(provider_json).collect::<Vec<_>>(),
+    })
+}
+
+/// A widget's preview as one JSON object.
+pub fn preview_json(preview: &WidgetPreview) -> Value {
+    json!({
+        "provider": preview.provider,
+        "source": preview.source.name(),
+        "preview_png": base64(&preview.png),
+    })
+}
+
+/// What `dsa widgets list --by-app` prints: each app with its widgets, then the ones placed.
+pub fn describe_widget_apps(apps: &[WidgetApp], placed: &[Widget]) -> String {
+    let mut out = String::new();
+    if apps.is_empty() {
+        out.push_str("No app in Android offers a widget.\n");
+    } else {
+        out.push_str("Widgets on offer, by app (dsa widgets add <provider>):\n");
+        for app in apps {
+            let _ = writeln!(
+                out,
+                "  {} ({}): {} {}",
+                app.app_label,
+                app.package_name,
+                app.widgets.len(),
+                if app.widgets.len() == 1 {
+                    "widget"
+                } else {
+                    "widgets"
+                }
+            );
+            for provider in &app.widgets {
+                let _ = writeln!(
+                    out,
+                    "    {}  {} ({}x{} dp)",
+                    provider.provider,
+                    provider.label,
+                    provider.default_width_dp,
+                    provider.default_height_dp
+                );
+            }
+        }
+    }
+    let placed_part = describe_widgets(&[], placed);
+    // The placed widgets, as `dsa widgets list` prints them.
+    out.push_str(
+        placed_part
+            .strip_prefix("No app in Android offers a widget.\n")
+            .unwrap_or(&placed_part),
+    );
+    out
+}
+
+/// What `dsa widgets previews` prints: each widget's preview, where it came from and its size.
+pub fn describe_previews(previews: &[WidgetPreview]) -> String {
+    if previews.is_empty() {
+        return "No preview: no such widget is on offer.".into();
+    }
+    previews
+        .iter()
+        .map(|preview| {
+            if preview.png.is_empty() {
+                format!("{}  no preview", preview.provider)
+            } else {
+                format!(
+                    "{}  {} ({} bytes of PNG)",
+                    preview.provider,
+                    preview.source.name(),
+                    preview.png.len()
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A placed widget as one JSON object.
 pub fn widget_json(widget: &Widget) -> Value {
     json!({
@@ -1871,6 +2004,33 @@ fn widgets(
                 .to_string()
             } else {
                 describe_widgets(&providers, &placed)
+            })
+        }
+        WidgetAction::ListByApp => {
+            let gallery = client.widget_gallery().map_err(|e| e.to_string())?;
+            let apps = group_by_app(&gallery.providers, &gallery.app_icons);
+            let (placed, _) = client.widgets().map_err(|e| e.to_string())?;
+            Ok(if invocation.json {
+                json!({
+                    "apps": apps.iter().map(widget_app_json).collect::<Vec<_>>(),
+                    "widgets": placed.iter().map(widget_json).collect::<Vec<_>>(),
+                })
+                .to_string()
+            } else {
+                describe_widget_apps(&apps, &placed)
+            })
+        }
+        WidgetAction::Previews(providers) => {
+            let previews = client
+                .widget_previews(&providers)
+                .map_err(|e| format!("the widgets' previews were not drawn: {e}"))?;
+            Ok(if invocation.json {
+                json!({
+                    "previews": previews.iter().map(preview_json).collect::<Vec<_>>(),
+                })
+                .to_string()
+            } else {
+                describe_previews(&previews)
             })
         }
         WidgetAction::Add(provider) => {

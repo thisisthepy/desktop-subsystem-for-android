@@ -122,8 +122,9 @@ use crate::touch_gestures::TouchGesturesState;
 use crate::update::alerts::{self as update_alerts, UpdateAlert};
 use crate::widevine::{self, WidevinePackage, WidevineStatus};
 use crate::widgets::{
-    self, MemoryWidgetPlacements, Placement, Widget, WidgetError, WidgetEvent, WidgetFrame,
-    WidgetPlacements, WidgetProvider, WidgetSize,
+    self, AppIcon, MemoryWidgetPlacements, Placement, PreviewSource, Widget, WidgetError,
+    WidgetEvent, WidgetFrame, WidgetGallery, WidgetPlacements, WidgetPreview, WidgetProvider,
+    WidgetSize,
 };
 use dsa_protocol::control;
 
@@ -147,6 +148,10 @@ const DRAG_READ_WAIT: Duration = Duration::from_secs(30);
 
 /// How long the service waits for Android to list its widgets.
 const WIDGET_LIST_WAIT: Duration = Duration::from_secs(20);
+
+/// How long the service waits for Android to draw the previews asked for at once: up to
+/// [`widgets::MAX_PREVIEWS_ASKED`] layouts, each drawn in a fraction of a second.
+const WIDGET_PREVIEW_WAIT: Duration = Duration::from_secs(30);
 
 /// How long the service waits for Android to place a widget, which includes the user
 /// setting it up when its app asks them to.
@@ -516,6 +521,23 @@ pub trait UserAndroid: Send + Sync {
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         Err(WidgetError::Refused(
             "this Android does not host widgets".into(),
+        ))
+    }
+    /// The widgets the apps in this Android offer, and with `lazy_previews` without their
+    /// previews and with each app's icon once instead. One that keeps no icons apart from
+    /// its widgets gives its widgets as [`widget_providers`](Self::widget_providers) does.
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        let _ = lazy_previews;
+        self.widget_providers().map(|providers| WidgetGallery {
+            providers,
+            app_icons: Vec::new(),
+        })
+    }
+    /// The previews of the widgets `providers` names, in that order, each once.
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        let _ = providers;
+        Err(WidgetError::Refused(
+            "this Android does not draw widget previews".into(),
         ))
     }
     /// Places a new widget of `provider` and returns its ID.
@@ -1105,6 +1127,12 @@ impl UserAndroid for Session {
     }
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         Session::widget_providers(self, WIDGET_LIST_WAIT).map_err(widget_error)
+    }
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        Session::widget_gallery(self, lazy_previews, WIDGET_LIST_WAIT).map_err(widget_error)
+    }
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        Session::widget_previews(self, providers, WIDGET_PREVIEW_WAIT).map_err(widget_error)
     }
     fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
         Session::add_widget(self, provider, WIDGET_ADD_WAIT).map_err(widget_error)
@@ -4660,14 +4688,66 @@ impl HostApiService {
         }
     }
 
-    fn widget_providers(&self, peer: &Peer) -> response::Body {
+    fn widget_providers(&self, peer: &Peer, list: types::ListWidgetProviders) -> response::Body {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
             Err(why) => return error(ErrorCode::Unavailable, why),
         };
-        match android.widget_providers() {
-            Ok(providers) => response::Body::WidgetProviders(types::WidgetProviders {
-                providers: providers.iter().map(provider_to_wire).collect(),
+        let gallery = if list.lazy_previews {
+            android.widget_gallery(true)
+        } else {
+            android.widget_providers().map(|providers| WidgetGallery {
+                providers,
+                app_icons: Vec::new(),
+            })
+        };
+        match gallery {
+            Ok(gallery) => response::Body::WidgetProviders(types::WidgetProviders {
+                providers: gallery.providers.iter().map(provider_to_wire).collect(),
+                app_icons: gallery.app_icons.iter().map(app_icon_to_wire).collect(),
+            }),
+            Err(WidgetError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(WidgetError::Refused(why)) => error(ErrorCode::WidgetRefused, why),
+        }
+    }
+
+    fn widget_previews(&self, peer: &Peer, get: types::GetWidgetPreviews) -> response::Body {
+        if get.providers.len() > widgets::MAX_PREVIEWS_ASKED {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{} previews were asked for at once; ask for at most {}",
+                    get.providers.len(),
+                    widgets::MAX_PREVIEWS_ASKED
+                ),
+            );
+        }
+        if let Some(bad) = get
+            .providers
+            .iter()
+            .find(|provider| !widgets::valid_provider_name(provider))
+        {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{:?} is not a widget's name; list the widgets to see them",
+                    bad.chars().take(80).collect::<String>()
+                ),
+            );
+        }
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.widget_previews(&get.providers) {
+            Ok(previews) => response::Body::WidgetPreviews(types::WidgetPreviews {
+                previews: widgets::previews_in_asked_order(
+                    &widgets::previews_to_ask(&get.providers),
+                    previews,
+                )
+                .iter()
+                .map(preview_to_wire)
+                .collect(),
             }),
             Err(WidgetError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
             Err(WidgetError::Refused(why)) => error(ErrorCode::WidgetRefused, why),
@@ -5569,7 +5649,8 @@ impl HostApiService {
             Some(request::Body::ListBackgroundApps(_)) => self.list_background(peer),
             Some(request::Body::ActOnBackgroundApp(act)) => self.act_on_background(peer, act),
             Some(request::Body::ControlMedia(control)) => self.control_media(peer, control),
-            Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
+            Some(request::Body::ListWidgetProviders(list)) => self.widget_providers(peer, list),
+            Some(request::Body::GetWidgetPreviews(get)) => self.widget_previews(peer, get),
             Some(request::Body::GetArmTranslation(_)) => self.get_arm_translation(peer),
             Some(request::Body::RemoveArmTranslation(_)) => self.remove_arm_translation(peer),
             Some(request::Body::GetGapps(_)) => self.get_gapps(peer),
@@ -5657,6 +5738,7 @@ impl HostApiService {
                         | request::Body::ActOnBackgroundApp(_)
                         | request::Body::ControlMedia(_)
                         | request::Body::ListWidgetProviders(_)
+                        | request::Body::GetWidgetPreviews(_)
                         | request::Body::GetPackage(_)
                         | request::Body::DragOut(_)
                         | request::Body::ReadDrag(_)
@@ -9068,15 +9150,51 @@ impl HostApiClient {
 
     /// The widgets the apps in the caller's Android offer, in label order.
     pub fn widget_providers(&mut self) -> Result<Vec<WidgetProvider>, ClientError> {
+        self.list_widget_providers(false)
+            .map(|gallery| gallery.providers)
+    }
+
+    /// The widgets the apps in the caller's Android offer, in label order, without their
+    /// previews, and the icon of each app that offers one: what a gallery grouped by app
+    /// shows before the user opens an app. The previews of the widgets it shows come from
+    /// [`widget_previews`](Self::widget_previews).
+    pub fn widget_gallery(&mut self) -> Result<WidgetGallery, ClientError> {
+        self.list_widget_providers(true)
+    }
+
+    fn list_widget_providers(&mut self, lazy_previews: bool) -> Result<WidgetGallery, ClientError> {
         match self.exchange(
-            request::Body::ListWidgetProviders(types::ListWidgetProviders {}),
+            request::Body::ListWidgetProviders(types::ListWidgetProviders { lazy_previews }),
             self.timeout.max(WIDGET_LIST_WAIT + Duration::from_secs(5)),
         )? {
-            response::Body::WidgetProviders(list) => {
-                Ok(list.providers.into_iter().map(provider_from_wire).collect())
-            }
+            response::Body::WidgetProviders(list) => Ok(WidgetGallery {
+                providers: list.providers.into_iter().map(provider_from_wire).collect(),
+                app_icons: list.app_icons.into_iter().map(app_icon_from_wire).collect(),
+            }),
             _ => Err(ClientError::Malformed(
                 "expected the widgets on offer".into(),
+            )),
+        }
+    }
+
+    /// The previews of the widgets `providers` names (at most
+    /// [`widgets::MAX_PREVIEWS_ASKED`]), each the best its app gives, in the order asked.
+    pub fn widget_previews(
+        &mut self,
+        providers: &[String],
+    ) -> Result<Vec<WidgetPreview>, ClientError> {
+        match self.exchange(
+            request::Body::GetWidgetPreviews(types::GetWidgetPreviews {
+                providers: providers.to_vec(),
+            }),
+            self.timeout
+                .max(WIDGET_PREVIEW_WAIT + Duration::from_secs(5)),
+        )? {
+            response::Body::WidgetPreviews(list) => {
+                Ok(list.previews.into_iter().map(preview_from_wire).collect())
+            }
+            _ => Err(ClientError::Malformed(
+                "expected the widgets' previews".into(),
             )),
         }
     }
@@ -9886,6 +10004,36 @@ fn provider_from_wire(provider: types::WidgetProvider) -> WidgetProvider {
         needs_configuration: provider.needs_configuration,
         app_label: provider.app_label,
         reconfigurable: provider.reconfigurable,
+    }
+}
+
+fn app_icon_to_wire(icon: &AppIcon) -> types::WidgetAppIcon {
+    types::WidgetAppIcon {
+        package_name: icon.package_name.clone(),
+        icon_png: icon.png.clone(),
+    }
+}
+
+fn app_icon_from_wire(icon: types::WidgetAppIcon) -> AppIcon {
+    AppIcon {
+        package_name: icon.package_name,
+        png: icon.icon_png,
+    }
+}
+
+fn preview_to_wire(preview: &WidgetPreview) -> types::WidgetPreview {
+    types::WidgetPreview {
+        provider: preview.provider.clone(),
+        preview_png: preview.png.clone(),
+        source: preview.source.to_wire(),
+    }
+}
+
+fn preview_from_wire(preview: types::WidgetPreview) -> WidgetPreview {
+    WidgetPreview {
+        provider: preview.provider,
+        png: preview.preview_png,
+        source: PreviewSource::from_wire(preview.source),
     }
 }
 

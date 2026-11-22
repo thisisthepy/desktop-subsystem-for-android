@@ -442,12 +442,26 @@ class Agent(
         arm64Supported,
         clock,
     )
+    /**
+     * Draws the widgets' previews a gallery asks for. Its one thread ends after a short idle
+     * time, so no thread is kept for a gallery that is seldom opened.
+     */
+    private val previewThread by lazy {
+        java.util.concurrent.ThreadPoolExecutor(
+            0,
+            1,
+            PREVIEW_THREAD_IDLE_SECONDS,
+            java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.LinkedBlockingQueue(),
+        ) { work -> Thread(work, "dsa-widget-previews") }
+    }
     private val widgetManager = WidgetManager(
         widgets,
         widgetStore,
         { frame -> channel.send(frame) },
         log,
         isConnected = { channel.connected },
+        background = { work -> previewThread.execute(work) },
     )
     private val closedApps = ClosedApps(
         appProcesses,
@@ -1374,6 +1388,9 @@ class Agent(
 
     private companion object {
         const val RETRY_MILLIS = 1000L
+
+        /** How long the thread that draws widget previews waits for more before it ends. */
+        const val PREVIEW_THREAD_IDLE_SECONDS = 30L
 
         /** How long a frame from another thread waits for the agent's thread to send it. */
         const val SEND_WAIT_MILLIS = 10_000L

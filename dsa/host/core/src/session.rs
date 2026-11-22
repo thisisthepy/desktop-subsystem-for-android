@@ -170,7 +170,8 @@ use crate::tasks::{
     TaskTable, TaskWatch,
 };
 use crate::widgets::{
-    self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
+    self, AppIcon, Placement, Widget, WidgetEvent, WidgetFrame, WidgetGallery, WidgetPreview,
+    WidgetProvider, WidgetSize,
 };
 
 mod dns_port;
@@ -945,7 +946,10 @@ pub enum BackgroundRequest {
 
 /// What the agent answers about widgets.
 enum WidgetAnswer {
-    Providers(Vec<WidgetProvider>, bool),
+    /// Part of the gallery: its widgets, the icons of their apps, and whether it is the last.
+    Providers(Vec<WidgetProvider>, Vec<AppIcon>, bool),
+    /// Part of the previews asked for, and whether it is the last.
+    Previews(Vec<WidgetPreview>, bool),
     Added(Result<i32, String>),
     /// How a widget's setup, opened again, ended: Ok when the user finished it.
     Reconfigured(Result<(), String>),
@@ -3899,19 +3903,37 @@ impl Session {
     /// The widgets the apps in the guest offer, in label order, asking the agent and waiting
     /// up to `timeout` for its whole answer. Needs an active session.
     pub fn widget_providers(&self, timeout: Duration) -> Result<Vec<WidgetProvider>, SessionError> {
+        self.widget_gallery(false, timeout)
+            .map(|gallery| gallery.providers)
+    }
+
+    /// The widgets the apps in the guest offer, in label order, as [`widget_providers`]
+    /// gives them, and with `lazy_previews` without their previews and with each app's icon
+    /// once instead, for a gallery that groups them by app and asks for the previews of the
+    /// widgets it shows ([`widget_previews`]). Needs an active session.
+    ///
+    /// [`widget_providers`]: Self::widget_providers
+    /// [`widget_previews`]: Self::widget_previews
+    pub fn widget_gallery(
+        &self,
+        lazy_previews: bool,
+        timeout: Duration,
+    ) -> Result<WidgetGallery, SessionError> {
         let (request_id, answers) = self.widget_request();
         let result = (|| {
             self.send(dsa_protocol::encode(&control::Envelope {
                 body: Some(Body::ListWidgetProviders(control::ListWidgetProviders {
                     request_id,
+                    lazy_previews,
                 })),
             }))?;
             let deadline = Instant::now() + timeout;
             let mut providers: Vec<WidgetProvider> = Vec::new();
+            let mut app_icons: Vec<AppIcon> = Vec::new();
             loop {
                 let left = deadline.saturating_duration_since(Instant::now());
                 match answers.recv_timeout(left) {
-                    Ok(WidgetAnswer::Providers(part, complete)) => {
+                    Ok(WidgetAnswer::Providers(part, icons, complete)) => {
                         for provider in part {
                             if providers.len() >= widgets::MAX_PROVIDERS {
                                 break;
@@ -3920,11 +3942,24 @@ impl Session {
                                 providers.push(provider);
                             }
                         }
+                        for icon in icons {
+                            if app_icons.len() >= widgets::MAX_PROVIDERS {
+                                break;
+                            }
+                            if !app_icons
+                                .iter()
+                                .any(|known| known.package_name == icon.package_name)
+                            {
+                                app_icons.push(icon);
+                            }
+                        }
                         if complete {
                             break;
                         }
                     }
-                    Ok(WidgetAnswer::Added(_)) | Ok(WidgetAnswer::Reconfigured(_)) => {}
+                    Ok(WidgetAnswer::Added(_))
+                    | Ok(WidgetAnswer::Previews(..))
+                    | Ok(WidgetAnswer::Reconfigured(_)) => {}
                     Err(_) => {
                         return Err(SessionError::WidgetRefused(format!(
                             "Android did not list its widgets within {} seconds",
@@ -3939,7 +3974,61 @@ impl Session {
                     .cmp(&b.label.to_lowercase())
                     .then_with(|| a.provider.cmp(&b.provider))
             });
-            Ok(providers)
+            Ok(WidgetGallery {
+                providers,
+                app_icons,
+            })
+        })();
+        self.forget_widget_request(request_id);
+        result
+    }
+
+    /// The previews of the widgets `providers` names, as their apps give them best (the
+    /// layout an app gives for a preview, drawn by the agent; else its preview image; else its
+    /// icon), in the order asked and each once, asking the agent and waiting up to `timeout`
+    /// for its whole answer. Only [`widgets::MAX_PREVIEWS_ASKED`] are asked for; a widget not
+    /// on offer has no entry. Needs an active session.
+    pub fn widget_previews(
+        &self,
+        providers: &[String],
+        timeout: Duration,
+    ) -> Result<Vec<WidgetPreview>, SessionError> {
+        let asked = widgets::previews_to_ask(providers);
+        if asked.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (request_id, answers) = self.widget_request();
+        let result = (|| {
+            self.send(dsa_protocol::encode(&control::Envelope {
+                body: Some(Body::GetWidgetPreviews(control::GetWidgetPreviews {
+                    request_id,
+                    providers: asked.clone(),
+                })),
+            }))?;
+            let deadline = Instant::now() + timeout;
+            let mut drawn: Vec<WidgetPreview> = Vec::new();
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match answers.recv_timeout(left) {
+                    Ok(WidgetAnswer::Previews(part, complete)) => {
+                        let room = widgets::MAX_PREVIEWS_ASKED.saturating_sub(drawn.len());
+                        drawn.extend(part.into_iter().take(room));
+                        if complete {
+                            break;
+                        }
+                    }
+                    Ok(WidgetAnswer::Providers(..))
+                    | Ok(WidgetAnswer::Added(_))
+                    | Ok(WidgetAnswer::Reconfigured(_)) => {}
+                    Err(_) => {
+                        return Err(SessionError::WidgetRefused(format!(
+                            "Android did not draw the widgets' previews within {} seconds",
+                            timeout.as_secs()
+                        )))
+                    }
+                }
+            }
+            Ok(widgets::previews_in_asked_order(&asked, drawn))
         })();
         self.forget_widget_request(request_id);
         result
@@ -3975,7 +4064,9 @@ impl Session {
                     Ok(WidgetAnswer::Added(Err(why))) => {
                         return Err(SessionError::WidgetRefused(why))
                     }
-                    Ok(WidgetAnswer::Providers(..)) | Ok(WidgetAnswer::Reconfigured(_)) => {}
+                    Ok(WidgetAnswer::Providers(..))
+                    | Ok(WidgetAnswer::Previews(..))
+                    | Ok(WidgetAnswer::Reconfigured(_)) => {}
                     Err(_) => {
                         return Err(SessionError::WidgetRefused(format!(
                             "Android did not place the widget within {} seconds",
@@ -4043,7 +4134,9 @@ impl Session {
                     Ok(WidgetAnswer::Reconfigured(Err(why))) => {
                         return Err(SessionError::WidgetRefused(why))
                     }
-                    Ok(WidgetAnswer::Providers(..)) | Ok(WidgetAnswer::Added(_)) => {}
+                    Ok(WidgetAnswer::Providers(..))
+                    | Ok(WidgetAnswer::Previews(..))
+                    | Ok(WidgetAnswer::Added(_)) => {}
                     Err(_) => {
                         return Err(SessionError::WidgetRefused(format!(
                             "the widget's settings did not close within {} seconds",
@@ -5314,9 +5407,32 @@ impl Worker {
                 Err(why) => eprintln!("widgets: dropped one from the gallery: {why}"),
             }
         }
+        let mut icons = Vec::new();
+        for icon in list.app_icons.into_iter().take(widgets::MAX_PROVIDERS) {
+            match widgets::checked_app_icon(icon) {
+                Ok(icon) => icons.push(icon),
+                Err(why) => eprintln!("widgets: dropped an app's icon from the gallery: {why}"),
+            }
+        }
         self.shared.widget_answer(
             list.request_id,
-            WidgetAnswer::Providers(providers, list.complete),
+            WidgetAnswer::Providers(providers, icons, list.complete),
+        );
+    }
+
+    /// Hands part of the previews the agent drew to whoever asked for them. Entries that do
+    /// not pass the checks are dropped and logged.
+    fn guest_widget_previews(&mut self, list: control::WidgetPreviews) {
+        let mut previews = Vec::new();
+        for preview in list.previews.into_iter().take(widgets::MAX_PREVIEWS_ASKED) {
+            match widgets::checked_preview(preview) {
+                Ok(preview) => previews.push(preview),
+                Err(why) => eprintln!("widgets: dropped a preview: {why}"),
+            }
+        }
+        self.shared.widget_answer(
+            list.request_id,
+            WidgetAnswer::Previews(previews, list.complete),
         );
     }
 
@@ -7133,6 +7249,7 @@ impl Worker {
                 InstallEvent::Done(InstallOutcome::from_control(&result)),
             ),
             Some(Body::WidgetProviders(list)) => self.guest_widget_providers(list),
+            Some(Body::WidgetPreviews(list)) => self.guest_widget_previews(list),
             Some(Body::WidgetAdded(added)) => self.shared.widget_answer(
                 added.request_id,
                 WidgetAnswer::Added(if added.widget_id > 0 {
@@ -7373,6 +7490,7 @@ impl Worker {
             | Some(Body::LaunchShortcut(_))
             | Some(Body::PinShortcutAnswer(_))
             | Some(Body::ListWidgetProviders(_))
+            | Some(Body::GetWidgetPreviews(_))
             | Some(Body::AddWidget(_))
             | Some(Body::RemoveWidget(_))
             | Some(Body::ReconfigureWidget(_))

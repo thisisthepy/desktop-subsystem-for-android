@@ -5774,6 +5774,7 @@ fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
             request_id,
             providers: vec![notes, broken],
             complete: false,
+            app_icons: Vec::new(),
         }),
     );
     send_body(
@@ -5782,6 +5783,7 @@ fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
             request_id,
             providers: vec![clock_widget()],
             complete: true,
+            app_icons: Vec::new(),
         }),
     );
     let providers = asking.join().unwrap().expect("the gallery");
@@ -5794,6 +5796,113 @@ fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
         vec![
             "com.example.notes/.NoteWidget",
             "com.example.clock/.ClockWidget"
+        ]
+    );
+}
+
+#[test]
+fn fr12_a_gallery_by_app_gets_each_apps_icon_and_then_the_previews_it_shows() {
+    use dsa_host_core::widgets::PreviewSource;
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.widget_gallery(true, WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::ListWidgetProviders(list) => {
+            assert!(list.lazy_previews, "the gallery asks for no previews");
+            list.request_id
+        }
+        other => panic!("expected the gallery request, got {other:?}"),
+    };
+    let battery = dsa_protocol::control::WidgetProvider {
+        provider: "com.appslab.widgets/.Battery".into(),
+        package_name: "com.appslab.widgets".into(),
+        label: "Battery".into(),
+        preview_png: Vec::new(),
+        ..clock_widget()
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetProviders(dsa_protocol::control::WidgetProviders {
+            request_id,
+            providers: vec![battery],
+            complete: true,
+            app_icons: vec![
+                dsa_protocol::control::WidgetAppIcon {
+                    package_name: "com.appslab.widgets".into(),
+                    icon_png: b"\x89PNGicon".to_vec(),
+                },
+                dsa_protocol::control::WidgetAppIcon {
+                    package_name: "../not a package".into(),
+                    icon_png: b"\x89PNG".to_vec(),
+                },
+            ],
+        }),
+    );
+    let gallery = asking.join().unwrap().expect("the gallery");
+    assert_eq!(gallery.providers.len(), 1);
+    assert_eq!(gallery.app_icons.len(), 1, "the bad icon is dropped");
+    assert_eq!(gallery.app_icons[0].png, b"\x89PNGicon");
+
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || {
+            session.widget_previews(
+                &[
+                    "com.appslab.widgets/.Battery".to_string(),
+                    "com.example.clock/.ClockWidget".to_string(),
+                ],
+                WAIT,
+            )
+        })
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::GetWidgetPreviews(get) => {
+            assert_eq!(
+                get.providers,
+                [
+                    "com.appslab.widgets/.Battery",
+                    "com.example.clock/.ClockWidget"
+                ]
+            );
+            get.request_id
+        }
+        other => panic!("expected the preview request, got {other:?}"),
+    };
+    let preview = |provider: &str, source: i32| dsa_protocol::control::WidgetPreview {
+        provider: provider.into(),
+        preview_png: b"\x89PNG".to_vec(),
+        source,
+    };
+    // In two parts, the clock's first: the answer still follows the order asked.
+    send_body(
+        &mut agent,
+        Body::WidgetPreviews(dsa_protocol::control::WidgetPreviews {
+            request_id,
+            previews: vec![preview("com.example.clock/.ClockWidget", 2)],
+            complete: false,
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::WidgetPreviews(dsa_protocol::control::WidgetPreviews {
+            request_id,
+            previews: vec![preview("com.appslab.widgets/.Battery", 1)],
+            complete: true,
+        }),
+    );
+    let previews = asking.join().unwrap().expect("the previews");
+    let got: Vec<(&str, PreviewSource)> = previews
+        .iter()
+        .map(|p| (p.provider.as_str(), p.source))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("com.appslab.widgets/.Battery", PreviewSource::Layout),
+            ("com.example.clock/.ClockWidget", PreviewSource::Image),
         ]
     );
 }

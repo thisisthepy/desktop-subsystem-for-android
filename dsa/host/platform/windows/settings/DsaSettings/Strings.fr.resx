@@ -1094,6 +1094,15 @@ Il n'est ni affilié à Microsoft ou Google, ni approuvé ou parrainé par eux.<
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} a été retiré de votre bureau.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widgets</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Afficher {0} de plus</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Programme d'installation d'APK</value>
   </data>

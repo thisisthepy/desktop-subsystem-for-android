@@ -1094,6 +1094,15 @@ Microsoft veya Google ile bağlantılı değildir; onlar tarafından onaylanmaz 
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} masaüstünüzden kaldırıldı.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} pencere öğesi</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 pencere öğesi</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>{0} tane daha göster</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK Yükleyicisi</value>
   </data>

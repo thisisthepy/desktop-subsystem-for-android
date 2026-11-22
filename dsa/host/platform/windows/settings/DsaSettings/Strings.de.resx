@@ -1094,6 +1094,15 @@ Es steht in keiner Verbindung zu Microsoft oder Google und wird von ihnen weder 
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} wurde von Ihrem Desktop entfernt.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} Widgets</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 Widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>{0} weitere anzeigen</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK Installer</value>
   </data>

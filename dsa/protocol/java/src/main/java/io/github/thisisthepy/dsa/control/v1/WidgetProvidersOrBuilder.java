@@ -32,4 +32,33 @@ public interface WidgetProvidersOrBuilder extends
    * @return The complete.
    */
   boolean getComplete();
+
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  java.util.List<io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> 
+      getAppIconsList();
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetAppIcon getAppIcons(int index);
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  int getAppIconsCount();
 }

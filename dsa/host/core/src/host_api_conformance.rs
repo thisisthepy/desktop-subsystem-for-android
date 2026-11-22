@@ -51,7 +51,8 @@ use crate::tasks::{
     TaskWatch,
 };
 use crate::widgets::{
-    Placement, Widget, WidgetError, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
+    AppIcon, Placement, PreviewSource, Widget, WidgetError, WidgetEvent, WidgetFrame,
+    WidgetGallery, WidgetPreview, WidgetProvider, WidgetSize,
 };
 
 /// A fresh listener, a connector that reaches it, and the user it reports for this process.
@@ -142,6 +143,10 @@ pub struct FakeAndroid {
     install_turn: Mutex<()>,
     /// The widgets its apps offer.
     pub widget_offer: Mutex<Vec<WidgetProvider>>,
+    /// The previews its widgets draw, by provider.
+    pub widget_previews: Mutex<Vec<WidgetPreview>>,
+    /// The providers whose previews it was asked for, request by request.
+    pub widget_preview_requests: Mutex<Vec<Vec<String>>>,
     /// The widgets placed in it, by ID, and who watches them.
     widgets: Mutex<FakeWidgets>,
     /// The sizes its widgets were given, in order.
@@ -293,6 +298,8 @@ impl FakeAndroid {
             install_time: Mutex::new(Duration::ZERO),
             install_turn: Mutex::new(()),
             widget_offer: Mutex::new(Vec::new()),
+            widget_previews: Mutex::new(Vec::new()),
+            widget_preview_requests: Mutex::new(Vec::new()),
             widgets: Mutex::new((std::collections::BTreeMap::new(), Vec::new())),
             widget_sizes: Mutex::new(Vec::new()),
             widget_pointers: Mutex::new(Vec::new()),
@@ -699,6 +706,51 @@ impl UserAndroid for FakeAndroid {
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         self.running_or().map_err(WidgetError::NotRunning)?;
         Ok(self.widget_offer.lock().unwrap().clone())
+    }
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        self.running_or().map_err(WidgetError::NotRunning)?;
+        let offer = self.widget_offer.lock().unwrap().clone();
+        if !lazy_previews {
+            return Ok(WidgetGallery {
+                providers: offer,
+                app_icons: Vec::new(),
+            });
+        }
+        // As the agent does: no previews, and each app's icon once.
+        let mut app_icons: Vec<AppIcon> = Vec::new();
+        for provider in &offer {
+            if !app_icons
+                .iter()
+                .any(|icon| icon.package_name == provider.package_name)
+            {
+                app_icons.push(AppIcon {
+                    package_name: provider.package_name.clone(),
+                    png: b"\x89PNGicon".to_vec(),
+                });
+            }
+        }
+        Ok(WidgetGallery {
+            providers: offer
+                .into_iter()
+                .map(|provider| WidgetProvider {
+                    preview_png: Vec::new(),
+                    ..provider
+                })
+                .collect(),
+            app_icons,
+        })
+    }
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        self.running_or().map_err(WidgetError::NotRunning)?;
+        self.widget_preview_requests
+            .lock()
+            .unwrap()
+            .push(providers.to_vec());
+        let drawn = self.widget_previews.lock().unwrap();
+        Ok(providers
+            .iter()
+            .filter_map(|provider| drawn.iter().find(|p| &p.provider == provider).cloned())
+            .collect())
     }
     fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
         self.running_or().map_err(WidgetError::NotRunning)?;
@@ -1590,6 +1642,10 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr12_the_gallery_lists_the_widgets_the_callers_android_offers() {
             $crate::host_api_conformance::widget_gallery_lists_the_offer(&mut || $make);
+        }
+        #[test]
+        fn fr12_a_gallery_grouped_by_app_asks_for_the_previews_it_shows() {
+            $crate::host_api_conformance::widget_gallery_by_app_asks_for_previews(&mut || $make);
         }
         #[test]
         fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
@@ -5543,6 +5599,91 @@ pub fn widget_gallery_lists_the_offer(make: MakeLocal<'_>) {
     );
     client.stop().unwrap();
     match client.widget_providers() {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::NotRunning),
+        other => panic!("expected the Android not to be running, got {other:?}"),
+    }
+}
+
+/// A gallery grouped by app reads the widgets without their previews and each app's icon
+/// once, then asks for the previews of the widgets it shows: the caller's Android draws them,
+/// and they come back in the order asked, each saying where it came from.
+pub fn widget_gallery_by_app_asks_for_previews(make: MakeLocal<'_>) {
+    let (_service, androids, _connector, user, mut client) = widget_android(make);
+    let android = androids.of(&user).unwrap();
+    let battery = WidgetProvider {
+        provider: "com.appslab.widgets/.Battery".into(),
+        package_name: "com.appslab.widgets".into(),
+        label: "Battery".into(),
+        app_label: "Material You Widgets".into(),
+        ..sample_widget_provider()
+    };
+    android.widget_offer.lock().unwrap().push(battery.clone());
+    *android.widget_previews.lock().unwrap() = vec![
+        WidgetPreview {
+            provider: battery.provider.clone(),
+            png: b"\x89PNGlayout".to_vec(),
+            source: PreviewSource::Layout,
+        },
+        WidgetPreview {
+            provider: "com.example.clock/.ClockWidget".into(),
+            png: b"\x89PNGimage".to_vec(),
+            source: PreviewSource::Image,
+        },
+    ];
+    let gallery = client.widget_gallery().unwrap();
+    assert_eq!(gallery.providers.len(), 2);
+    assert!(gallery.providers.iter().all(|p| p.preview_png.is_empty()));
+    let packages: Vec<&str> = gallery
+        .app_icons
+        .iter()
+        .map(|icon| icon.package_name.as_str())
+        .collect();
+    assert_eq!(packages, ["com.example.clock", "com.appslab.widgets"]);
+    let apps = crate::widgets::group_by_app(&gallery.providers, &gallery.app_icons);
+    assert_eq!(apps.len(), 2);
+    assert!(apps.iter().all(|app| !app.icon_png.is_empty()));
+    // The previews of the widgets shown, in the order asked.
+    let asked = vec![
+        battery.provider.clone(),
+        "com.example.clock/.ClockWidget".to_string(),
+    ];
+    let previews = client.widget_previews(&asked).unwrap();
+    let got: Vec<(&str, PreviewSource)> = previews
+        .iter()
+        .map(|p| (p.provider.as_str(), p.source))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("com.appslab.widgets/.Battery", PreviewSource::Layout),
+            ("com.example.clock/.ClockWidget", PreviewSource::Image),
+        ]
+    );
+    assert_eq!(previews[0].png, b"\x89PNGlayout");
+    assert_eq!(
+        *android.widget_preview_requests.lock().unwrap(),
+        vec![asked]
+    );
+    // More than a request may hold, or a name that is no widget, is refused before Android.
+    let many: Vec<String> = (0..=crate::widgets::MAX_PREVIEWS_ASKED)
+        .map(|i| format!("com.example.clock/.W{i}"))
+        .collect();
+    match client.widget_previews(&many) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::UnknownRequest),
+        other => panic!("expected too many previews to be refused, got {other:?}"),
+    }
+    match client.widget_previews(&["clock".to_string()]) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::UnknownRequest),
+        other => panic!("expected a bad name to be refused, got {other:?}"),
+    }
+    assert_eq!(android.widget_preview_requests.lock().unwrap().len(), 1);
+    // The plain list still carries each widget's preview, as before.
+    assert_eq!(
+        client.widget_providers().unwrap()[0].preview_png,
+        sample_widget_provider().preview_png
+    );
+    client.stop().unwrap();
+    match client.widget_previews(&["com.example.clock/.ClockWidget".to_string()]) {
         Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::NotRunning),
         other => panic!("expected the Android not to be running, got {other:?}"),
     }

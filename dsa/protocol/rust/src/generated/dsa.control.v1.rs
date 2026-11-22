@@ -2235,6 +2235,57 @@ pub struct ClockAnswer {
 pub struct ListWidgetProviders {
     #[prost(uint32, tag = "1")]
     pub request_id: u32,
+    /// Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+    /// icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+    /// apps the user opens asks so, and asks for those widgets' previews with
+    /// GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+    /// front would take seconds and hold hundreds of images.
+    #[prost(bool, tag = "2")]
+    pub lazy_previews: bool,
+}
+/// An app's icon, for a gallery that groups the widgets by the app that offers them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetAppIcon {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// A PNG image of at most 160 pixels on a side and 48 KiB.
+    #[prost(bytes = "vec", tag = "2")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
+/// Host to guest: asks the agent for the previews of some widgets on offer, as a gallery
+/// shows them when the user opens their app. The agent answers with one or more
+/// WidgetPreviews of the same `request_id`, the last one marked `complete`. At most 64
+/// providers are asked for at once; the agent leaves out the rest.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetWidgetPreviews {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    /// The providers' components, as `package/class`.
+    #[prost(string, repeated, tag = "2")]
+    pub providers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// One widget's preview: the best the widget has (see WidgetPreviewSource), as a PNG image of
+/// at most 256 pixels on a side and 48 KiB. Empty when the widget has none, or its app is
+/// gone.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetPreview {
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub preview_png: ::prost::alloc::vec::Vec<u8>,
+    #[prost(enumeration = "WidgetPreviewSource", tag = "3")]
+    pub source: i32,
+}
+/// Guest to host, from the agent: part of the answer to GetWidgetPreviews. Each message is
+/// kept under 256 KiB, so the previews come in several; `complete` marks the last.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WidgetPreviews {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(message, repeated, tag = "2")]
+    pub previews: ::prost::alloc::vec::Vec<WidgetPreview>,
+    #[prost(bool, tag = "3")]
+    pub complete: bool,
 }
 /// One widget an app in the guest offers, as a gallery shows it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2290,6 +2341,10 @@ pub struct WidgetProviders {
     pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
     #[prost(bool, tag = "3")]
     pub complete: bool,
+    /// With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+    /// once in the whole answer.
+    #[prost(message, repeated, tag = "4")]
+    pub app_icons: ::prost::alloc::vec::Vec<WidgetAppIcon>,
 }
 /// Host to guest: place a new widget of `provider`. The agent allocates a widget ID, binds it
 /// to the provider, runs the provider's configuration activity when it has one (which shows
@@ -3718,7 +3773,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -4138,6 +4193,10 @@ pub mod envelope {
         LaunchPlacement(super::LaunchPlacement),
         #[prost(message, tag = "715")]
         CaptionCompat(super::CaptionCompat),
+        #[prost(message, tag = "740")]
+        GetWidgetPreviews(super::GetWidgetPreviews),
+        #[prost(message, tag = "741")]
+        WidgetPreviews(super::WidgetPreviews),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -5177,6 +5236,41 @@ impl SensorKind {
             "SENSOR_KIND_GYROSCOPE" => Some(Self::Gyroscope),
             "SENSOR_KIND_ROTATION_VECTOR" => Some(Self::RotationVector),
             "SENSOR_KIND_LIGHT" => Some(Self::Light),
+            _ => None,
+        }
+    }
+}
+/// Where a widget's preview comes from, best first: the layout the app gives for its
+/// preview (drawn by the agent at the widget's default size), the app's preview image, or,
+/// when the widget has neither, the app's icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WidgetPreviewSource {
+    Unspecified = 0,
+    Layout = 1,
+    Image = 2,
+    Icon = 3,
+}
+impl WidgetPreviewSource {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WIDGET_PREVIEW_SOURCE_UNSPECIFIED",
+            Self::Layout => "WIDGET_PREVIEW_SOURCE_LAYOUT",
+            Self::Image => "WIDGET_PREVIEW_SOURCE_IMAGE",
+            Self::Icon => "WIDGET_PREVIEW_SOURCE_ICON",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WIDGET_PREVIEW_SOURCE_UNSPECIFIED" => Some(Self::Unspecified),
+            "WIDGET_PREVIEW_SOURCE_LAYOUT" => Some(Self::Layout),
+            "WIDGET_PREVIEW_SOURCE_IMAGE" => Some(Self::Image),
+            "WIDGET_PREVIEW_SOURCE_ICON" => Some(Self::Icon),
             _ => None,
         }
     }

@@ -42,6 +42,10 @@ pub const MAX_PREVIEW_BYTES: usize = 48 * 1024;
 /// The most widgets a gallery lists. A guest that offers more has the rest left out.
 pub const MAX_PROVIDERS: usize = 512;
 
+/// The most previews one request asks for. A gallery asks for the widgets it shows, which
+/// are fewer; the rest are left out of the request.
+pub const MAX_PREVIEWS_ASKED: usize = 64;
+
 /// The most widgets the host keeps placed at once.
 pub const MAX_WIDGETS: usize = 64;
 
@@ -87,6 +91,227 @@ pub struct WidgetProvider {
     /// Whether a placed widget can be set up again: its app says so and it has a setup. Its
     /// menu offers "Widget settings" only then.
     pub reconfigurable: bool,
+}
+
+/// Where a widget's preview comes from, best first: the layout its app gives for a preview,
+/// which Android draws at the widget's default size; the app's preview image; the app's icon,
+/// for a widget that has neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreviewSource {
+    /// Android did not say, or the widget has no preview.
+    #[default]
+    None,
+    Layout,
+    Image,
+    Icon,
+}
+
+impl PreviewSource {
+    /// The source a wire value names; [`PreviewSource::None`] for one it does not know.
+    pub fn from_wire(value: i32) -> PreviewSource {
+        match value {
+            1 => PreviewSource::Layout,
+            2 => PreviewSource::Image,
+            3 => PreviewSource::Icon,
+            _ => PreviewSource::None,
+        }
+    }
+
+    /// The wire value of this source, the same in the control channel and the local API.
+    pub fn to_wire(self) -> i32 {
+        match self {
+            PreviewSource::None => 0,
+            PreviewSource::Layout => 1,
+            PreviewSource::Image => 2,
+            PreviewSource::Icon => 3,
+        }
+    }
+
+    /// The source's name as `dsa widgets previews` prints it.
+    pub fn name(self) -> &'static str {
+        match self {
+            PreviewSource::None => "none",
+            PreviewSource::Layout => "layout",
+            PreviewSource::Image => "image",
+            PreviewSource::Icon => "icon",
+        }
+    }
+}
+
+/// One widget's preview, as a gallery shows it once the user opens the widget's app.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WidgetPreview {
+    /// The provider's component, as `package/class`.
+    pub provider: String,
+    /// A PNG image; empty for none.
+    pub png: Vec<u8>,
+    pub source: PreviewSource,
+}
+
+/// An app's icon, for a gallery grouped by app.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AppIcon {
+    pub package_name: String,
+    /// A PNG image; empty for none.
+    pub png: Vec<u8>,
+}
+
+/// The widgets on offer as a gallery grouped by app reads them: the widgets without their
+/// previews, and each app's icon once.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WidgetGallery {
+    pub providers: Vec<WidgetProvider>,
+    pub app_icons: Vec<AppIcon>,
+}
+
+/// The widgets one app offers, as a gallery grouped by app shows them: the app, by its name
+/// and icon, and its widgets in label order.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WidgetApp {
+    pub package_name: String,
+    /// The app's name; its package when Android did not say.
+    pub app_label: String,
+    /// A PNG image; empty for none.
+    pub icon_png: Vec<u8>,
+    pub widgets: Vec<WidgetProvider>,
+}
+
+fn label_key(label: &str, tie: &str) -> (String, String) {
+    (label.to_lowercase(), tie.to_string())
+}
+
+/// The widgets on offer grouped by the app that offers them, one entry per app, so an app
+/// with hundreds of widgets takes one line until the user opens it. Apps are in name order
+/// (ignoring case, then by package), each app's widgets in label order (ignoring case, then
+/// by provider). An app's name is the first one its widgets give, else its package; its icon
+/// is the one in `icons` for its package, else none.
+pub fn group_by_app(providers: &[WidgetProvider], icons: &[AppIcon]) -> Vec<WidgetApp> {
+    let mut apps: Vec<WidgetApp> = Vec::new();
+    for provider in providers {
+        let package = if provider.package_name.is_empty() {
+            provider
+                .provider
+                .split_once('/')
+                .map(|(package, _)| package)
+                .unwrap_or(&provider.provider)
+        } else {
+            &provider.package_name
+        };
+        let at = match apps.iter().position(|app| app.package_name == package) {
+            Some(at) => at,
+            None => {
+                apps.push(WidgetApp {
+                    package_name: package.to_string(),
+                    icon_png: icons
+                        .iter()
+                        .find(|icon| icon.package_name == package)
+                        .map(|icon| icon.png.clone())
+                        .unwrap_or_default(),
+                    ..WidgetApp::default()
+                });
+                apps.len() - 1
+            }
+        };
+        let app = &mut apps[at];
+        if app.app_label.is_empty() && !provider.app_label.trim().is_empty() {
+            app.app_label = provider.app_label.clone();
+        }
+        app.widgets.push(provider.clone());
+    }
+    for app in &mut apps {
+        if app.app_label.is_empty() {
+            app.app_label = app.package_name.clone();
+        }
+        app.widgets
+            .sort_by_key(|widget| label_key(&widget.label, &widget.provider));
+    }
+    apps.sort_by_key(|app| label_key(&app.app_label, &app.package_name));
+    apps
+}
+
+/// The providers a preview request asks for, from what a caller asked: each one once, in the
+/// order asked, only those that can be a provider's component, and at most
+/// [`MAX_PREVIEWS_ASKED`].
+pub fn previews_to_ask(asked: &[String]) -> Vec<String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for provider in asked {
+        if wanted.len() >= MAX_PREVIEWS_ASKED {
+            break;
+        }
+        if valid_provider_name(provider) && !wanted.contains(provider) {
+            wanted.push(provider.clone());
+        }
+    }
+    wanted
+}
+
+/// The previews Android drew, in the order `asked` names them, each once: a preview of a
+/// widget not asked for is dropped, and of two for the same widget the first is kept.
+pub fn previews_in_asked_order(asked: &[String], drawn: Vec<WidgetPreview>) -> Vec<WidgetPreview> {
+    let mut by_provider: HashMap<String, WidgetPreview> = HashMap::new();
+    for preview in drawn {
+        if asked.contains(&preview.provider) {
+            by_provider
+                .entry(preview.provider.clone())
+                .or_insert(preview);
+        }
+    }
+    asked
+        .iter()
+        .filter_map(|provider| by_provider.remove(provider))
+        .collect()
+}
+
+/// Checks a widget's preview from the guest: a provider that is no component is refused; an
+/// image too large or not a PNG is left out, and a source Android did not name becomes none.
+pub fn checked_preview(message: control::WidgetPreview) -> Result<WidgetPreview, String> {
+    if !valid_provider_name(&message.provider) {
+        return Err(format!(
+            "the preview's provider {:?} is not a component name",
+            message.provider.chars().take(80).collect::<String>()
+        ));
+    }
+    let png = if message.preview_png.len() <= MAX_PREVIEW_BYTES && is_png(&message.preview_png) {
+        message.preview_png
+    } else {
+        Vec::new()
+    };
+    let source = if png.is_empty() {
+        PreviewSource::None
+    } else {
+        PreviewSource::from_wire(message.source)
+    };
+    Ok(WidgetPreview {
+        provider: message.provider,
+        png,
+        source,
+    })
+}
+
+/// Checks an app's icon from the guest: a package name that is no package is refused, and
+/// an icon too large or not a PNG is left out.
+pub fn checked_app_icon(message: control::WidgetAppIcon) -> Result<AppIcon, String> {
+    let package = &message.package_name;
+    let valid = !package.is_empty()
+        && package.len() <= MAX_PROVIDER_BYTES
+        && package.split('.').all(|part| {
+            !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
+    if !valid {
+        return Err(format!(
+            "the icon's app {:?} is not a package name",
+            package.chars().take(80).collect::<String>()
+        ));
+    }
+    let png = if message.icon_png.len() <= MAX_PREVIEW_BYTES && is_png(&message.icon_png) {
+        message.icon_png
+    } else {
+        Vec::new()
+    };
+    Ok(AppIcon {
+        package_name: message.package_name,
+        png,
+    })
 }
 
 /// Where a widget's window is: its top left corner in the host's physical screen pixels,
@@ -654,6 +879,153 @@ mod tests {
         })
         .unwrap();
         assert!(gif.preview_png.is_empty());
+    }
+
+    fn offered(provider: &str, label: &str, app_label: &str) -> WidgetProvider {
+        let package = provider.split_once('/').unwrap().0;
+        WidgetProvider {
+            provider: provider.into(),
+            package_name: package.into(),
+            label: label.into(),
+            app_label: app_label.into(),
+            preview_png: Vec::new(),
+            ..checked_provider(clock()).unwrap()
+        }
+    }
+
+    #[test]
+    fn fr12_the_gallery_groups_the_widgets_by_app_in_name_order() {
+        let providers = vec![
+            offered(
+                "com.appslab.widgets/.Battery",
+                "battery",
+                "Material You Widgets",
+            ),
+            offered("com.example.clock/.Digital", "Digital clock", "Clock"),
+            offered(
+                "com.appslab.widgets/.Weather",
+                "Weather",
+                "Material You Widgets",
+            ),
+            offered("com.example.clock/.Analog", "Analog clock", ""),
+            offered(
+                "com.appslab.widgets/.Alarm",
+                "Alarm",
+                "Material You Widgets",
+            ),
+            offered("org.nameless/.Note", "Note", ""),
+        ];
+        let icons = vec![AppIcon {
+            package_name: "com.example.clock".into(),
+            png: b"\x89PNGclock".to_vec(),
+        }];
+        let apps = group_by_app(&providers, &icons);
+        // One entry per app, by name ignoring case; an app that gives no name goes by its
+        // package.
+        let names: Vec<&str> = apps.iter().map(|app| app.app_label.as_str()).collect();
+        assert_eq!(names, ["Clock", "Material You Widgets", "org.nameless"]);
+        // Each app's widgets in label order, ignoring case, and none is lost.
+        let labels: Vec<&str> = apps[1].widgets.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["Alarm", "battery", "Weather"]);
+        let clocks: Vec<&str> = apps[0].widgets.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(clocks, ["Analog clock", "Digital clock"]);
+        assert_eq!(
+            apps.iter().map(|app| app.widgets.len()).sum::<usize>(),
+            providers.len()
+        );
+        // The app's icon comes from the icons Android sent, once per app.
+        assert_eq!(apps[0].icon_png, b"\x89PNGclock");
+        assert!(apps[1].icon_png.is_empty());
+        assert!(group_by_app(&[], &icons).is_empty());
+    }
+
+    #[test]
+    fn fr12_a_preview_request_asks_each_widget_once_and_answers_in_its_order() {
+        let asked: Vec<String> = [
+            "com.a/.One",
+            "not a provider",
+            "com.a/.Two",
+            "com.a/.One",
+            "com.b/.Three",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let wanted = previews_to_ask(&asked);
+        assert_eq!(wanted, ["com.a/.One", "com.a/.Two", "com.b/.Three"]);
+        let many: Vec<String> = (0..200).map(|i| format!("com.a/.W{i}")).collect();
+        assert_eq!(previews_to_ask(&many).len(), MAX_PREVIEWS_ASKED);
+        let drawn = |provider: &str, source| WidgetPreview {
+            provider: provider.into(),
+            png: b"\x89PNG".to_vec(),
+            source,
+        };
+        let answered = previews_in_asked_order(
+            &wanted,
+            vec![
+                drawn("com.b/.Three", PreviewSource::Icon),
+                drawn("com.x/.NotAsked", PreviewSource::Image),
+                drawn("com.a/.One", PreviewSource::Layout),
+                drawn("com.a/.One", PreviewSource::Icon),
+            ],
+        );
+        let got: Vec<(&str, PreviewSource)> = answered
+            .iter()
+            .map(|p| (p.provider.as_str(), p.source))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("com.a/.One", PreviewSource::Layout),
+                ("com.b/.Three", PreviewSource::Icon)
+            ]
+        );
+    }
+
+    #[test]
+    fn fr12_a_drawn_preview_is_checked_and_says_where_it_came_from() {
+        let preview = |png: Vec<u8>, source: i32| control::WidgetPreview {
+            provider: "com.appslab.widgets/.Battery".into(),
+            preview_png: png,
+            source,
+        };
+        let layout = checked_preview(preview(b"\x89PNG".to_vec(), 1)).unwrap();
+        assert_eq!(layout.source, PreviewSource::Layout);
+        assert_eq!(layout.source.name(), "layout");
+        assert_eq!(PreviewSource::from_wire(2), PreviewSource::Image);
+        assert_eq!(PreviewSource::from_wire(3), PreviewSource::Icon);
+        assert_eq!(PreviewSource::from_wire(99), PreviewSource::None);
+        for source in [
+            PreviewSource::Layout,
+            PreviewSource::Image,
+            PreviewSource::Icon,
+        ] {
+            assert_eq!(PreviewSource::from_wire(source.to_wire()), source);
+        }
+        // Too large, or not a PNG: no image, and so no source.
+        let big = [b"\x89PNG".to_vec(), vec![0; MAX_PREVIEW_BYTES]].concat();
+        let dropped = checked_preview(preview(big, 1)).unwrap();
+        assert!(dropped.png.is_empty());
+        assert_eq!(dropped.source, PreviewSource::None);
+        assert!(checked_preview(preview(b"GIF89a".to_vec(), 2))
+            .unwrap()
+            .png
+            .is_empty());
+        assert!(checked_preview(control::WidgetPreview {
+            provider: "nothing".into(),
+            ..preview(b"\x89PNG".to_vec(), 1)
+        })
+        .is_err());
+        assert!(checked_app_icon(control::WidgetAppIcon {
+            package_name: "com.example.clock".into(),
+            icon_png: b"\x89PNG".to_vec(),
+        })
+        .is_ok());
+        assert!(checked_app_icon(control::WidgetAppIcon {
+            package_name: "../x".into(),
+            icon_png: b"\x89PNG".to_vec(),
+        })
+        .is_err());
     }
 
     #[test]

@@ -1094,6 +1094,15 @@ Microsoft および Google とは提携しておらず、両社による承認�
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} をデスクトップから削除しました。</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>ウィジェット {0} 個</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>ウィジェット 1 個</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>さらに {0} 個を表示</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK インストーラー</value>
   </data>

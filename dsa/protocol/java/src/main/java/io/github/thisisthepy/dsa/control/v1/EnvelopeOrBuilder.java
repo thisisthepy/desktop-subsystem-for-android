@@ -2273,5 +2273,27 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.CaptionCompat getCaptionCompat();
 
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   * @return Whether the getWidgetPreviews field is set.
+   */
+  boolean hasGetWidgetPreviews();
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   * @return The getWidgetPreviews.
+   */
+  io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews getGetWidgetPreviews();
+
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   * @return Whether the widgetPreviews field is set.
+   */
+  boolean hasWidgetPreviews();
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   * @return The widgetPreviews.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetPreviews getWidgetPreviews();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

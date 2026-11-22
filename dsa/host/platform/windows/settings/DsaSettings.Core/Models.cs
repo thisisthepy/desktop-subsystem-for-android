@@ -362,8 +362,18 @@ public sealed record WidgetOffer(string Provider, string Package, string Label, 
 /// device-independent pixels.</summary>
 public sealed record PlacedWidget(int Id, string Provider, string Label, string AppLabel, int X, int Y, int WidthDp, int HeightDp);
 
-/// <summary>The widgets on offer and the ones placed.</summary>
-public sealed record WidgetList(IReadOnlyList<WidgetOffer> Offers, IReadOnlyList<PlacedWidget> Placed);
+/// <summary>An app that offers widgets, as dsa groups them: its name (else its package), its
+/// icon and its widgets in label order, each without its preview, which
+/// <see cref="DsaService.WidgetPreviewsAsync"/> draws when the app is opened.</summary>
+public sealed record WidgetApp(string Package, string AppLabel, byte[] IconPng, IReadOnlyList<WidgetOffer> Widgets);
+
+/// <summary>The widgets on offer grouped by app, in app name order, and the ones placed.</summary>
+public sealed record WidgetGallery(IReadOnlyList<WidgetApp> Apps, IReadOnlyList<PlacedWidget> Placed);
+
+/// <summary>A widget's preview as Android drew it: <see cref="Source"/> says where it came
+/// from (<c>layout</c>, <c>image</c>, <c>icon</c> or <c>none</c>), and <see cref="Png"/> is
+/// empty when there is none.</summary>
+public sealed record WidgetPreview(string Provider, string Source, byte[] Png);
 
 /// <summary>An app in Android that keeps running with no window because it runs a foreground
 /// service, with the notification the service keeps shown.</summary>

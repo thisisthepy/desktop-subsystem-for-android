@@ -18,6 +18,7 @@ public  final class WidgetProviders extends
     WidgetProvidersOrBuilder {
   private WidgetProviders() {
     providers_ = emptyProtobufList();
+    appIcons_ = emptyProtobufList();
   }
   public static final int REQUEST_ID_FIELD_NUMBER = 1;
   private int requestId_;
@@ -163,6 +164,155 @@ public  final class WidgetProviders extends
   private void clearComplete() {
     
     complete_ = false;
+  }
+
+  public static final int APP_ICONS_FIELD_NUMBER = 4;
+  private com.google.protobuf.Internal.ProtobufList<io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> appIcons_;
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  @java.lang.Override
+  public java.util.List<io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> getAppIconsList() {
+    return appIcons_;
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  public java.util.List<? extends io.github.thisisthepy.dsa.control.v1.WidgetAppIconOrBuilder> 
+      getAppIconsOrBuilderList() {
+    return appIcons_;
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  @java.lang.Override
+  public int getAppIconsCount() {
+    return appIcons_.size();
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.WidgetAppIcon getAppIcons(int index) {
+    return appIcons_.get(index);
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  public io.github.thisisthepy.dsa.control.v1.WidgetAppIconOrBuilder getAppIconsOrBuilder(
+      int index) {
+    return appIcons_.get(index);
+  }
+  private void ensureAppIconsIsMutable() {
+    com.google.protobuf.Internal.ProtobufList<io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> tmp = appIcons_;
+    if (!tmp.isModifiable()) {
+      appIcons_ =
+          com.google.protobuf.GeneratedMessageLite.mutableCopy(tmp);
+     }
+  }
+
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  private void setAppIcons(
+      int index, io.github.thisisthepy.dsa.control.v1.WidgetAppIcon value) {
+    value.getClass();
+  ensureAppIconsIsMutable();
+    appIcons_.set(index, value);
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  private void addAppIcons(io.github.thisisthepy.dsa.control.v1.WidgetAppIcon value) {
+    value.getClass();
+  ensureAppIconsIsMutable();
+    appIcons_.add(value);
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  private void addAppIcons(
+      int index, io.github.thisisthepy.dsa.control.v1.WidgetAppIcon value) {
+    value.getClass();
+  ensureAppIconsIsMutable();
+    appIcons_.add(index, value);
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  private void addAllAppIcons(
+      java.lang.Iterable<? extends io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> values) {
+    ensureAppIconsIsMutable();
+    com.google.protobuf.AbstractMessageLite.addAll(
+        values, appIcons_);
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  private void clearAppIcons() {
+    appIcons_ = emptyProtobufList();
+  }
+  /**
+   * <pre>
+   * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+   * once in the whole answer.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+   */
+  private void removeAppIcons(int index) {
+    ensureAppIconsIsMutable();
+    appIcons_.remove(index);
   }
 
   public static io.github.thisisthepy.dsa.control.v1.WidgetProviders parseFrom(
@@ -423,6 +573,168 @@ public  final class WidgetProviders extends
       return this;
     }
 
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    @java.lang.Override
+    public java.util.List<io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> getAppIconsList() {
+      return java.util.Collections.unmodifiableList(
+          instance.getAppIconsList());
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    @java.lang.Override
+    public int getAppIconsCount() {
+      return instance.getAppIconsCount();
+    }/**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.WidgetAppIcon getAppIcons(int index) {
+      return instance.getAppIcons(index);
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder setAppIcons(
+        int index, io.github.thisisthepy.dsa.control.v1.WidgetAppIcon value) {
+      copyOnWrite();
+      instance.setAppIcons(index, value);
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder setAppIcons(
+        int index, io.github.thisisthepy.dsa.control.v1.WidgetAppIcon.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAppIcons(index,
+          builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder addAppIcons(io.github.thisisthepy.dsa.control.v1.WidgetAppIcon value) {
+      copyOnWrite();
+      instance.addAppIcons(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder addAppIcons(
+        int index, io.github.thisisthepy.dsa.control.v1.WidgetAppIcon value) {
+      copyOnWrite();
+      instance.addAppIcons(index, value);
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder addAppIcons(
+        io.github.thisisthepy.dsa.control.v1.WidgetAppIcon.Builder builderForValue) {
+      copyOnWrite();
+      instance.addAppIcons(builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder addAppIcons(
+        int index, io.github.thisisthepy.dsa.control.v1.WidgetAppIcon.Builder builderForValue) {
+      copyOnWrite();
+      instance.addAppIcons(index,
+          builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder addAllAppIcons(
+        java.lang.Iterable<? extends io.github.thisisthepy.dsa.control.v1.WidgetAppIcon> values) {
+      copyOnWrite();
+      instance.addAllAppIcons(values);
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder clearAppIcons() {
+      copyOnWrite();
+      instance.clearAppIcons();
+      return this;
+    }
+    /**
+     * <pre>
+     * With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+     * once in the whole answer.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;</code>
+     */
+    public Builder removeAppIcons(int index) {
+      copyOnWrite();
+      instance.removeAppIcons(index);
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.WidgetProviders)
   }
   @java.lang.Override
@@ -443,10 +755,12 @@ public  final class WidgetProviders extends
             "providers_",
             io.github.thisisthepy.dsa.control.v1.WidgetProvider.class,
             "complete_",
+            "appIcons_",
+            io.github.thisisthepy.dsa.control.v1.WidgetAppIcon.class,
           };
           java.lang.String info =
-              "\u0000\u0003\u0000\u0000\u0001\u0003\u0003\u0000\u0001\u0000\u0001\u000b\u0002\u001b" +
-              "\u0003\u0007";
+              "\u0000\u0004\u0000\u0000\u0001\u0004\u0004\u0000\u0002\u0000\u0001\u000b\u0002\u001b" +
+              "\u0003\u0007\u0004\u001b";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

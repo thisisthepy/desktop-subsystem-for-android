@@ -45,6 +45,56 @@ public  final class ListWidgetProviders extends
     requestId_ = 0;
   }
 
+  public static final int LAZY_PREVIEWS_FIELD_NUMBER = 2;
+  private boolean lazyPreviews_;
+  /**
+   * <pre>
+   * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+   * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+   * apps the user opens asks so, and asks for those widgets' previews with
+   * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+   * front would take seconds and hold hundreds of images.
+   * </pre>
+   *
+   * <code>bool lazy_previews = 2;</code>
+   * @return The lazyPreviews.
+   */
+  @java.lang.Override
+  public boolean getLazyPreviews() {
+    return lazyPreviews_;
+  }
+  /**
+   * <pre>
+   * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+   * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+   * apps the user opens asks so, and asks for those widgets' previews with
+   * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+   * front would take seconds and hold hundreds of images.
+   * </pre>
+   *
+   * <code>bool lazy_previews = 2;</code>
+   * @param value The lazyPreviews to set.
+   */
+  private void setLazyPreviews(boolean value) {
+    
+    lazyPreviews_ = value;
+  }
+  /**
+   * <pre>
+   * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+   * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+   * apps the user opens asks so, and asks for those widgets' previews with
+   * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+   * front would take seconds and hold hundreds of images.
+   * </pre>
+   *
+   * <code>bool lazy_previews = 2;</code>
+   */
+  private void clearLazyPreviews() {
+    
+    lazyPreviews_ = false;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.ListWidgetProviders parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -174,6 +224,58 @@ public  final class ListWidgetProviders extends
       return this;
     }
 
+    /**
+     * <pre>
+     * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+     * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+     * apps the user opens asks so, and asks for those widgets' previews with
+     * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+     * front would take seconds and hold hundreds of images.
+     * </pre>
+     *
+     * <code>bool lazy_previews = 2;</code>
+     * @return The lazyPreviews.
+     */
+    @java.lang.Override
+    public boolean getLazyPreviews() {
+      return instance.getLazyPreviews();
+    }
+    /**
+     * <pre>
+     * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+     * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+     * apps the user opens asks so, and asks for those widgets' previews with
+     * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+     * front would take seconds and hold hundreds of images.
+     * </pre>
+     *
+     * <code>bool lazy_previews = 2;</code>
+     * @param value The lazyPreviews to set.
+     * @return This builder for chaining.
+     */
+    public Builder setLazyPreviews(boolean value) {
+      copyOnWrite();
+      instance.setLazyPreviews(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+     * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+     * apps the user opens asks so, and asks for those widgets' previews with
+     * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+     * front would take seconds and hold hundreds of images.
+     * </pre>
+     *
+     * <code>bool lazy_previews = 2;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearLazyPreviews() {
+      copyOnWrite();
+      instance.clearLazyPreviews();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.ListWidgetProviders)
   }
   @java.lang.Override
@@ -191,9 +293,11 @@ public  final class ListWidgetProviders extends
       case BUILD_MESSAGE_INFO: {
           java.lang.Object[] objects = new java.lang.Object[] {
             "requestId_",
+            "lazyPreviews_",
           };
           java.lang.String info =
-              "\u0000\u0001\u0000\u0000\u0001\u0001\u0001\u0000\u0000\u0000\u0001\u000b";
+              "\u0000\u0002\u0000\u0000\u0001\u0002\u0002\u0000\u0000\u0000\u0001\u000b\u0002\u0007" +
+              "";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

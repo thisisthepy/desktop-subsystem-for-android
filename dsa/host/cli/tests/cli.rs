@@ -2955,6 +2955,91 @@ fn fr12_dsa_widgets_lists_adds_and_removes_widgets() {
 }
 
 #[test]
+fn fr12_dsa_widgets_lists_by_app_and_draws_the_previews_asked_for() {
+    use dsa_host_core::widgets::{PreviewSource, WidgetPreview};
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    offer_clock(&androids, &user);
+    androids
+        .of(&user)
+        .unwrap()
+        .widget_previews
+        .lock()
+        .unwrap()
+        .push(WidgetPreview {
+            provider: "com.example.clock/.ClockWidget".into(),
+            png: vec![0x89, b'P', b'N', b'G'],
+            source: PreviewSource::Layout,
+        });
+
+    let json = json_of(&dsa(&endpoint, "widgets list --by-app --json"));
+    let app = &json["apps"][0];
+    assert_eq!(app["package"], "com.example.clock");
+    assert_eq!(app["app"], "Clock App");
+    assert!(!app["icon_png"].as_str().unwrap().is_empty());
+    assert_eq!(
+        app["widgets"][0]["provider"],
+        "com.example.clock/.ClockWidget"
+    );
+    assert_eq!(app["widgets"][0]["preview_png"], "", "previews come later");
+    assert_eq!(app["widgets"][0]["default_width_dp"], 180);
+    assert_eq!(json["widgets"].as_array().unwrap().len(), 0);
+
+    let output = dsa(&endpoint, "widgets list --by-app");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("Clock App (com.example.clock): 1 widget"),
+        "{}",
+        stdout(&output)
+    );
+
+    let json = json_of(&dsa(
+        &endpoint,
+        "widgets previews com.example.clock/.ClockWidget --json",
+    ));
+    assert_eq!(
+        json["previews"][0]["provider"],
+        "com.example.clock/.ClockWidget"
+    );
+    assert_eq!(json["previews"][0]["source"], "layout");
+    assert_eq!(json["previews"][0]["preview_png"], "iVBORw==");
+}
+
+#[test]
+fn fr12_dsa_widgets_previews_and_by_app_are_parsed() {
+    use dsa_cli::WidgetAction;
+    assert_eq!(
+        parse(&args("widgets list --by-app --json"))
+            .unwrap()
+            .widgets,
+        Some(WidgetAction::ListByApp)
+    );
+    assert_eq!(
+        parse(&args("widgets --by-app")).unwrap().widgets,
+        Some(WidgetAction::ListByApp)
+    );
+    assert_eq!(
+        parse(&args("widgets previews com.a/.One com.b/.Two --json"))
+            .unwrap()
+            .widgets,
+        Some(WidgetAction::Previews(vec![
+            "com.a/.One".into(),
+            "com.b/.Two".into()
+        ]))
+    );
+    assert!(parse(&args("widgets previews")).is_err());
+    assert!(parse(&args("widgets previews clock")).is_err());
+    assert!(parse(&args("widgets add com.a/.One --by-app")).is_err());
+    let many = (0..=64)
+        .map(|i| format!("com.a/.W{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(parse(&args(&format!("widgets previews {many}"))).is_err());
+    assert!(dsa_cli::USAGE.contains("previews <provider>..."));
+}
+
+#[test]
 fn fr12_dsa_widgets_says_why_a_widget_was_not_placed() {
     let ((listener, _, user), endpoint) = local_pair();
     let androids = Arc::new(FakeAndroids::default());

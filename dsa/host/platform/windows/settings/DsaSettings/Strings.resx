@@ -1094,6 +1094,15 @@ It is not affiliated with, endorsed by or sponsored by Microsoft or Google.</val
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} was removed from your desktop.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widgets</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Show {0} more</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK Installer</value>
   </data>

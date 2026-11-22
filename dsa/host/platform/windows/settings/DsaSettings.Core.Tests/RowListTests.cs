@@ -46,8 +46,37 @@ public class RowListTests
             .Select(e => (string?)e.Attribute("ItemsSource"))
             .ToList();
         Assert.Contains("{Binding Placed, Mode=OneWay}", lists);
-        Assert.Contains("{Binding Offers, Mode=OneWay}", lists);
+        // The widgets on offer: one entry per app, and in an open app its widgets' cards.
+        Assert.Contains("{Binding Apps, Mode=OneWay}", lists);
+        Assert.Contains("{Binding Cards, Mode=OneWay}", lists);
         Assert.Empty(page.Descendants(Wpf + "ItemsControl"));
+    }
+
+    private static readonly XNamespace Ui = "http://schemas.lepo.co/wpfui/2022/xaml";
+
+    private static readonly XName AutomationName = XName.Get("AutomationProperties.Name");
+
+    [Fact]
+    public void Fr12_each_app_opens_on_its_own_and_its_widget_cards_are_named_buttons()
+    {
+        var page = Page("WidgetsPage");
+        // Each app is an expander a screen reader reads by the app's name and its count, which
+        // Space or Enter opens and closes; the page tells the view model which one changed.
+        var app = Assert.Single(page.Descendants(Ui + "CardExpander"));
+        Assert.Equal("{Binding Name}", (string?)app.Attribute(AutomationName));
+        Assert.Equal("{Binding CountText}", (string?)app.Attribute(XName.Get("AutomationProperties.HelpText")));
+        Assert.Equal("OnAppExpanded", (string?)app.Attribute("Expanded"));
+        Assert.Equal("OnAppCollapsed", (string?)app.Attribute("Collapsed"));
+        // An open app's widgets wrap as a grid, each a button that places its widget, named by
+        // the widget and described by its size; the arrow keys stay within the grid.
+        var grid = page.Descendants(XName.Get("RowList", Local))
+            .Single(e => (string?)e.Attribute("ItemsSource") == "{Binding Cards, Mode=OneWay}");
+        Assert.Single(grid.Descendants(Wpf + "WrapPanel"));
+        Assert.Equal("Contained", (string?)grid.Attribute(XName.Get("KeyboardNavigation.DirectionalNavigation")));
+        var card = grid.Descendants(Ui + "Button").Single(b => (string?)b.Attribute("Click") == "OnAdd");
+        Assert.Equal("{Binding Label}", (string?)card.Attribute(AutomationName));
+        Assert.Equal("{Binding Detail}", (string?)card.Attribute(XName.Get("AutomationProperties.HelpText")));
+        Assert.Contains(card.Descendants(Wpf + "Image"), i => ((string?)i.Attribute("Source") ?? "").Contains("Preview"));
     }
 
     [Fact]

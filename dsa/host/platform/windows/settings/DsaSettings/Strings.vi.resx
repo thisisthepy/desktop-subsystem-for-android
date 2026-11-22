@@ -1094,6 +1094,15 @@ DSA không liên kết với Microsoft hay Google, và không được hai công
   <data name="Widgets_Removed" xml:space="preserve">
     <value>Đã gỡ {0} khỏi màn hình nền.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widget</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Hiển thị thêm {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Trình cài đặt APK</value>
   </data>

@@ -1094,6 +1094,15 @@ Microsoft나 Google과 제휴하거나 그들의 보증 또는 후원을 받지 
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0}을(를) 바탕 화면에서 제거했습니다.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>위젯 {0}개</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>위젯 1개</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>{0}개 더 보기</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK 설치 관리자</value>
   </data>

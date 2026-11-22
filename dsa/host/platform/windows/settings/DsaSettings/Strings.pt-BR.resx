@@ -1094,6 +1094,15 @@ Ele não é afiliado à Microsoft nem ao Google, nem endossado ou patrocinado po
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} foi removido da sua área de trabalho.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widgets</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Mostrar mais {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Instalador de APK</value>
   </data>

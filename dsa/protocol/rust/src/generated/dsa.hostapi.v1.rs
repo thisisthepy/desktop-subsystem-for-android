@@ -938,7 +938,47 @@ pub struct SetAppVolume {
 /// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 /// Needs the caller's Android to be running.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListWidgetProviders {}
+pub struct ListWidgetProviders {
+    /// Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+    /// icon comes once, in `app_icons`, instead. A gallery that groups the widgets by app and
+    /// shows only those of the apps the user opens asks so, and asks for their previews with
+    /// GetWidgetPreviews: an app may offer hundreds of widgets.
+    #[prost(bool, tag = "1")]
+    pub lazy_previews: bool,
+}
+/// An app's icon, a PNG image of at most 160 pixels on a side.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetAppIcon {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
+/// Asks for the previews of some widgets on offer, at most 64 at once. The answer is
+/// WidgetPreviews. Needs the caller's Android to be running.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetWidgetPreviews {
+    /// The providers' components, as `package/class`.
+    #[prost(string, repeated, tag = "1")]
+    pub providers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// One widget's preview, a PNG image of at most 256 pixels on a side; empty for none.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetPreview {
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub preview_png: ::prost::alloc::vec::Vec<u8>,
+    #[prost(enumeration = "WidgetPreviewSource", tag = "3")]
+    pub source: i32,
+}
+/// The answer to GetWidgetPreviews, in the order asked, each widget once. A widget that is not
+/// on offer has no entry.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WidgetPreviews {
+    #[prost(message, repeated, tag = "1")]
+    pub previews: ::prost::alloc::vec::Vec<WidgetPreview>,
+}
 /// One widget an app in the caller's Android offers.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WidgetProvider {
@@ -985,6 +1025,9 @@ pub struct WidgetProvider {
 pub struct WidgetProviders {
     #[prost(message, repeated, tag = "1")]
     pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
+    /// With `lazy_previews`: the icon of each app that offers a widget, each app once.
+    #[prost(message, repeated, tag = "2")]
+    pub app_icons: ::prost::alloc::vec::Vec<WidgetAppIcon>,
 }
 /// Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
 /// it up, its setup shows as a window first, and the answer waits for the user. The answer is
@@ -3337,7 +3380,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715, 740"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -3539,6 +3582,8 @@ pub mod request {
         LaunchPlacement(super::LaunchPlacement),
         #[prost(message, tag = "715")]
         SetCaptionCompat(super::SetCaptionCompat),
+        #[prost(message, tag = "740")]
+        GetWidgetPreviews(super::GetWidgetPreviews),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -3547,7 +3592,7 @@ pub struct Response {
     pub id: u64,
     #[prost(
         oneof = "response::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660, 700"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660, 700, 740"
     )]
     pub body: ::core::option::Option<response::Body>,
 }
@@ -3621,6 +3666,8 @@ pub mod response {
         AppAudio(super::AppAudio),
         #[prost(message, tag = "700")]
         Widevine(super::Widevine),
+        #[prost(message, tag = "740")]
+        WidgetPreviews(super::WidgetPreviews),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -4265,6 +4312,40 @@ impl MediaCommand {
             "MEDIA_COMMAND_NEXT" => Some(Self::Next),
             "MEDIA_COMMAND_PREVIOUS" => Some(Self::Previous),
             "MEDIA_COMMAND_STOP" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+}
+/// Where a widget's preview comes from, best first: the layout its app gives for a preview,
+/// drawn at the widget's default size; the app's preview image; else the app's icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WidgetPreviewSource {
+    Unspecified = 0,
+    Layout = 1,
+    Image = 2,
+    Icon = 3,
+}
+impl WidgetPreviewSource {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WIDGET_PREVIEW_SOURCE_UNSPECIFIED",
+            Self::Layout => "WIDGET_PREVIEW_SOURCE_LAYOUT",
+            Self::Image => "WIDGET_PREVIEW_SOURCE_IMAGE",
+            Self::Icon => "WIDGET_PREVIEW_SOURCE_ICON",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WIDGET_PREVIEW_SOURCE_UNSPECIFIED" => Some(Self::Unspecified),
+            "WIDGET_PREVIEW_SOURCE_LAYOUT" => Some(Self::Layout),
+            "WIDGET_PREVIEW_SOURCE_IMAGE" => Some(Self::Image),
+            "WIDGET_PREVIEW_SOURCE_ICON" => Some(Self::Icon),
             _ => None,
         }
     }

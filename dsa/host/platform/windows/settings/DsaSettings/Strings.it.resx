@@ -1094,6 +1094,15 @@ Non è affiliato, approvato o sponsorizzato da Microsoft o Google.</value>
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} è stato rimosso dal desktop.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widget</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Mostra altri {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK Installer</value>
   </data>

@@ -1094,6 +1094,15 @@ ID это десятичное число, формат, который прин
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} удалён с рабочего стола.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>Виджетов: {0}</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 виджет</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Показать ещё {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Установщик APK</value>
   </data>
