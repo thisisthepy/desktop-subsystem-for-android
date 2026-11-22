@@ -768,6 +768,18 @@ impl TaskWindows {
             }
             TaskEvent::Updated(task) if !self.tasks.contains_key(&task.task_id) => {
                 self.tasks.insert(task.task_id, task.clone());
+                if !super::window_hosts::is_valid_package(&task.package_name) {
+                    // No window program can be made for it, so its window would never open:
+                    // said once, when the task first comes.
+                    self.notes.push(format!(
+                        "task {} ({:?}, {:?}) gets no window: {:?} is not a package name a \
+                         window program can be made for",
+                        task.task_id,
+                        task.package_name,
+                        window_title(task),
+                        task.package_name,
+                    ));
+                }
                 if self.closing.contains(&task.task_id) {
                     let sizing = self.sizing_for(task);
                     self.sizes.insert(task.task_id, sizing);
@@ -893,7 +905,13 @@ impl TaskWindows {
             } => {
                 if *display_id == WHOLE_SCREEN_DISPLAY {
                     // Showing it would put the guest's whole screen in a task's window.
-                    self.displays.remove(task_id);
+                    if self.displays.remove(task_id).is_some() || !self.tasks.contains_key(task_id)
+                    {
+                        self.notes.push(format!(
+                            "task {task_id}'s frames on display {display_id} are not shown: that \
+                             display is the guest's whole screen"
+                        ));
+                    }
                     return Vec::new();
                 }
                 // A display carries one task's frames: the task that claimed it last.
@@ -1509,6 +1527,48 @@ mod tests {
             task_id,
             tone: None,
         }
+    }
+
+    /// Task 144 on build 1.0.1-dev.12: the version easter egg Settings opens
+    /// (`android/com.android.internal.app.PlatLogoActivity`), a task of Android's own package.
+    fn system_task() -> Task {
+        Task {
+            package_name: "android".into(),
+            label: "Android 시스템".into(),
+            ..task(144, "", 675, 1199)
+        }
+    }
+
+    #[test]
+    fn fr3_a_task_of_androids_own_package_opens_a_window_with_its_name() {
+        let mut windows = TaskWindows::new();
+        let changes = windows.apply(&TaskEvent::Updated(system_task()));
+        assert_eq!(
+            changes.first(),
+            Some(&WindowChange::Open {
+                task_id: 144,
+                package_name: "android".into(),
+                title: "Android 시스템".into(),
+                width: 675,
+                height: 1199,
+                focused: false,
+            })
+        );
+        assert!(windows.has_window(144));
+        windows.apply(&frames(144, 4));
+        assert_eq!(windows.task_for_display(4), Some(144));
+        assert!(windows.take_notes().is_empty());
+    }
+
+    #[test]
+    fn fr3_a_task_that_gets_no_window_says_why() {
+        let mut windows = TaskWindows::new();
+        let mut bad = task(7, "Odd", 400, 600);
+        bad.package_name = "..\\odd".into();
+        windows.apply(&TaskEvent::Updated(bad));
+        let notes = windows.take_notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("task 7") && notes[0].contains("gets no window"));
     }
 
     #[test]
