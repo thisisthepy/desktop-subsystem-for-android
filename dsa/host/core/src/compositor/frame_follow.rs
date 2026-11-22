@@ -135,7 +135,7 @@ impl FrameFollow {
     ///   its strips are filled at once.
     /// - Within the limit, the strips beside a settled frame that does not cover the window
     ///   are filled. While the window's new size is pending (the moment of a maximise, a snap
-    ///   or a restore), the app is still catching up and its stretched last frame is shown
+    ///   or a restore), the app is still catching up and its last frame is shown
     ///   with nothing drawn around it.
     pub fn strips_filled(&self, placement: FramePlacement) -> bool {
         if !self.held {
@@ -160,43 +160,29 @@ impl FrameFollow {
     }
 
     /// Whether a window that holds its size still waits for the guest's answer to it: the
-    /// frame on the screen is the app's drawing of the size before, and is shown stretched to
-    /// the window until the answer comes
-    /// ([`shown_frame_placement`](super::window_sizing::shown_frame_placement)).
+    /// frame on the screen is the app's drawing of the size before, shown unstretched where
+    /// [`frame_placement`](super::window_sizing::frame_placement) puts it until the answer
+    /// comes.
     pub fn pending(&self) -> bool {
         self.held && self.waiting_from.is_some()
     }
 
     /// Whether the last frame is shown stretched over the whole window
-    /// ([`shown_frame_placement`](super::window_sizing::shown_frame_placement)'s `pending`):
-    /// the window waits for the guest's answer to its new size, and the frame on the screen is
-    /// not already as large as the guest can draw. A frame at that limit in a window beyond it
-    /// is the guest's last word (a window at the limit maximised again gets the same frame
-    /// back), so it is shown as it is, with the strips beside it filled.
+    /// ([`shown_frame_placement`](super::window_sizing::shown_frame_placement)'s `pending`).
+    /// Only a window moved onto a monitor of another scale does, until a frame drawn for the
+    /// window is shown: the frame covers the window's client area and nothing else, so it keeps
+    /// the window's size to the eye. Placed at the scale it is measured at, it would shrink or
+    /// grow inside the window by the ratio of the two scales whenever the scale and the window's
+    /// rectangle change at different moments (the scale before the rectangle, which the desktop
+    /// applies later, and back to 1:1 when the task takes the new density at the end of the
+    /// move). The window keeps its shape through such a move, so the app's does not change.
     ///
-    /// A window moved onto a monitor of another scale shows its last frame stretched too, until
-    /// a frame drawn for the window is shown: the frame covers the window's client area and
-    /// nothing else, so it keeps the window's size to the eye. Placed at the scale it is
-    /// measured at, it would shrink or grow inside the window by the ratio of the two scales
-    /// whenever the scale and the window's rectangle change at different moments (the scale
-    /// before the rectangle, which the desktop applies later, and back to 1:1 when the task
-    /// takes the new density at the end of the move).
+    /// A window that holds a new size (a maximise, a snap, a restore) never stretches its last
+    /// frame: that would change the app's shape on the screen. It shows the frame where
+    /// [`frame_placement`](super::window_sizing::frame_placement) puts it until the frame of
+    /// the new size comes.
     pub fn stretched(&self) -> bool {
-        if self.scale_hold && !self.held {
-            return true;
-        }
-        if !self.pending() {
-            return false;
-        }
-        let view = self.view;
-        let at_limit = match (self.limit, self.shown) {
-            (Some(limit), Some(shown)) => {
-                (view.0 > limit.0 && shown.0 + 1 >= limit.0)
-                    || (view.1 > limit.1 && shown.1 + 1 >= limit.1)
-            }
-            _ => false,
-        };
-        !at_limit
+        self.scale_hold && !self.held
     }
 
     /// Whether a change of the window's client size waits, inside the call that changed it,

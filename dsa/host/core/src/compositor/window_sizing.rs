@@ -404,24 +404,22 @@ pub fn frame_placement(
 }
 
 /// Where a window of `view` pixels shows the last frame it has (`frame` task pixels, at
-/// `scale`) while a frame of its new size is still `pending`: the window holds a new size (the
-/// maximise button, a double click on the title bar, a snap, a restore) and the guest has not
-/// answered it yet ([`FrameFollow::pending`](super::frame_follow::FrameFollow::pending)). The
-/// last frame is stretched over the whole window, in every scaling mode, so the window grows
-/// (or shrinks) with the app in it and no part of the window is left uncovered: kept to its
-/// shape, a phone-shaped frame in a wide window left bands at its sides that showed the desktop.
-/// Its `size` is then the window's, and its `scale` is the height's; each axis is scaled by
-/// [`placement_ratios`]. Once nothing is pending the frame is placed as [`frame_placement`]
-/// says.
+/// `scale`), stretched over the whole window when `stretched`
+/// ([`FrameFollow::stretched`](super::frame_follow::FrameFollow::stretched)): only while a
+/// window moved onto a monitor of another scale waits for a frame drawn for it, when the window
+/// keeps its shape and the frame covers its client area. Its `size` is then the window's, and
+/// its `scale` is the height's; each axis is scaled by [`placement_ratios`]. Otherwise,
+/// including while a maximised, snapped or restored window waits for the frame of its new size,
+/// the frame is placed as [`frame_placement`] says: never stretched to another shape.
 pub fn shown_frame_placement(
     frame: (u32, u32),
     view: (u32, u32),
     scale: Scale,
     held: bool,
-    pending: bool,
+    stretched: bool,
 ) -> FramePlacement {
     let placed = frame_placement(frame, view, scale, held);
-    if !pending || frame.0 == 0 || frame.1 == 0 || view.0 == 0 || view.1 == 0 {
+    if !stretched || frame.0 == 0 || frame.1 == 0 || view.0 == 0 || view.1 == 0 {
         return placed;
     }
     if to_window_size(frame, scale) == view {
@@ -1944,7 +1942,7 @@ mod tests {
     fn fr4_a_held_frame_that_is_not_pending_is_placed_as_before() {
         // Settings at 1041x1495, drawn at its window's density, maximised on the 2880x1800 main
         // monitor: a held frame of another size that is not pending (shown_frame_placement
-        // stretches only a pending one) is placed 1:1 in the window's middle, as it always was.
+        // stretches none) is placed 1:1 in the window's middle, as it always was.
         let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), true);
         assert_eq!(
             placed,
@@ -1965,51 +1963,62 @@ mod tests {
     }
 
     #[test]
-    fn fr4_a_main_monitor_maximise_stretches_the_last_frame_then_shows_the_new_one() {
-        use crate::compositor::frame_follow::FrameFollow;
-        let filled = |follow: &FrameFollow| {
-            let frame = follow.shown().unwrap_or(follow.view());
-            let placement =
-                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.stretched());
-            follow.strips_filled(placement)
+    fn fr4_a_maximise_shows_the_last_frame_as_1_0_0_does_never_changing_its_shape() {
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        let shown = |follow: &FrameFollow, frame: (u32, u32)| {
+            shown_frame_placement(frame, follow.view(), (1, 1), true, follow.stretched())
         };
-        // Settings at 1041x1495 is maximised on the 2880x1800 main monitor (work area
-        // 2880x1704). While its frame of the new size is pending, the last frame is stretched to
-        // the window's height, keeping its shape, in the window's middle; nothing is filled.
-        let mut follow = FrameFollow::new((1041, 1495));
-        follow.frame_arrived((1041, 1495));
-        follow.set_held(true);
+        // FLO restored at 471x831 on the 2880x1800 main monitor at 200%, maximised (the button,
+        // a double click on the title bar and SC_MAXIMIZE take the same path): the client
+        // becomes 2880x1704 and no frame of that size has come yet.
+        let mut follow = FrameFollow::new((471, 831));
         follow.set_limit(Some((2880, 2880)));
+        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        follow.set_held(true);
         follow.view_taken((2880, 1704));
         assert!(follow.pending());
-        assert!(!filled(&follow));
-        let view = follow.view();
-        let placed = shown_frame_placement((1041, 1495), view, (1, 1), true, follow.stretched());
-        assert_eq!(placed.origin, (0, 0));
-        assert_eq!(placed.size, (2880, 1704));
-        // The frame of the new size comes: shown 1:1, filling the window, nothing pending.
-        follow.frame_arrived((2880, 1704));
-        assert!(!follow.pending());
-        // It covers the window, so nothing is filled.
-        assert!(!filled(&follow));
-        let placed = shown_frame_placement((2880, 1704), view, (1, 1), true, follow.pending());
+        assert!(!follow.stretched());
+        // FLO keeps drawing its old size meanwhile: shown 1:1 in the window's middle, as 1.0.0
+        // shows it, with the same scale on both axes, and nothing filled around it.
+        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        let placed = shown(&follow, (471, 831));
         assert_eq!(
             placed,
-            FramePlacement {
-                scale: (1, 1),
-                origin: (0, 0),
-                size: (2880, 1704),
-            }
+            frame_placement((471, 831), (2880, 1704), (1, 1), true)
         );
-        // A frame that is not pending is placed as frame_placement says.
+        assert_eq!(placed.scale, (1, 1));
+        assert_eq!(placed.size, (471, 831));
+        assert_eq!(placed.origin, ((2880 - 471) / 2, (1704 - 831) / 2));
+        let (x, y) = placement_ratios((471, 831), placed);
+        assert_eq!(x, y);
+        assert!(!follow.strips_filled(placed));
+        // The frame of the maximised size comes and covers the window 1:1.
+        assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
+        assert!(!follow.pending());
+        let placed = shown(&follow, (2880, 1704));
+        assert_eq!((placed.origin, placed.size), ((0, 0), (2880, 1704)));
+        assert!(!follow.strips_filled(placed));
+        // Snapped or restored to a smaller size while held: the large frame is scaled down to
+        // fit, keeping its shape, until the frame of the new size comes.
+        follow.view_taken((1440, 1704));
+        assert!(follow.pending());
+        let placed = shown(&follow, (2880, 1704));
         assert_eq!(
-            shown_frame_placement((1041, 1495), view, (1, 1), true, false),
-            frame_placement((1041, 1495), view, (1, 1), true)
+            placed,
+            frame_placement((2880, 1704), (1440, 1704), (1, 1), true)
         );
+        let (x, y) = placement_ratios((2880, 1704), placed);
+        assert_eq!(x, y);
+        // Settings (1041x1495), and a task kept at another density, keep their shape too.
+        let placed = shown_frame_placement((1041, 1495), (2880, 1704), (1, 1), true, false);
+        assert_eq!((placed.size, placed.scale), ((1041, 1495), (1, 1)));
+        let placed = frame_placement((1041, 1495), (2880, 1704), (82, 131), true);
+        let (x, y) = placement_ratios((1041, 1495), placed);
+        assert_eq!(x, y);
     }
 
     #[test]
-    fn fr4_a_size_limited_maximise_stretches_while_pending_and_leaves_no_transparent_strip() {
+    fn fr4_a_size_limited_maximise_on_a_secondary_monitor_fills_what_the_frame_leaves() {
         use crate::compositor::frame_follow::FrameFollow;
         let filled = |follow: &FrameFollow| {
             let frame = follow.shown().unwrap_or(follow.view());
@@ -2024,49 +2033,29 @@ mod tests {
         follow.frame_arrived((1140, 836));
         follow.set_held(true);
         follow.view_taken((2560, 1380));
-        // While pending, the last frame is stretched over the whole window: no strip at all.
+        // The window is beyond what the guest can draw, so no frame will ever cover it: the
+        // strips beside the unstretched last frame are filled from the start.
         assert!(follow.pending());
-        assert!(follow.stretched());
-        let placed = shown_frame_placement((1140, 836), (2560, 1380), (1, 1), true, true);
-        assert_eq!(placed.origin, (0, 0));
-        assert_eq!(placed.size, (2560, 1380));
-        assert!(!filled(&follow));
-        // The guest's answer at its limit: shown as it is, the strips beside it filled.
+        assert!(!follow.stretched());
+        let placed = shown_frame_placement((1140, 836), (2560, 1380), (1, 1), true, false);
+        assert_eq!((placed.size, placed.scale), ((1140, 836), (1, 1)));
+        assert!(filled(&follow));
+        // The guest's answer at its limit: shown 1:1, the strips beside it filled.
         follow.frame_arrived((2400, 1380));
         assert!(!follow.pending());
+        let placed = shown_frame_placement((2400, 1380), (2560, 1380), (1, 1), true, false);
+        assert_eq!((placed.origin, placed.size), ((80, 0), (2400, 1380)));
         assert!(filled(&follow));
-    }
-
-    #[test]
-    fn fr4_a_maximise_by_sc_maximize_stretches_the_last_frame_over_the_whole_window() {
-        use crate::compositor::frame_follow::{Arrival, FrameFollow};
-        // FLO restored at 497x844 (client 471x831) on the 2880x1800 main monitor at 200%,
-        // maximised by WM_SYSCOMMAND SC_MAXIMIZE (the same path as the button and a double
-        // click): the client becomes 2880x1704 and no frame of that size has come yet.
-        let mut follow = FrameFollow::new((471, 831));
+        // On the main monitor the frame of the maximised size covers the window: nothing is
+        // filled, as in 1.0.0.
+        let mut follow = FrameFollow::new((1041, 1495));
         follow.set_limit(Some((2880, 2880)));
-        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        follow.frame_arrived((1041, 1495));
         follow.set_held(true);
         follow.view_taken((2880, 1704));
-        // FLO keeps drawing its old size meanwhile.
-        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
-        assert!(follow.stretched());
-        let placed = shown_frame_placement((471, 831), (2880, 1704), (1, 1), true, true);
-        // The whole window, not a phone-shaped frame in its middle with bands beside it.
-        assert_eq!(placed.origin, (0, 0));
-        assert_eq!(placed.size, (2880, 1704));
-        let (x, y) = placement_ratios((471, 831), placed);
-        assert!((x * 471.0 - 2880.0).abs() < 0.5, "{x}");
-        assert!((y * 831.0 - 1704.0).abs() < 0.5, "{y}");
-        assert!(!follow.strips_filled(placed));
-        // Restored: the window lets go and takes its frames' size again; a held window
-        // snapped or restored to a smaller size while held is stretched the same way.
-        let placed = shown_frame_placement((2880, 1704), (471, 831), (1, 1), true, true);
-        assert_eq!((placed.origin, placed.size), ((0, 0), (471, 831)));
-        // An unstretched placement scales both axes by its own scale.
-        let placed = frame_placement((1041, 1495), (2880, 1704), (82, 131), true);
-        let (x, y) = placement_ratios((1041, 1495), placed);
-        assert_eq!(x, y);
+        assert!(!filled(&follow));
+        follow.frame_arrived((2880, 1704));
+        assert!(!filled(&follow));
     }
 
     #[test]

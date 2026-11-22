@@ -1830,8 +1830,8 @@ fn frame_transform(
     frame: (u32, u32),
     placement: FramePlacement,
 ) -> (f32, f32, f32, f32) {
-    // Each axis on its own: a frame stretched over a window of another shape while the
-    // window waits for the app scales its two axes differently.
+    // Each axis on its own: a frame stretched over the window while it moves onto a monitor
+    // of another scale may be a pixel off on one axis. Any other placement keeps its shape.
     let (x, y) = placement_ratios(frame, placement);
     (
         buffer_scale.0 * x as f32,
