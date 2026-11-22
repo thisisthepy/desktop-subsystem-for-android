@@ -171,6 +171,14 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             })),
         ),
         (
+            "task_updated_forced_density",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 42,
+                forced_density_available: true,
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
             "resize_task",
             wrap(Body::ResizeTask(ResizeTask {
                 task_id: 42,
@@ -185,6 +193,16 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 task_id: 42,
                 density_dpi: 240,
                 recreate: false,
+                forced: false,
+            })),
+        ),
+        (
+            "set_task_density_forced",
+            wrap(Body::SetTaskDensity(SetTaskDensity {
+                task_id: 42,
+                density_dpi: 240,
+                recreate: false,
+                forced: true,
             })),
         ),
         (

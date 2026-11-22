@@ -66,9 +66,9 @@
 //! gives it the new monitor's density and it
 //! redraws (Android recreates the screen of an app that does not say it handles a change of
 //! density, and restores its state, so it may redraw briefly), `system` keeps its
-//! density and scales the window to the same physical size, and `system-forced` would give a
-//! new density to any app without a restart, which needs a framework change that is not made
-//! yet, so it works as `system` until then. `auto`, the default, is `system` for the apps on
+//! density and scales the window to the same physical size, and `system-forced` gives a
+//! new density to any app without a restart (on an image whose Android cannot, it works as
+//! `system`). `auto`, the default, is `system` for the apps on
 //! DSA's built-in list of apps that break when their density changes while they run
 //! (YouTube); for any other app it is `app` for an app that says it handles a change of
 //! density and `system` for any other. Neither restarts the app.
@@ -84,7 +84,7 @@
 //! (null for none, else `[width, height]`), `dpi_scaling`, `default_dpi_scaling` (what `auto`
 //! is for that app: `system` for an app on the built-in list, else `auto`, its own way),
 //! `fullscreen`, `immersive` and `below_title_bar`,
-//! `system_forced_available`, whether `system-forced` does what it says yet,
+//! `system_forced_available`, whether `system-forced` does what it says,
 //! `system_scaled_by_default`, the packages whose `auto` is `system`,
 //! `below_title_bar_by_default`, the packages that start below the title bar unless the user
 //! says otherwise (none for now), and `defaults`,
@@ -2388,7 +2388,9 @@ fn describe_dpi_scaling(scaling: DpiScaling, package: &str) -> String {
         DpiScaling::App => "redraws at another monitor's scale".to_string(),
         DpiScaling::System => "is scaled by DSA on another monitor".to_string(),
         DpiScaling::SystemForced if DpiScaling::FORCED_AVAILABLE => {
-            "is given another monitor's scale without a restart".to_string()
+            "is given another monitor's scale without a restart (scaled by DSA instead on an \
+             Android image that cannot)"
+                .to_string()
         }
         DpiScaling::SystemForced => "is set to system (forced), not available yet: it needs a \
                                      change to Android's framework, and until then it is \

@@ -18,7 +18,7 @@ use super::window_sizing::{
     ScalingMode, WindowSizing, BASE_DENSITY, DENSITY_AT_BASE_DPI, SETTLE,
 };
 use crate::app_windows::{
-    below_title_bar_packages, full_screen_place, AppWindowSettings, FullScreenDefaults,
+    below_title_bar_packages, full_screen_place, AppWindowSettings, DpiScaling, FullScreenDefaults,
     FullScreenPlace,
 };
 use crate::tasks::{Bounds, Task, TaskEvent, TaskOrientation, TaskRequest};
@@ -634,20 +634,37 @@ impl TaskWindows {
         )
     }
 
-    /// How `task`'s window follows a monitor of another scale: as the user chose for its app,
-    /// else as DSA's built-in list says for it, and as its top activity says it handles a
-    /// change of density.
-    fn scaling_of(&self, task: &Task) -> ScalingMode {
+    /// The user's choice of how `task`'s app follows a monitor of another scale.
+    fn dpi_scaling_of(&self, task: &Task) -> DpiScaling {
         self.app_windows
             .get(&task.package_name)
             .map(|app| app.dpi_scaling)
             .unwrap_or_default()
-            .mode_for(&task.package_name, task.handles_density_change)
+    }
+
+    /// How `task`'s window follows a monitor of another scale: as the user chose for its app,
+    /// else as DSA's built-in list says for it, as its top activity says it handles a change
+    /// of density, and as the guest can give it one without a relaunch.
+    fn scaling_of(&self, task: &Task) -> ScalingMode {
+        self.dpi_scaling_of(task).mode_on(
+            &task.package_name,
+            task.handles_density_change,
+            task.forced_density_available,
+        )
+    }
+
+    /// Whether `task`'s density requests go out forced: its app is set to System (forced)
+    /// scaling and the guest can give it a density without a relaunch.
+    fn forced_of(&self, task: &Task) -> bool {
+        self.dpi_scaling_of(task)
+            .forced_on(&task.package_name, task.forced_density_available)
     }
 
     /// A new record of how `task`'s window follows its task.
     fn sizing_for(&self, task: &Task) -> WindowSizing {
-        WindowSizing::with_mode(task, self.scaling_of(task))
+        let mut sizing = WindowSizing::with_mode(task, self.scaling_of(task));
+        sizing.set_forced(self.forced_of(task));
+        sizing
     }
 
     /// The scale `task_id`'s window shows its task at.
@@ -868,10 +885,12 @@ impl TaskWindows {
             TaskEvent::Updated(task) => {
                 let previous = self.tasks.insert(task.task_id, task.clone());
                 let scaling = self.scaling_of(task);
+                let forced = self.forced_of(task);
                 let follow = match self.sizes.get_mut(&task.task_id) {
                     Some(sizing) if previous.is_some() => {
                         // Another activity on top may say otherwise about a change of density.
                         sizing.set_mode(scaling);
+                        sizing.set_forced(forced);
                         let follow = sizing.guest_updated(task);
                         if let Some((asked, given)) = sizing.take_clamped() {
                             self.notes.push(format!(
@@ -2280,7 +2299,8 @@ mod tests {
                 (806, 605),
                 vec![TaskRequest::SetDensity {
                     task_id: 1,
-                    density_dpi: 262
+                    density_dpi: 262,
+                    forced: false,
                 }],
                 vec![]
             ))
@@ -2292,7 +2312,8 @@ mod tests {
             .reconfigures(Instant::now())
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 130
+                density_dpi: 130,
+                forced: false,
             }));
         // Nothing is asked for a window the user closed.
         windows.user_closed(1);
@@ -2405,7 +2426,8 @@ mod tests {
                 }],
                 vec![TaskRequest::SetDensity {
                     task_id: 1,
-                    density_dpi: 196
+                    density_dpi: 196,
+                    forced: false,
                 }]
             )
         );
@@ -2416,7 +2438,8 @@ mod tests {
             .reconfigures(Instant::now())
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 130
+                density_dpi: 130,
+                forced: false,
             }));
     }
 
@@ -2541,7 +2564,7 @@ mod tests {
         assert!(!asks_for_density(&requests));
         assert_eq!(windows.scale(1), (98, 65));
 
-        // Forced works as system until the framework change it needs is made.
+        // Forced works as system on an image that cannot give a density without a relaunch.
         let (mut windows, _) = notes_at_100(false);
         windows.set_app_windows(&[AppWindowSettings {
             package_name: "com.example.app1".into(),
@@ -2596,7 +2619,8 @@ mod tests {
             vec![
                 TaskRequest::SetDensity {
                     task_id: 1,
-                    density_dpi: 262
+                    density_dpi: 262,
+                    forced: false,
                 },
                 TaskRequest::Resize {
                     task_id: 1,
@@ -2621,6 +2645,88 @@ mod tests {
             .any(|change| matches!(change, WindowChange::Resize { .. })));
         assert_eq!(windows.task_size(1), Some((806, 605)));
         assert_eq!(windows.scale(1), (1, 1));
+    }
+
+    /// A window of an app set to System (forced) scaling on a 100% monitor, whose task draws
+    /// at 130 dpi and whose activity does not say it handles a change of density, on a guest
+    /// that can (`available`) or cannot give it one without a relaunch.
+    fn forced_at_100(available: bool) -> (TaskWindows, Task) {
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "com.example.app1".into(),
+            dpi_scaling: DpiScaling::SystemForced,
+            ..AppWindowSettings::default()
+        }]);
+        let mut forced = task(1, "Notes", 400, 300);
+        forced.density_dpi = 130;
+        forced.max_width = 1920;
+        forced.max_height = 1920;
+        forced.forced_density_available = available;
+        windows.apply(&TaskEvent::Updated(forced.clone()));
+        let (changes, requests) = windows.window_dpi(1, 96);
+        assert!(requests.is_empty(), "it starts at its monitor's density");
+        assert!(changes.is_empty());
+        (windows, forced)
+    }
+
+    #[test]
+    fn fr4_a_forced_window_dragged_to_another_scale_behaves_as_an_app_mode_one_without_a_relaunch()
+    {
+        // Dragged from 100% to 200%: the window stays where it is dropped and keeps its size,
+        // shows the last frame scaled, then the task takes the new density, forced, 1:1.
+        let (mut windows, mut forced) = forced_at_100(true);
+        let now = Instant::now();
+        assert_eq!(windows.window_dragging(1, true, now), vec![]);
+        let (changes, requests) = windows.window_dpi(1, 192);
+        assert!(!asks_for_density(&requests), "never during the drag");
+        assert!(!changes
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+        assert_eq!(windows.scale(1), (131, 65));
+        assert_eq!(windows.window_resized(1, (806, 605), now), vec![]);
+        assert_eq!(
+            windows.window_dragging(1, false, now),
+            vec![
+                TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 262,
+                    forced: true,
+                },
+                TaskRequest::Resize {
+                    task_id: 1,
+                    width: 806,
+                    height: 605,
+                    live: true,
+                },
+            ]
+        );
+        assert!(!asks_for_density(&windows.reconfigures(now)), "once");
+        forced.density_dpi = 262;
+        forced.bounds.right = forced.bounds.left + 806;
+        forced.bounds.bottom = forced.bounds.top + 605;
+        let changes = windows.apply(&TaskEvent::Updated(forced));
+        assert!(!changes
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+        assert!(!windows
+            .tick(now + SETTLE * 2)
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+        assert_eq!(windows.task_size(1), Some((806, 605)));
+        assert_eq!(windows.scale(1), (1, 1));
+    }
+
+    #[test]
+    fn fr4_a_forced_window_on_an_image_that_would_relaunch_the_app_is_scaled_as_system() {
+        let (mut windows, _) = forced_at_100(false);
+        let now = Instant::now();
+        windows.window_dragging(1, true, now);
+        windows.window_dpi(1, 192);
+        assert_eq!(windows.window_resized(1, (806, 605), now), vec![]);
+        assert_eq!(windows.window_dragging(1, false, now), vec![]);
+        assert!(!asks_for_density(&windows.reconfigures(now)));
+        assert_eq!(windows.scale(1), (131, 65));
+        assert_eq!(windows.task_size(1), Some((400, 300)));
     }
 
     #[test]
@@ -2676,7 +2782,8 @@ mod tests {
             .reconfigures(Instant::now())
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 262
+                density_dpi: 262,
+                forced: false,
             }));
         youtube_updated(&mut windows, 806, 605, 262);
         assert_eq!(windows.scale(1), (1, 1));
@@ -2820,7 +2927,8 @@ mod tests {
         let requests = windows.reconfigures(now);
         assert!(requests.contains(&TaskRequest::SetDensity {
             task_id: 1,
-            density_dpi: 262
+            density_dpi: 262,
+            forced: false,
         }));
         assert!(requests.contains(&TaskRequest::Resize {
             task_id: 1,
@@ -2871,7 +2979,8 @@ mod tests {
             .reconfigures(now)
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 262
+                density_dpi: 262,
+                forced: false,
             }));
         // Its next activity does not say so either, and the choice still holds.
         notes.density_dpi = 262;
@@ -2883,7 +2992,8 @@ mod tests {
             .reconfigures(now)
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 130
+                density_dpi: 130,
+                forced: false,
             }));
 
         // Auto and system never give such an app another density.

@@ -366,11 +366,47 @@ class AgentTest {
             .build().toByteArray(),
     )
 
-    private fun density(taskId: Int, densityDpi: Int) = daemon.deliver(
+    private fun density(taskId: Int, densityDpi: Int, forced: Boolean = false) = daemon.deliver(
         Envelope.newBuilder()
-            .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(taskId).setDensityDpi(densityDpi))
+            .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(taskId).setDensityDpi(densityDpi).setForced(forced))
             .build().toByteArray(),
     )
+
+    @Test
+    fun fr4_a_forced_density_marks_the_task_and_then_gives_it_the_density() {
+        actions.forcedDensity = true
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        density(1, 262, forced = true)
+        scheduler.runDue()
+
+        assertEquals(listOf(1 to true), actions.forcedMarks)
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 400, 300), 262 as Int?)), actions.resized)
+    }
+
+    @Test
+    fun fr4_a_forced_density_is_not_given_on_an_image_that_would_relaunch_the_app() {
+        actions.forcedDensity = false
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        density(1, 262, forced = true)
+        scheduler.runDue()
+
+        assertTrue(actions.forcedMarks.isEmpty())
+        assertTrue(actions.resized.isEmpty())
+    }
+
+    @Test
+    fun fr4_the_host_hears_whether_a_task_can_take_a_density_without_a_relaunch() {
+        actions.forcedDensity = true
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        val update = daemon.sentMessages().last { it.hasTaskUpdated() }.taskUpdated
+        assertTrue(update.forcedDensityAvailable)
+    }
 
     @Test
     fun fr4_resizing_a_window_gives_its_task_the_size_and_tells_the_host_at_once() {

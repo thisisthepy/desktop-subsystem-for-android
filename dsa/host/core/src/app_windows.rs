@@ -50,8 +50,12 @@ pub enum DpiScaling {
     /// soft.
     System,
     /// The app is given the new density without a restart, even though it does not say it
-    /// handles one. That needs a change to Android's framework that is not made yet, so until
-    /// then it works as [`DpiScaling::System`] does ([`DpiScaling::FORCED_AVAILABLE`]).
+    /// handles one: Android's framework, in DSA's image, is told to treat a change of density
+    /// as handled by the task's activity instead of relaunching it. Its window then follows
+    /// its monitor as [`DpiScaling::App`] does. An app that keeps sizes it read at the old
+    /// density can draw some of them wrong until it reads them again, which is why it is a
+    /// choice per app and never a default. On an image whose framework cannot do it
+    /// ([`DpiScaling::mode_on`]), it works as [`DpiScaling::System`] does.
     SystemForced,
 }
 
@@ -66,9 +70,10 @@ pub enum ScalingMode {
 }
 
 impl DpiScaling {
-    /// Whether [`DpiScaling::SystemForced`] does what it says yet. It needs a framework change
-    /// that is not approved, so it does not.
-    pub const FORCED_AVAILABLE: bool = false;
+    /// Whether [`DpiScaling::SystemForced`] does what it says. It needs DSA's framework
+    /// change, which the image carries; an image without it falls back to
+    /// [`DpiScaling::System`] ([`DpiScaling::mode_on`]).
+    pub const FORCED_AVAILABLE: bool = true;
 
     /// Every choice, in the order the settings apps list them.
     pub const ALL: [DpiScaling; 4] = [
@@ -121,6 +126,32 @@ impl DpiScaling {
         self.resolved_for(package).mode(handles_density_change)
     }
 
+    /// [`DpiScaling::mode_for`] on a guest that can (`forced_density_available`) or cannot
+    /// give a task a new density without relaunching its activity. Where it cannot,
+    /// [`DpiScaling::SystemForced`] works as [`DpiScaling::System`] does: following the
+    /// monitor there would restart the app, which is what the user chose it to avoid. Every
+    /// other choice is as [`DpiScaling::mode_for`] says.
+    pub fn mode_on(
+        self,
+        package: &str,
+        handles_density_change: bool,
+        forced_density_available: bool,
+    ) -> ScalingMode {
+        match self.resolved_for(package) {
+            DpiScaling::SystemForced if !forced_density_available => ScalingMode::System,
+            resolved => resolved.mode(handles_density_change),
+        }
+    }
+
+    /// Whether the density requests of a task of `package` with this choice go out forced
+    /// (the guest gives the density without relaunching the activity): for
+    /// [`DpiScaling::SystemForced`] on a guest that can, and for nothing else.
+    pub fn forced_on(self, package: &str, forced_density_available: bool) -> bool {
+        DpiScaling::FORCED_AVAILABLE
+            && forced_density_available
+            && self.resolved_for(package) == DpiScaling::SystemForced
+    }
+
     /// What a task's window does with this choice, for a task whose top activity does
     /// (`handles_density_change`) or does not say it handles a change of density itself, and
     /// whose app is outside [`SYSTEM_SCALED_BY_DEFAULT`] ([`DpiScaling::mode_for`] takes the
@@ -131,7 +162,8 @@ impl DpiScaling {
     /// [`DpiScaling::Auto`] gives another density only to an activity that says it handles
     /// one. [`DpiScaling::App`] is the user's explicit choice to stay sharp at the cost of
     /// that relaunch, so it gives the new density to any app. [`DpiScaling::SystemForced`]
-    /// works as [`DpiScaling::System`] does until the framework change it needs is made.
+    /// gives it too, without the relaunch, on a guest whose framework can
+    /// ([`DpiScaling::mode_on`] falls back to [`DpiScaling::System`] where it cannot).
     pub fn mode(self, handles_density_change: bool) -> ScalingMode {
         match self {
             DpiScaling::App => ScalingMode::App,
@@ -476,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn fr4_an_explicit_app_choice_always_takes_the_density_and_forced_works_as_system_for_now() {
+    fn fr4_an_explicit_app_choice_always_takes_the_density() {
         assert_eq!(DpiScaling::Auto.mode(true), ScalingMode::App);
         assert_eq!(DpiScaling::Auto.mode(false), ScalingMode::System);
         assert_eq!(DpiScaling::App.mode(true), ScalingMode::App);
@@ -484,10 +516,57 @@ mod tests {
         assert_eq!(DpiScaling::App.mode(false), ScalingMode::App);
         assert_eq!(DpiScaling::System.mode(false), ScalingMode::System);
         assert_eq!(DpiScaling::System.mode(true), ScalingMode::System);
-        // It needs a framework change that is not made yet.
-        const { assert!(!DpiScaling::FORCED_AVAILABLE) };
-        assert_eq!(DpiScaling::SystemForced.mode(false), ScalingMode::System);
-        assert_eq!(DpiScaling::SystemForced.mode(true), ScalingMode::System);
+    }
+
+    #[test]
+    fn fr4_forced_follows_the_monitor_without_a_relaunch_where_the_guest_can() {
+        const { assert!(DpiScaling::FORCED_AVAILABLE) };
+        // Its window follows the monitor as app does, whatever the activity says.
+        assert_eq!(DpiScaling::SystemForced.mode(false), ScalingMode::App);
+        assert_eq!(DpiScaling::SystemForced.mode(true), ScalingMode::App);
+        for handles in [false, true] {
+            assert_eq!(
+                DpiScaling::SystemForced.mode_on("com.example.notes", handles, true),
+                ScalingMode::App
+            );
+        }
+        // Its densities go out forced, and nothing else's ever does.
+        assert!(DpiScaling::SystemForced.forced_on("com.example.notes", true));
+        for scaling in [DpiScaling::Auto, DpiScaling::App, DpiScaling::System] {
+            assert!(!scaling.forced_on("com.example.notes", true), "{scaling:?}");
+            assert!(
+                !scaling.forced_on("com.google.android.youtube", true),
+                "{scaling:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fr4_forced_works_as_system_on_an_image_that_would_relaunch_the_app() {
+        for handles in [false, true] {
+            assert_eq!(
+                DpiScaling::SystemForced.mode_on("com.example.notes", handles, false),
+                ScalingMode::System
+            );
+        }
+        assert!(!DpiScaling::SystemForced.forced_on("com.example.notes", false));
+    }
+
+    #[test]
+    fn fr4_the_guest_changes_nothing_for_auto_app_and_system() {
+        for package in ["com.example.notes", "com.google.android.youtube"] {
+            for handles in [false, true] {
+                for scaling in [DpiScaling::Auto, DpiScaling::App, DpiScaling::System] {
+                    for available in [false, true] {
+                        assert_eq!(
+                            scaling.mode_on(package, handles, available),
+                            scaling.mode_for(package, handles),
+                            "{scaling:?} {package} {handles} {available}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

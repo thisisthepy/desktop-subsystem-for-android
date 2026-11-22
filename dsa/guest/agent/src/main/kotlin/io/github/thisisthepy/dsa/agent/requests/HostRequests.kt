@@ -114,6 +114,21 @@ interface TaskActions {
      * scale that density belongs to. 0 when it cannot be read.
      */
     fun statusBarHeight(densityDpi: Int): Int = 0
+
+    /**
+     * Whether the framework can mark a task so that a change of density alone does not
+     * relaunch its activities ([markForcedDensity]). Only an image whose framework carries
+     * that change can. False when it cannot, or this cannot tell.
+     */
+    fun forcedDensitySupported(): Boolean = false
+
+    /**
+     * Marks the task ([forced]) so that the framework gives it a new density without relaunching
+     * its activities, even those that do not say they handle a change of density, or takes the
+     * mark away. The mark ends with the task. False when the framework has no such mark or
+     * refused.
+     */
+    fun markForcedDensity(taskId: Int, forced: Boolean): Boolean = false
 }
 
 /** Which of Android Settings' pages of an app to open. */
@@ -167,8 +182,12 @@ sealed interface RequestResult {
      */
     data class Resize(val taskId: Int, val size: Size, val live: Boolean = false) : RequestResult
 
-    /** The host's window for the task is on a monitor of another scale; it draws at [densityDpi]. */
-    data class Density(val taskId: Int, val densityDpi: Int) : RequestResult
+    /**
+     * The host's window for the task is on a monitor of another scale; it draws at [densityDpi].
+     * [forced] when the user set the task's app to System (forced) scaling: the task is to take
+     * the density without its activity being relaunched ([io.github.thisisthepy.dsa.agent.windowing.ForcedDensity]).
+     */
+    data class Density(val taskId: Int, val densityDpi: Int, val forced: Boolean = false) : RequestResult
 
     /**
      * The host's window for the task draws its title bar over the task's top [height] pixels;
@@ -229,8 +248,9 @@ class HostRequests(
             Envelope.BodyCase.RESIZE_TASK -> envelope.resizeTask.let {
                 resize(it.taskId, it.width, it.height, it.live)
             }
-            Envelope.BodyCase.SET_TASK_DENSITY ->
-                density(envelope.setTaskDensity.taskId, envelope.setTaskDensity.densityDpi)
+            Envelope.BodyCase.SET_TASK_DENSITY -> envelope.setTaskDensity.let {
+                density(it.taskId, it.densityDpi, it.forced)
+            }
             Envelope.BodyCase.CAPTION_COMPAT ->
                 RequestResult.CaptionCompat(envelope.captionCompat.belowTitleBarList.filter { it.isNotEmpty() }.toSet())
             Envelope.BodyCase.SET_TASK_CAPTION -> caption(
@@ -311,11 +331,11 @@ class HostRequests(
         else -> RequestResult.Resize(taskId, Size(width, height), live)
     }
 
-    private fun density(taskId: Int, densityDpi: Int): RequestResult = when {
+    private fun density(taskId: Int, densityDpi: Int, forced: Boolean): RequestResult = when {
         densityDpi < MIN_DENSITY || densityDpi > MAX_DENSITY ->
             RequestResult.Malformed("SetTaskDensity asks for ${Integer.toUnsignedString(densityDpi)} dpi")
         !reported(taskId) -> RequestResult.SizeRefused(taskId, "the host was never told about this task")
-        else -> RequestResult.Density(taskId, densityDpi)
+        else -> RequestResult.Density(taskId, densityDpi, forced)
     }
 
     // The height is unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.

@@ -101,6 +101,17 @@ std::map<std::string, v1::Envelope> Cases() {
     density->set_density_dpi(240);
   }
   {
+    v1::SetTaskDensity* density = cases["set_task_density_forced"].mutable_set_task_density();
+    density->set_task_id(42);
+    density->set_density_dpi(240);
+    density->set_forced(true);
+  }
+  {
+    v1::TaskUpdated* task = cases["task_updated_forced_density"].mutable_task_updated();
+    task->set_task_id(42);
+    task->set_forced_density_available(true);
+  }
+  {
     v1::TaskUpdated* task = cases["task_updated_negative_origin"].mutable_task_updated();
     task->set_task_id(7);
     task->mutable_bounds()->set_left(-40);

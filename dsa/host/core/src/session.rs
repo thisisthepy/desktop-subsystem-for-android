@@ -3454,12 +3454,14 @@ impl Session {
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
+                forced,
             } => Body::SetTaskDensity(control::SetTaskDensity {
                 task_id,
                 density_dpi,
                 // The task takes the density as Android gives it; the agent is never asked to
                 // recreate its activity on top of that.
                 recreate: false,
+                forced,
             }),
             TaskRequest::SetCaption {
                 task_id,
@@ -6952,6 +6954,7 @@ impl Worker {
                         .collect(),
                     can_go_back: update.can_go_back,
                     handles_density_change: update.handles_density_change,
+                    forced_density_available: update.forced_density_available,
                     overlay: update.overlay.map(|overlay| OverlayWindow {
                         window_type: overlay.window_type,
                         focusable: overlay.focusable,

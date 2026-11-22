@@ -129,6 +129,7 @@ PROTOBUF_CONSTEXPR TaskUpdated::TaskUpdated(
   , /*decltype(_impl_.fullscreen_request_)*/0
   , /*decltype(_impl_.can_go_back_)*/false
   , /*decltype(_impl_.handles_density_change_)*/false
+  , /*decltype(_impl_.forced_density_available_)*/false
   , /*decltype(_impl_.below_title_bar_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct TaskUpdatedDefaultTypeInternal {
@@ -269,6 +270,7 @@ PROTOBUF_CONSTEXPR SetTaskDensity::SetTaskDensity(
     /*decltype(_impl_.task_id_)*/0
   , /*decltype(_impl_.density_dpi_)*/0u
   , /*decltype(_impl_.recreate_)*/false
+  , /*decltype(_impl_.forced_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct SetTaskDensityDefaultTypeInternal {
   PROTOBUF_CONSTEXPR SetTaskDensityDefaultTypeInternal()
@@ -7832,6 +7834,7 @@ TaskUpdated::TaskUpdated(const TaskUpdated& from)
     , decltype(_impl_.fullscreen_request_){}
     , decltype(_impl_.can_go_back_){}
     , decltype(_impl_.handles_density_change_){}
+    , decltype(_impl_.forced_density_available_){}
     , decltype(_impl_.below_title_bar_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
@@ -7890,6 +7893,7 @@ inline void TaskUpdated::SharedCtor(
     , decltype(_impl_.fullscreen_request_){0}
     , decltype(_impl_.can_go_back_){false}
     , decltype(_impl_.handles_density_change_){false}
+    , decltype(_impl_.forced_density_available_){false}
     , decltype(_impl_.below_title_bar_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
@@ -8134,6 +8138,14 @@ const char* TaskUpdated::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         } else
           goto handle_unusual;
         continue;
+      // bool forced_density_available = 29;
+      case 29:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 232)) {
+          _impl_.forced_density_available_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // bool below_title_bar = 40;
       case 40:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
@@ -8312,6 +8324,12 @@ uint8_t* TaskUpdated::_InternalSerialize(
         _Internal::overlay(this).GetCachedSize(), target, stream);
   }
 
+  // bool forced_density_available = 29;
+  if (this->_internal_forced_density_available() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(29, this->_internal_forced_density_available(), target);
+  }
+
   // bool below_title_bar = 40;
   if (this->_internal_below_title_bar() != 0) {
     target = stream->EnsureSpace(target);
@@ -8452,6 +8470,11 @@ size_t TaskUpdated::ByteSizeLong() const {
     total_size += 2 + 1;
   }
 
+  // bool forced_density_available = 29;
+  if (this->_internal_forced_density_available() != 0) {
+    total_size += 2 + 1;
+  }
+
   // bool below_title_bar = 40;
   if (this->_internal_below_title_bar() != 0) {
     total_size += 2 + 1;
@@ -8540,6 +8563,9 @@ void TaskUpdated::MergeFrom(const TaskUpdated& from) {
   }
   if (from._internal_handles_density_change() != 0) {
     _this->_internal_set_handles_density_change(from._internal_handles_density_change());
+  }
+  if (from._internal_forced_density_available() != 0) {
+    _this->_internal_set_forced_density_available(from._internal_forced_density_available());
   }
   if (from._internal_below_title_bar() != 0) {
     _this->_internal_set_below_title_bar(from._internal_below_title_bar());
@@ -10484,12 +10510,13 @@ SetTaskDensity::SetTaskDensity(const SetTaskDensity& from)
       decltype(_impl_.task_id_){}
     , decltype(_impl_.density_dpi_){}
     , decltype(_impl_.recreate_){}
+    , decltype(_impl_.forced_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.recreate_) -
-    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.recreate_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.forced_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.forced_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.SetTaskDensity)
 }
 
@@ -10501,6 +10528,7 @@ inline void SetTaskDensity::SharedCtor(
       decltype(_impl_.task_id_){0}
     , decltype(_impl_.density_dpi_){0u}
     , decltype(_impl_.recreate_){false}
+    , decltype(_impl_.forced_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -10529,8 +10557,8 @@ void SetTaskDensity::Clear() {
   (void) cached_has_bits;
 
   ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.recreate_) -
-      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.recreate_));
+      reinterpret_cast<char*>(&_impl_.forced_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.forced_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -10560,6 +10588,14 @@ const char* SetTaskDensity::_InternalParse(const char* ptr, ::_pbi::ParseContext
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.recreate_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool forced = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.forced_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -10611,6 +10647,12 @@ uint8_t* SetTaskDensity::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_recreate(), target);
   }
 
+  // bool forced = 4;
+  if (this->_internal_forced() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_forced(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -10639,6 +10681,11 @@ size_t SetTaskDensity::ByteSizeLong() const {
 
   // bool recreate = 3;
   if (this->_internal_recreate() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool forced = 4;
+  if (this->_internal_forced() != 0) {
     total_size += 1 + 1;
   }
 
@@ -10672,6 +10719,9 @@ void SetTaskDensity::MergeFrom(const SetTaskDensity& from) {
   if (from._internal_recreate() != 0) {
     _this->_internal_set_recreate(from._internal_recreate());
   }
+  if (from._internal_forced() != 0) {
+    _this->_internal_set_forced(from._internal_forced());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -10690,8 +10740,8 @@ void SetTaskDensity::InternalSwap(SetTaskDensity* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.recreate_)
-      + sizeof(SetTaskDensity::_impl_.recreate_)
+      PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.forced_)
+      + sizeof(SetTaskDensity::_impl_.forced_)
       - PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.task_id_)>(
           reinterpret_cast<char*>(&_impl_.task_id_),
           reinterpret_cast<char*>(&other->_impl_.task_id_));

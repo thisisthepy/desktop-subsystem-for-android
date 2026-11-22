@@ -334,6 +334,24 @@ class FakeActions : TaskActions {
     var statusBarHeights = mapOf<Int, Int>()
 
     override fun statusBarHeight(densityDpi: Int): Int = statusBarHeights[densityDpi] ?: 0
+
+    /** Whether the framework can mark a task for forced system scaling; how often it was asked. */
+    var forcedDensity = false
+    var forcedDensityAsked = 0
+
+    /** Each mark asked for, in order: the task and whether it is marked. */
+    val forcedMarks = mutableListOf<Pair<Int, Boolean>>()
+    var marksTaken = true
+
+    override fun forcedDensitySupported(): Boolean {
+        forcedDensityAsked++
+        return forcedDensity
+    }
+
+    override fun markForcedDensity(taskId: Int, forced: Boolean): Boolean {
+        forcedMarks += taskId to forced
+        return marksTaken
+    }
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {

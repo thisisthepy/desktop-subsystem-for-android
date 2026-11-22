@@ -1705,6 +1705,7 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
         .request(TaskRequest::SetDensity {
             task_id: 7,
             density_dpi: 320,
+            forced: false,
         })
         .expect("the density is sent");
     session
@@ -1723,7 +1724,8 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
             dsa_protocol::control::SetTaskDensity {
                 task_id: 7,
                 density_dpi: 320,
-                recreate: false
+                recreate: false,
+                forced: false
             }
         ))
     );
@@ -1736,6 +1738,31 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
             height: 1948,
             live: false
         }))
+    );
+}
+
+#[test]
+fn fr4_a_forced_density_reaches_the_guest_forced() {
+    let (session, mut agent, _launcher) = active_session();
+    session
+        .request(TaskRequest::SetDensity {
+            task_id: 7,
+            density_dpi: 262,
+            forced: true,
+        })
+        .expect("the density is sent");
+
+    let sent = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+    assert_eq!(
+        sent.body,
+        Some(Body::SetTaskDensity(
+            dsa_protocol::control::SetTaskDensity {
+                task_id: 7,
+                density_dpi: 262,
+                recreate: false,
+                forced: true
+            }
+        ))
     );
 }
 

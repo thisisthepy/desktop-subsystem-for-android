@@ -138,7 +138,10 @@ pub struct ResizeTask {
 /// the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 /// With `recreate`, the move has ended and Android recreates the task's top activity at the
 /// new density, restoring its saved state, even when the app says it handles a change of
-/// density itself (see the control protocol's SetTaskDensity).
+/// density itself (see the control protocol's SetTaskDensity). With `forced`, the task's app
+/// is set to System (forced) scaling: Android is to give the task the density without
+/// relaunching its activity, and gives it none if it cannot (the control protocol's
+/// SetTaskDensity.forced).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetTaskDensity {
     #[prost(int32, tag = "1")]
@@ -147,6 +150,8 @@ pub struct SetTaskDensity {
     pub density_dpi: u32,
     #[prost(bool, tag = "3")]
     pub recreate: bool,
+    #[prost(bool, tag = "4")]
+    pub forced: bool,
 }
 /// The monitor the window of the next task opens on: asks the caller's Android to start the
 /// tasks it starts from now on at that monitor's density and size, so an app's first frame is
@@ -1441,6 +1446,11 @@ pub struct Task {
     /// redraws at a new density rather than being relaunched. False when unknown.
     #[prost(bool, tag = "26")]
     pub handles_density_change: bool,
+    /// Whether the caller's Android can give the task a new density without relaunching its
+    /// activity although the activity does not say it handles one (see the control protocol's
+    /// TaskUpdated.forced_density_available). False on an image without it.
+    #[prost(bool, tag = "29")]
+    pub forced_density_available: bool,
     /// Which kind of full screen the task's app asks for, if any.
     #[prost(enumeration = "FullScreenRequest", tag = "27")]
     pub fullscreen_request: i32,

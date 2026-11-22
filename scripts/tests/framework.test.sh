@@ -11,6 +11,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 uv run dsa/guest/framework/test_framework_lock.py
+uv run dsa/guest/framework/test_forced_density_patches.py
 
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT

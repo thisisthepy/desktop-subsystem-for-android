@@ -664,6 +664,10 @@ pub struct WindowSizing {
     placed: bool,
     /// Whether the task follows its window's monitor's density or keeps its own.
     mode: ScalingMode,
+    /// Whether the density requests go out forced: the task's app is set to System (forced)
+    /// scaling, so the guest gives it a new density without relaunching its activity
+    /// ([`set_forced`](Self::set_forced)).
+    forced: bool,
     /// The density of the window's monitor, once the window has said; 0 until then.
     monitor_density: u32,
     /// The density the task keeps while its window is scaled ([`ScalingMode::System`]); 0
@@ -743,6 +747,7 @@ impl WindowSizing {
             reconfigure: false,
             placed: false,
             mode,
+            forced: false,
             monitor_density: 0,
             kept_density: match mode {
                 ScalingMode::App => 0,
@@ -764,6 +769,13 @@ impl WindowSizing {
     /// How the task follows its window's monitor now.
     pub fn mode(&self) -> ScalingMode {
         self.mode
+    }
+
+    /// Whether the density requests from now on go out forced: the task's app is set to System
+    /// (forced) scaling, which follows the monitor's density as [`ScalingMode::App`] does, and
+    /// the guest is to give it each density without relaunching its activity.
+    pub fn set_forced(&mut self, forced: bool) {
+        self.forced = forced;
     }
 
     /// The task's app now says it does (`App`) or does not handle a change of density, as the
@@ -849,6 +861,7 @@ impl WindowSizing {
                 TaskRequest::SetDensity {
                     task_id: self.task_id,
                     density_dpi: wanted,
+                    forced: self.forced,
                 }
             });
         let size = rescale(self.guest, self.density, density_for_dpi(dpi));
@@ -947,6 +960,7 @@ impl WindowSizing {
         let mut requests = vec![TaskRequest::SetDensity {
             task_id: self.task_id,
             density_dpi: wanted,
+            forced: self.forced,
         }];
         let size = clamp_size(self.view, self.max);
         let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
@@ -1727,6 +1741,7 @@ mod tests {
         Some(TaskRequest::SetDensity {
             task_id: 7,
             density_dpi,
+            forced: false,
         })
     }
 

@@ -94,6 +94,12 @@ public final class VectorsTest {
         cases.put("set_task_density", Envelope.newBuilder()
                 .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240))
                 .build());
+        cases.put("set_task_density_forced", Envelope.newBuilder()
+                .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240).setForced(true))
+                .build());
+        cases.put("task_updated_forced_density", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder().setTaskId(42).setForcedDensityAvailable(true))
+                .build());
         cases.put("task_updated_negative_origin", Envelope.newBuilder()
                 .setTaskUpdated(TaskUpdated.newBuilder()
                         .setTaskId(7)

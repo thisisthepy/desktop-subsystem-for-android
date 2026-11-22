@@ -78,6 +78,12 @@ pub struct Task {
     /// Whether the task's top activity says it handles a change of density itself, so
     /// Android redraws it at a new density instead of relaunching it.
     pub handles_density_change: bool,
+    /// Whether the guest can give the task a new density without relaunching its activity
+    /// although the activity does not say it handles one: the guest's framework can mark the
+    /// task for it. Only then does an app set to
+    /// [`DpiScaling::SystemForced`](crate::app_windows::DpiScaling::SystemForced) follow its
+    /// monitor's density.
+    pub forced_density_available: bool,
     /// Set when this is not an app task but an app overlay window, which the guest reports the
     /// same way ([`OverlayWindow`]).
     pub overlay: Option<OverlayWindow>,
@@ -442,7 +448,13 @@ pub enum TaskRequest {
         live: bool,
     },
     /// The task's window is on a monitor of another scale: the task draws at this density.
-    SetDensity { task_id: i32, density_dpi: u32 },
+    /// `forced` when the task's app is set to System (forced) scaling: the guest gives the task
+    /// the density without relaunching its activity, or gives it none.
+    SetDensity {
+        task_id: i32,
+        density_dpi: u32,
+        forced: bool,
+    },
     /// The task's window draws its title bar over the top `height` pixels of the task: the
     /// task gets a top system bar inset of that height. 0 removes it. `start_width` and
     /// `end_width` are how far the window's icon and its caption buttons reach into the band
@@ -517,7 +529,13 @@ impl TaskRequest {
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
+                forced: false,
             } => format!("draw task {task_id} at {density_dpi} dpi"),
+            TaskRequest::SetDensity {
+                task_id,
+                density_dpi,
+                forced: true,
+            } => format!("draw task {task_id} at {density_dpi} dpi without a relaunch"),
             TaskRequest::SetCaption {
                 task_id, height, ..
             } => format!("give task {task_id} a title bar inset of {height} pixels"),
@@ -1159,12 +1177,14 @@ mod tests {
         let density = TaskRequest::SetDensity {
             task_id: 1,
             density_dpi: 320,
+            forced: false,
         };
         let requests = vec![
             resize(1, 500),
             TaskRequest::SetDensity {
                 task_id: 1,
                 density_dpi: 240,
+                forced: false,
             },
             density.clone(),
             resize(1, 1000),

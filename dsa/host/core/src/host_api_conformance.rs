@@ -1955,7 +1955,10 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
     let _service = RunningService::start(listener, androids.clone());
     let mut client = connect(&mut *connector);
     client.start().unwrap();
-    client.set_task_density(9, 320).expect("the density");
+    client.set_task_density(9, 320, false).expect("the density");
+    client
+        .set_task_density(9, 262, true)
+        .expect("the forced density");
     // A step of a drag, and the resize that ends it.
     client
         .resize_task(9, 1280, 720, true)
@@ -1966,7 +1969,13 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
         vec![
             TaskRequest::SetDensity {
                 task_id: 9,
-                density_dpi: 320
+                density_dpi: 320,
+                forced: false
+            },
+            TaskRequest::SetDensity {
+                task_id: 9,
+                density_dpi: 262,
+                forced: true
             },
             TaskRequest::Resize {
                 task_id: 9,

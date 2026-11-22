@@ -84,6 +84,16 @@ class HostRequestsTest {
         assertEquals(RequestResult.Density(3, 320), requests.handle(density(3, 320)))
     }
 
+    @Test
+    fun fr4_a_density_asked_for_with_forced_is_handed_back_forced() {
+        reported += 3
+        val frame = Envelope.newBuilder()
+            .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(3).setDensityDpi(262).setForced(true))
+            .build().toByteArray()
+
+        assertEquals(RequestResult.Density(3, 262, forced = true), requests.handle(frame))
+    }
+
     private fun caption(taskId: Int, height: Int) = Envelope.newBuilder()
         .setSetTaskCaption(SetTaskCaption.newBuilder().setTaskId(taskId).setHeight(height))
         .build().toByteArray()

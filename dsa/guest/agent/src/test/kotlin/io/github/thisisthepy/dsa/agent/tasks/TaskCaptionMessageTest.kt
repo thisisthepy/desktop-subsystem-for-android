@@ -46,6 +46,14 @@ class TaskCaptionMessageTest {
     }
 
     @Test
+    fun fr4_a_task_says_whether_it_can_take_a_new_density_without_a_relaunch() {
+        assertTrue(
+            decode(Messages.taskUpdated(appTask(1).copy(forcedDensityAvailable = true))).taskUpdated.forcedDensityAvailable,
+        )
+        assertFalse(decode(Messages.taskUpdated(appTask(1))).taskUpdated.forcedDensityAvailable)
+    }
+
+    @Test
     fun fr22_the_icon_becomes_a_back_button_when_the_task_can_go_back() {
         assertTrue(decode(Messages.taskUpdated(appTask(1).copy(canGoBack = true))).taskUpdated.canGoBack)
         assertFalse(decode(Messages.taskUpdated(appTask(1))).taskUpdated.canGoBack)

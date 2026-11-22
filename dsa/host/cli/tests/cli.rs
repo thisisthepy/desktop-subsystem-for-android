@@ -3647,8 +3647,8 @@ fn fr4_dsa_app_window_sets_and_keeps_an_apps_dpi_scaling() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = settings_service(listener);
     let none = json_of(&dsa(&endpoint, "app-window --json"));
-    // The forced way is stored but does not do what it says yet.
-    assert_eq!(none["system_forced_available"], false);
+    // The forced way does what it says.
+    assert_eq!(none["system_forced_available"], true);
     let set = json_of(&dsa(
         &endpoint,
         "app-window com.example.notes --dpi-scaling system --json",
@@ -3672,7 +3672,7 @@ fn fr4_dsa_app_window_sets_and_keeps_an_apps_dpi_scaling() {
         "app-window com.example.notes --dpi-scaling system-forced",
     );
     assert!(
-        stdout(&forced).contains("not available yet"),
+        stdout(&forced).contains("without a restart"),
         "{}",
         stdout(&forced)
     );

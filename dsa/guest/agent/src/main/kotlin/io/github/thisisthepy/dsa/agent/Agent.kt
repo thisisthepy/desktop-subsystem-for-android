@@ -102,6 +102,7 @@ import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
 import io.github.thisisthepy.dsa.agent.widgets.WidgetManager
 import io.github.thisisthepy.dsa.agent.widgets.WidgetPlatform
 import io.github.thisisthepy.dsa.agent.widgets.WidgetStore
+import io.github.thisisthepy.dsa.agent.windowing.ForcedDensity
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.GestureExclusion
 import io.github.thisisthepy.dsa.agent.windowing.BelowTitleBar
@@ -476,6 +477,7 @@ class Agent(
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val captions = CaptionInsets(actions, log)
     private val belowTitleBar = BelowTitleBar()
+    private val forcedDensity = ForcedDensity(actions, log)
     private val fullScreenHolds = FullScreenHolds()
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
     private val shortcutReporter = ShortcutReporter(ownPackage) { frame -> channel.send(frame) }
@@ -917,9 +919,13 @@ class Agent(
                 accessibilityExport.resizing(result.taskId)
             }
             is RequestResult.Density -> {
-                log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
-                arranger.setDensity(result.taskId, result.densityDpi)
-                accessibilityExport.resizing(result.taskId)
+                // A task whose app is set to forced system scaling is marked first, or is not
+                // given the density at all: unmarked, Android would restart the app for it.
+                if (forcedDensity.beforeDensity(result.taskId, result.forced)) {
+                    log.info("task ${result.taskId} draws at ${result.densityDpi} dpi" + if (result.forced) ", without a relaunch" else "")
+                    arranger.setDensity(result.taskId, result.densityDpi)
+                    accessibilityExport.resizing(result.taskId)
+                }
             }
             is RequestResult.Caption -> {
                 log.info("task ${result.taskId} is under a title bar ${result.height} pixels high")
@@ -1304,9 +1310,12 @@ class Agent(
         if (!channel.connected) return
         // Whether a task starts below the title bar is settled when it is first seen here.
         val below = belowTitleBar.tasks(running.associate { it.taskId to it.packageName })
+        forcedDensity.running(running.map { it.taskId }.toSet())
+        val forcedDensityAvailable = forcedDensity.available
         val placedTasks = running.map { task ->
             val placed = bounds[task.taskId]
-            val moved = if (placed == null || placed == task.bounds) task else task.copy(bounds = placed)
+            val bounded = if (placed == null || placed == task.bounds) task else task.copy(bounds = placed)
+            val moved = if (forcedDensityAvailable) bounded.copy(forcedDensityAvailable = true) else bounded
             if (moved.taskId in below) {
                 // The user's switch wins over an app that asks to draw its own title bar: the
                 // whole band is the host's, and the app has no controls in it.

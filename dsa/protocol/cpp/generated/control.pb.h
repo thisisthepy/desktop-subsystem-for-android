@@ -3012,6 +3012,7 @@ class TaskUpdated final :
     kFullscreenRequestFieldNumber = 27,
     kCanGoBackFieldNumber = 25,
     kHandlesDensityChangeFieldNumber = 26,
+    kForcedDensityAvailableFieldNumber = 29,
     kBelowTitleBarFieldNumber = 40,
   };
   // repeated .dsa.control.v1.Rect caption_interactive = 24;
@@ -3240,6 +3241,15 @@ class TaskUpdated final :
   void _internal_set_handles_density_change(bool value);
   public:
 
+  // bool forced_density_available = 29;
+  void clear_forced_density_available();
+  bool forced_density_available() const;
+  void set_forced_density_available(bool value);
+  private:
+  bool _internal_forced_density_available() const;
+  void _internal_set_forced_density_available(bool value);
+  public:
+
   // bool below_title_bar = 40;
   void clear_below_title_bar();
   bool below_title_bar() const;
@@ -3278,6 +3288,7 @@ class TaskUpdated final :
     int fullscreen_request_;
     bool can_go_back_;
     bool handles_density_change_;
+    bool forced_density_available_;
     bool below_title_bar_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -4664,6 +4675,7 @@ class SetTaskDensity final :
     kTaskIdFieldNumber = 1,
     kDensityDpiFieldNumber = 2,
     kRecreateFieldNumber = 3,
+    kForcedFieldNumber = 4,
   };
   // int32 task_id = 1;
   void clear_task_id();
@@ -4692,6 +4704,15 @@ class SetTaskDensity final :
   void _internal_set_recreate(bool value);
   public:
 
+  // bool forced = 4;
+  void clear_forced();
+  bool forced() const;
+  void set_forced(bool value);
+  private:
+  bool _internal_forced() const;
+  void _internal_set_forced(bool value);
+  public:
+
   // @@protoc_insertion_point(class_scope:dsa.control.v1.SetTaskDensity)
  private:
   class _Internal;
@@ -4703,6 +4724,7 @@ class SetTaskDensity final :
     int32_t task_id_;
     uint32_t density_dpi_;
     bool recreate_;
+    bool forced_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -46862,6 +46884,26 @@ inline void TaskUpdated::set_handles_density_change(bool value) {
   // @@protoc_insertion_point(field_set:dsa.control.v1.TaskUpdated.handles_density_change)
 }
 
+// bool forced_density_available = 29;
+inline void TaskUpdated::clear_forced_density_available() {
+  _impl_.forced_density_available_ = false;
+}
+inline bool TaskUpdated::_internal_forced_density_available() const {
+  return _impl_.forced_density_available_;
+}
+inline bool TaskUpdated::forced_density_available() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.TaskUpdated.forced_density_available)
+  return _internal_forced_density_available();
+}
+inline void TaskUpdated::_internal_set_forced_density_available(bool value) {
+  
+  _impl_.forced_density_available_ = value;
+}
+inline void TaskUpdated::set_forced_density_available(bool value) {
+  _internal_set_forced_density_available(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.TaskUpdated.forced_density_available)
+}
+
 // .dsa.control.v1.FullScreenRequest fullscreen_request = 27;
 inline void TaskUpdated::clear_fullscreen_request() {
   _impl_.fullscreen_request_ = 0;
@@ -47525,6 +47567,26 @@ inline void SetTaskDensity::_internal_set_recreate(bool value) {
 inline void SetTaskDensity::set_recreate(bool value) {
   _internal_set_recreate(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.SetTaskDensity.recreate)
+}
+
+// bool forced = 4;
+inline void SetTaskDensity::clear_forced() {
+  _impl_.forced_ = false;
+}
+inline bool SetTaskDensity::_internal_forced() const {
+  return _impl_.forced_;
+}
+inline bool SetTaskDensity::forced() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.SetTaskDensity.forced)
+  return _internal_forced();
+}
+inline void SetTaskDensity::_internal_set_forced(bool value) {
+  
+  _impl_.forced_ = value;
+}
+inline void SetTaskDensity::set_forced(bool value) {
+  _internal_set_forced(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.SetTaskDensity.forced)
 }
 
 // -------------------------------------------------------------------

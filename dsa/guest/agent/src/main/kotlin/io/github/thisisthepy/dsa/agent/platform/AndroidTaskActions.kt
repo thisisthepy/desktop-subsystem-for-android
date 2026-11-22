@@ -447,6 +447,32 @@ class AndroidTaskActions(
     }
 
     /** The status bar heights read so far, by density. */
+    /**
+     * Asks the window manager's dsa-forced-density shell command, which DSA's framework adds,
+     * to answer. An image without that change answers "Unknown command", which [serviceShell]
+     * turns into a failure.
+     */
+    override fun forcedDensitySupported(): Boolean = try {
+        serviceShell(WINDOW_SERVICE, FORCED_DENSITY_COMMAND) == "supported"
+    } catch (e: Exception) {
+        log.info("the window manager has no $FORCED_DENSITY_COMMAND command (${e.message})")
+        false
+    }
+
+    /**
+     * Marks the task, or takes the mark away, through the window manager's dsa-forced-density
+     * shell command (`cmd window dsa-forced-density <task> true|false`), which needs the
+     * MANAGE_ACTIVITY_TASKS permission the agent holds. The framework keeps the mark on the
+     * task itself, so it ends with the task.
+     */
+    override fun markForcedDensity(taskId: Int, forced: Boolean): Boolean = try {
+        serviceShell(WINDOW_SERVICE, FORCED_DENSITY_COMMAND, taskId.toString(), forced.toString())
+        true
+    } catch (e: Exception) {
+        log.warn("the window manager did not mark task $taskId for forced system scaling", e)
+        false
+    }
+
     private val statusBarHeights = HashMap<Int, Int>()
 
     /**
@@ -555,6 +581,11 @@ class AndroidTaskActions(
         const val RESIZE_MODE_PRESERVE_WINDOW = 1
 
         const val MAX_TASKS = 1000
+
+        // Context.WINDOW_SERVICE, the window manager's binder, and the shell command DSA's
+        // framework adds to it.
+        const val WINDOW_SERVICE = "window"
+        const val FORCED_DENSITY_COMMAND = "dsa-forced-density"
 
         // InsetsSource.FLAG_FORCE_CONSUMING (1 shl 2) and
         // FLAG_FORCE_CONSUMING_OPAQUE_CAPTION_BAR (1 shl 4), the same in Android 16 and 17:

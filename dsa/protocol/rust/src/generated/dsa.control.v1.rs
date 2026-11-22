@@ -145,6 +145,13 @@ pub struct TaskUpdated {
     /// the window instead. False when the agent cannot read it.
     #[prost(bool, tag = "26")]
     pub handles_density_change: bool,
+    /// Whether the guest can give this task a new density without relaunching its activity, even
+    /// though the activity does not say it handles one: the guest's framework has the change that
+    /// lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+    /// an app the user set to System (forced) scaling another monitor's density only when this
+    /// is set, and scales its window as for System otherwise. False on an image without it.
+    #[prost(bool, tag = "29")]
+    pub forced_density_available: bool,
     /// Which kind of full screen the task's app asks for, if any. The host shows the task's
     /// window on its whole monitor or keeps it inside its window, as the user's setting for that
     /// kind of request says.
@@ -299,6 +306,13 @@ pub struct ResizeTask {
 /// it handles a change of density itself. Some apps that say so lay out only part of their
 /// screen again and leave the rest at the old density. An activity that does not say so is
 /// recreated by Android anyway, so the agent asks for nothing more.
+///
+/// `forced` is set when the user set the task's app to System (forced) scaling, and the task
+/// said `forced_density_available`: the agent first marks the task so that Android gives it the
+/// density without relaunching its activity, whether or not the activity says it handles a
+/// change of density, and only then gives it the density. If the task cannot be marked, the
+/// agent gives it no density, so the app is never restarted for it. Without `forced`, the agent
+/// takes away a mark it gave the task before, so that Android handles the density as it would.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetTaskDensity {
     #[prost(int32, tag = "1")]
@@ -307,6 +321,8 @@ pub struct SetTaskDensity {
     pub density_dpi: u32,
     #[prost(bool, tag = "3")]
     pub recreate: bool,
+    #[prost(bool, tag = "4")]
+    pub forced: bool,
 }
 /// Host to guest: the monitor the window of the next task opens on, so that the task starts at
 /// that monitor's density and its size there from its first frame, and its app is never

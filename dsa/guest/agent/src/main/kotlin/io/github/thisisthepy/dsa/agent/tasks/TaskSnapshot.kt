@@ -91,6 +91,12 @@ data class TaskSnapshot(
      */
     val handlesDensityChange: Boolean = false,
     /**
+     * Whether the framework can give the task a new density without relaunching its activity
+     * although the activity does not say it handles one ([io.github.thisisthepy.dsa.agent.windowing.ForcedDensity]).
+     * The host gives an app set to System (forced) scaling another monitor's density only then.
+     */
+    val forcedDensityAvailable: Boolean = false,
+    /**
      * Whether the task's top and root activities say they handle a change of font scale
      * themselves (configChanges include fontScale), so Android redraws them at a new font
      * scale instead of restarting them. The agent holds a new font scale while a task that

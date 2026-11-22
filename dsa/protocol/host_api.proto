@@ -207,11 +207,15 @@ message ResizeTask {
 // the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 // With `recreate`, the move has ended and Android recreates the task's top activity at the
 // new density, restoring its saved state, even when the app says it handles a change of
-// density itself (see the control protocol's SetTaskDensity).
+// density itself (see the control protocol's SetTaskDensity). With `forced`, the task's app
+// is set to System (forced) scaling: Android is to give the task the density without
+// relaunching its activity, and gives it none if it cannot (the control protocol's
+// SetTaskDensity.forced).
 message SetTaskDensity {
   int32 task_id = 1;
   uint32 density_dpi = 2;
   bool recreate = 3;
+  bool forced = 4;
 }
 
 // The monitor the window of the next task opens on: asks the caller's Android to start the
@@ -1352,6 +1356,10 @@ message Task {
   // Whether the task's top activity says it handles a change of density itself, so it
   // redraws at a new density rather than being relaunched. False when unknown.
   bool handles_density_change = 26;
+  // Whether the caller's Android can give the task a new density without relaunching its
+  // activity although the activity does not say it handles one (see the control protocol's
+  // TaskUpdated.forced_density_available). False on an image without it.
+  bool forced_density_available = 29;
   // Which kind of full screen the task's app asks for, if any.
   FullScreenRequest fullscreen_request = 27;
   // Set when this is not an app task but an app overlay window (see OverlayWindow): `task_id`

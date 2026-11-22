@@ -1570,6 +1570,7 @@ fn task_to_wire(task: Task) -> types::Task {
             .collect(),
         can_go_back: task.can_go_back,
         handles_density_change: task.handles_density_change,
+        forced_density_available: task.forced_density_available,
         overlay: task.overlay.map(|overlay| types::OverlayWindow {
             window_type: overlay.window_type,
             focusable: overlay.focusable,
@@ -1630,6 +1631,7 @@ fn task_from_wire(task: types::Task) -> Task {
             .collect(),
         can_go_back: task.can_go_back,
         handles_density_change: task.handles_density_change,
+        forced_density_available: task.forced_density_available,
         overlay: task.overlay.map(|overlay| OverlayWindow {
             window_type: overlay.window_type,
             focusable: overlay.focusable,
@@ -5492,6 +5494,7 @@ impl HostApiService {
                 TaskRequest::SetDensity {
                     task_id: density.task_id,
                     density_dpi: density.density_dpi,
+                    forced: density.forced,
                 },
             ),
             // The message stays in the protocol so that its field number is never reused, but
@@ -8239,13 +8242,21 @@ impl HostApiClient {
     }
 
     /// Asks the caller's Android to draw a task at `density_dpi`, as when its window moves
-    /// to a monitor of another scale.
-    pub fn set_task_density(&mut self, task_id: i32, density_dpi: u32) -> Result<(), ClientError> {
+    /// to a monitor of another scale. With `forced`, the task's app is set to System (forced)
+    /// scaling: Android gives the task the density without relaunching its activity, or gives
+    /// it none.
+    pub fn set_task_density(
+        &mut self,
+        task_id: i32,
+        density_dpi: u32,
+        forced: bool,
+    ) -> Result<(), ClientError> {
         self.done(request::Body::SetTaskDensity(types::SetTaskDensity {
             task_id,
             density_dpi,
             // Never set: Android redraws or recreates the task at a new density on its own.
             recreate: false,
+            forced,
         }))
     }
 
@@ -8312,7 +8323,8 @@ impl HostApiClient {
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
-            } => self.set_task_density(*task_id, *density_dpi),
+                forced,
+            } => self.set_task_density(*task_id, *density_dpi, *forced),
             TaskRequest::SetCaption {
                 task_id,
                 height,
