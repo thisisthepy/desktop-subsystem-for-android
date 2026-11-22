@@ -194,6 +194,12 @@ ndk::ScopedAStatus Session::configureStreams(const device::StreamConfiguration& 
     const StreamSize size = hostSizeFor(mCamera, asks);
     {
         std::lock_guard<std::mutex> host(mHostLock);
+        // A close that came while the streams were read has let the host camera go already
+        // (it sets mClosed before it takes mHostLock); starting it now would hold the host's
+        // camera for a session nobody closes again.
+        if (closed()) {
+            return error(common::Status::INTERNAL_ERROR);
+        }
         const bool resize = !mHost || size.width != mHostWidth || size.height != mHostHeight;
         mHostWidth = size.width;
         mHostHeight = size.height;

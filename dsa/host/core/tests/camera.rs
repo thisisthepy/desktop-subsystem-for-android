@@ -2,7 +2,7 @@
 //! standing in for the platform's.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -45,11 +45,82 @@ fn picture(width: u32, height: u32, value: u8, timestamp_ns: u64) -> Frame {
     }
 }
 
-/// What the fake cameras were asked, and how many are open now.
+/// What the fake cameras were asked, how many streams are open now, how many cameras are held
+/// (opened and not let go, which is what turns the computer's camera light on), and the most
+/// held at once.
 #[derive(Default)]
 struct Record {
     log: Mutex<Vec<String>>,
     open: AtomicUsize,
+    held: AtomicUsize,
+    peak: AtomicUsize,
+}
+
+impl Record {
+    fn hold(&self) {
+        let now = self.held.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+    }
+
+    fn count(&self, prefix: &str) -> usize {
+        let log = self.log.lock().unwrap();
+        log.iter().filter(|line| line.starts_with(prefix)).count()
+    }
+}
+
+/// Waits up to `limit` for `done`, and says whether it came.
+fn within(limit: Duration, done: impl Fn() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while std::time::Instant::now() < deadline {
+        if done() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    done()
+}
+
+/// A camera that sends no picture until it is let go, as one whose pictures stopped coming
+/// (a source reader waiting on a camera that went quiet). Its releaser lets it go from
+/// another thread, as the platforms' streams do.
+struct WaitingStream {
+    released: Arc<(Mutex<bool>, Condvar)>,
+    record: Arc<Record>,
+}
+
+fn let_go(released: &(Mutex<bool>, Condvar), record: &Record) {
+    let (flag, changed) = released;
+    let mut done = flag.lock().unwrap();
+    if !*done {
+        *done = true;
+        record.held.fetch_sub(1, Ordering::SeqCst);
+        record.log.lock().unwrap().push("release".into());
+    }
+    changed.notify_all();
+}
+
+impl CameraStream for WaitingStream {
+    fn next(&mut self) -> Result<Frame, String> {
+        let (flag, changed) = &*self.released;
+        let mut done = flag.lock().unwrap();
+        while !*done {
+            done = changed.wait(done).unwrap();
+        }
+        Err("the camera was let go".into())
+    }
+
+    fn releaser(&self) -> Option<Box<dyn Fn() + Send>> {
+        let (released, record) = (Arc::clone(&self.released), Arc::clone(&self.record));
+        Some(Box::new(move || let_go(&released, &record)))
+    }
+}
+
+impl Drop for WaitingStream {
+    fn drop(&mut self) {
+        let_go(&self.released, &self.record);
+        self.record.open.fetch_sub(1, Ordering::SeqCst);
+        self.record.log.lock().unwrap().push("close".into());
+    }
 }
 
 /// A camera that gives pictures 1, 2, 3 and so on (in the luma), then fails after `fail_after`
@@ -81,6 +152,7 @@ impl CameraStream for FakeStream {
 impl Drop for FakeStream {
     fn drop(&mut self) {
         self.record.open.fetch_sub(1, Ordering::SeqCst);
+        self.record.held.fetch_sub(1, Ordering::SeqCst);
         self.record.log.lock().unwrap().push("close".into());
     }
 }
@@ -88,6 +160,8 @@ impl Drop for FakeStream {
 struct FakeCameras {
     cameras: Vec<Camera>,
     fail_after: Option<u8>,
+    /// Whether its cameras are [`WaitingStream`]s.
+    waiting: bool,
     record: Arc<Record>,
 }
 
@@ -116,6 +190,7 @@ impl FakeCameras {
                 camera("blocked", Facing::Front, true),
             ],
             fail_after,
+            waiting: false,
             record: Arc::default(),
         }
     }
@@ -133,6 +208,13 @@ impl Cameras for FakeCameras {
             return Err("blocked".into());
         }
         self.record.open.fetch_add(1, Ordering::SeqCst);
+        self.record.hold();
+        if self.waiting {
+            return Ok(Box::new(WaitingStream {
+                released: Arc::default(),
+                record: Arc::clone(&self.record),
+            }));
+        }
         Ok(Box::new(FakeStream {
             width: mode.width,
             height: mode.height,
@@ -172,8 +254,11 @@ type Connected = (
 );
 
 fn connect(fail_after: Option<u8>) -> Connected {
+    connect_to(FakeCameras::new(fail_after))
+}
+
+fn connect_to(cameras: FakeCameras) -> Connected {
     let (mut listener, mut connector) = memory::pair();
-    let cameras = FakeCameras::new(fail_after);
     let record = Arc::clone(&cameras.record);
     let host = thread::spawn(move || {
         let connection = listener.accept(WAIT).expect("accepts");
@@ -316,6 +401,133 @@ fn fr26_the_camera_is_open_only_while_in_use() {
     drop(guest);
     assert_eq!(host.join().unwrap(), CameraEnd::Closed);
     assert_eq!(record.open.load(Ordering::SeqCst), 0);
+}
+
+fn waiting_cameras() -> FakeCameras {
+    FakeCameras {
+        waiting: true,
+        ..FakeCameras::new(None)
+    }
+}
+
+#[test]
+fn fr26_a_stop_lets_the_camera_go_while_it_waits_for_a_picture() {
+    let (mut guest, host, _, record) = connect_to(waiting_cameras());
+    assert!(open(guest.as_mut(), "front", 640, 480, 30).ok);
+    assert_eq!(record.held.load(Ordering::SeqCst), 1);
+    send(guest.as_mut(), Body::CameraStop(CameraStop {}));
+    // The camera sends nothing, so nothing but the stop can let it go.
+    assert!(
+        within(Duration::from_secs(1), || record
+            .held
+            .load(Ordering::SeqCst)
+            == 0),
+        "the camera is still held a second after the guest stopped it"
+    );
+    // It opens again, and the connection's end lets it go too.
+    assert!(open(guest.as_mut(), "front", 640, 480, 30).ok);
+    assert_eq!(record.held.load(Ordering::SeqCst), 1);
+    drop(guest);
+    assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+    assert_eq!(record.held.load(Ordering::SeqCst), 0);
+    assert_eq!(record.open.load(Ordering::SeqCst), 0);
+    assert_eq!(record.count("open "), record.count("close"));
+}
+
+#[test]
+fn fr26_closing_the_connection_lets_a_waiting_camera_go() {
+    let (mut guest, host, _, record) = connect_to(waiting_cameras());
+    assert!(open(guest.as_mut(), "back", 1280, 720, 30).ok);
+    assert_eq!(record.held.load(Ordering::SeqCst), 1);
+    drop(guest);
+    assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+    assert_eq!(record.held.load(Ordering::SeqCst), 0);
+    assert_eq!(record.open.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn fr26_a_connection_closed_while_its_camera_opens_leaves_no_camera_held() {
+    for waiting in [false, true] {
+        for stop_first in [false, true] {
+            let cameras = FakeCameras {
+                waiting,
+                ..FakeCameras::new(None)
+            };
+            let (mut guest, host, _, record) = connect_to(cameras);
+            // The guest asks and goes before it reads the answer, as a HAL whose app closed
+            // the camera while it was opening.
+            send(
+                guest.as_mut(),
+                Body::CameraOpen(CameraOpen {
+                    id: "usb".into(),
+                    width: 640,
+                    height: 480,
+                    fps: 30,
+                }),
+            );
+            if stop_first {
+                send(guest.as_mut(), Body::CameraStop(CameraStop {}));
+            }
+            drop(guest);
+            assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+            assert_eq!(record.held.load(Ordering::SeqCst), 0, "waiting {waiting}");
+            assert_eq!(record.open.load(Ordering::SeqCst), 0, "waiting {waiting}");
+            assert_eq!(record.count("open "), record.count("close"));
+        }
+    }
+}
+
+#[test]
+fn fr26_opens_and_stops_in_quick_succession_never_hold_a_camera_twice() {
+    for waiting in [false, true] {
+        let cameras = FakeCameras {
+            waiting,
+            ..FakeCameras::new(None)
+        };
+        let (mut guest, host, _, record) = connect_to(cameras);
+        // As an app that probes its cameras: open, stop, open the other, stop, unanswered.
+        for round in 0..6 {
+            let id = if round % 2 == 0 { "front" } else { "back" };
+            send(
+                guest.as_mut(),
+                Body::CameraOpen(CameraOpen {
+                    id: id.into(),
+                    width: 640,
+                    height: 480,
+                    fps: 30,
+                }),
+            );
+            send(guest.as_mut(), Body::CameraStop(CameraStop {}));
+        }
+        // A still's answer shows every message before it was taken.
+        send(
+            guest.as_mut(),
+            Body::CameraStill(CameraStill {
+                request_id: 3,
+                width: 640,
+                height: 480,
+                quality: 90,
+            }),
+        );
+        loop {
+            match next(guest.as_mut()) {
+                Body::CameraStillTaken(taken) => {
+                    assert_eq!(taken.request_id, 3);
+                    break;
+                }
+                Body::CameraOpened(opened) => assert!(opened.ok, "{}", opened.error),
+                Body::CameraFrame(_) => continue,
+                other => panic!("expected the still's answer, got {other:?}"),
+            }
+        }
+        assert_eq!(record.held.load(Ordering::SeqCst), 0, "waiting {waiting}");
+        assert_eq!(record.open.load(Ordering::SeqCst), 0, "waiting {waiting}");
+        assert_eq!(record.peak.load(Ordering::SeqCst), 1, "waiting {waiting}");
+        assert_eq!(record.count("open "), 6);
+        assert_eq!(record.count("close"), 6);
+        drop(guest);
+        assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+    }
 }
 
 #[test]
