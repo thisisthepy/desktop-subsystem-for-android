@@ -98,6 +98,11 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_DirectComposition",
+    # The app's name in a task window's title bar, laid out by DirectWrite and drawn by
+    # Direct2D with grayscale antialiasing at the window's own scale.
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     # The data object a drop carries: its medium names GDI handles.
