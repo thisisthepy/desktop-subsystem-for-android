@@ -9,6 +9,7 @@ use dsa_host_core::video::{
     serve_connection, Codec, CodecSupport, DecoderReport, Packet, Picture, StreamStats,
     VideoDecoder, VideoDecoders, VideoEnd, PICTURES_IN_FLIGHT, STATS_INTERVAL,
 };
+use dsa_host_core::video_layout::nv12_holds_no_picture;
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
     Envelope, Hello, Role, VideoCodec, VideoDecoderOpen, VideoFlush, VideoFrame, VideoPacket,
@@ -679,7 +680,10 @@ fn fr26_a_streams_numbers_go_to_the_log_every_few_seconds() {
     assert!(line.contains("150 pictures decoded (30.0/s)"), "{line}");
     assert!(line.contains("148 handed on (29.6/s)"), "{line}");
     assert!(
-        line.contains("2 dropped (2 flushed, 0 malformed, 0 before a key frame)"),
+        line.contains(
+            "2 dropped (2 flushed, 0 malformed, 0 before a key frame, 0 not written by the \
+             decoder)"
+        ),
         "{line}"
     );
     assert!(
@@ -719,4 +723,94 @@ fn fr26_messages_keep_their_order_behind_the_pictures_in_flight() {
     assert!(matches!(next(guest.as_mut()), Body::VideoFlushed(_)));
     guest.close();
     assert_eq!(host.join().unwrap(), VideoEnd::Closed);
+}
+
+#[test]
+fn fr26_a_picture_the_decoder_never_wrote_is_not_handed_on_and_its_work_ends() {
+    // A hardware decoder may hand back a surface it never decoded into: zeros, solid green
+    // in the app. Before, it went to the guest as a picture like any other, which the guest
+    // wrote into a buffer of the app's surface.
+    let (mut guest, host, _log) = connect(Role::GuestVideo);
+    open(guest.as_mut(), VideoCodec::H264, 0, 0);
+    assert!(matches!(next(guest.as_mut()), Body::VideoDecoderOpened(o) if o.ok));
+    // The fake decoder makes a picture of each packet's first byte: 0 is a surface of zeros.
+    send(guest.as_mut(), packet(1, &[10]));
+    send(guest.as_mut(), packet(2, &[0]));
+    send(guest.as_mut(), packet(3, &[30]));
+    send(guest.as_mut(), packet(4, &[40]));
+    let first = frame(next(guest.as_mut()));
+    assert_eq!((first.frame_index, first.nv12.clone()), (1, vec![10; 6]));
+    // Packet 2's work ends with no picture, so the app's surface keeps the last good one.
+    let none = frame(next(guest.as_mut()));
+    assert_eq!(none.frame_index, 2);
+    assert_eq!((none.width, none.height, none.stride), (0, 0, 0));
+    assert!(none.nv12.is_empty());
+    assert!(!none.end_of_stream);
+    // And the stream plays on.
+    let third = frame(next(guest.as_mut()));
+    assert_eq!((third.frame_index, third.nv12.clone()), (3, vec![30; 6]));
+    guest.close();
+    assert_eq!(host.join().unwrap(), VideoEnd::Closed);
+}
+
+#[test]
+fn fr26_only_a_picture_with_a_part_never_written_counts_as_unwritten() {
+    // 4x4 NV12, rows of 4 bytes: four luma rows, then two chroma rows of Cb, Cr pairs.
+    let flat = |luma: u8, chroma: u8| {
+        let mut nv12 = vec![luma; 16];
+        nv12.extend(vec![chroma; 8]);
+        nv12
+    };
+    // Every sample zero: what a surface holds before anything is decoded into it.
+    assert!(nv12_holds_no_picture(&flat(0, 0), 4, 4, 4));
+    // Black, in limited and in full range, and a dark green: real pictures.
+    assert!(!nv12_holds_no_picture(&flat(16, 128), 4, 4, 4));
+    assert!(!nv12_holds_no_picture(&flat(0, 128), 4, 4, 4));
+    assert!(!nv12_holds_no_picture(&flat(1, 0), 4, 4, 4));
+    // A green band: the bottom rows and their chroma never written.
+    let mut band = flat(81, 90);
+    band[12..16].fill(0);
+    band[20..24].fill(0);
+    assert!(nv12_holds_no_picture(&band, 4, 4, 4));
+    // A picture shorter than its size is left to the checks of its length.
+    assert!(!nv12_holds_no_picture(&flat(0, 0)[..20], 4, 4, 4));
+    // A 720x1280 Short whose every row is written.
+    let (width, height) = (720usize, 1280usize);
+    let mut short = vec![81u8; width * height];
+    short.extend(vec![90u8; width * height / 2]);
+    assert!(!nv12_holds_no_picture(&short, 720, 1280, 720));
+    // The same Short with its last eight rows (and their chroma) still zero.
+    short[width * (height - 8)..width * height].fill(0);
+    short[width * height + width * (height / 2 - 4)..].fill(0);
+    assert!(nv12_holds_no_picture(&short, 720, 1280, 720));
+}
+
+#[test]
+fn fr26_the_pictures_a_drain_brings_out_count_as_decoded() {
+    // A Short that loops ends its stream: the drain brings out the pictures the decoder held
+    // back. They were counted handed on but not decoded, so a window read "138 pictures
+    // decoded, 140 handed on".
+    let start = Instant::now();
+    let mut stats = StreamStats::default();
+    for i in 0..138u32 {
+        let at = start + Duration::from_millis(u64::from(i) * 33);
+        stats.decoded(at, Duration::from_millis(1), 1);
+        stats.handed_on(at, (720, 1280), Duration::ZERO);
+    }
+    stats.drained(start, 2);
+    stats.handed_on(start, (720, 1280), Duration::ZERO);
+    stats.handed_on(start, (720, 1280), Duration::ZERO);
+    stats.not_written(start);
+    let line = stats
+        .report(start + STATS_INTERVAL, Codec::Av1)
+        .expect("a line once the interval has passed");
+    assert!(line.contains("138 packets, 140 pictures decoded"), "{line}");
+    assert!(line.contains("140 handed on"), "{line}");
+    assert!(
+        line.contains(
+            "1 dropped (0 flushed, 0 malformed, 0 before a key frame, 1 not written by the \
+             decoder)"
+        ),
+        "{line}"
+    );
 }

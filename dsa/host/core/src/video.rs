@@ -48,6 +48,7 @@ use dsa_protocol::{decode, encode};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 use crate::video_keyframe::{Admit, KeyframeGate, MAX_SKIPPED};
+use crate::video_layout::nv12_holds_no_picture;
 use crate::video_slots::{PictureSlots, Slot, StreamSlots, SLOTS_PER_STREAM};
 
 /// The vsock port the guest's codec HAL connects to.
@@ -350,7 +351,9 @@ impl Pending {
 }
 
 /// Sends `pictures` to the guest, each with its packet's frame index and timestamp. A
-/// picture whose packet is unknown (it was flushed) is dropped.
+/// picture whose packet is unknown (it was flushed) is dropped. A picture the decoder never
+/// wrote ([`nv12_holds_no_picture`]) is dropped too, and its packet gets a frame with no
+/// picture, so its work in the guest ends at once.
 fn send_pictures(
     connection: &mut dyn Connection,
     outgoing: &mut Outgoing,
@@ -378,6 +381,27 @@ fn send_pictures(
         if expected.is_none() || expected != has {
             drop_slot(&picture);
             outgoing.stats().dropped(Instant::now(), false);
+            continue;
+        }
+        // A surface the decoder handed back without writing it (zeros: solid green) never
+        // reaches the guest. Its packet's work ends at once with no picture, so the app's
+        // surface keeps showing the last good one, rather than waiting for one that never
+        // comes.
+        let (width, height, stride) = (picture.width, picture.height, picture.stride);
+        let blank = |bytes: &[u8]| nv12_holds_no_picture(bytes, width, height, stride);
+        let unwritten = match (picture.slot, slots) {
+            (Some(slot), Some(slots)) => slots.read(&slot, blank).unwrap_or(false),
+            _ => blank(&picture.nv12),
+        };
+        if unwritten {
+            drop_slot(&picture);
+            outgoing.stats().not_written(Instant::now());
+            let none = VideoFrame {
+                frame_index,
+                timestamp_us,
+                ..VideoFrame::default()
+            };
+            outgoing.send_small(connection, Body::VideoFrame(none))?;
             continue;
         }
         // A picture the decoder left in memory goes into a slot here, when one is free.
@@ -439,6 +463,8 @@ pub struct StreamStats {
     sent: u32,
     flushed: u32,
     malformed: u32,
+    /// Pictures the decoder handed back without writing them ([`nv12_holds_no_picture`]).
+    not_written: u32,
     before_keyframe: u32,
     decode: Duration,
     readback: Duration,
@@ -480,6 +506,13 @@ impl StreamStats {
         self.packets += 1;
         self.decoded += pictures;
         self.decode += took;
+    }
+
+    /// A drain gave `pictures` pictures the decoder held back: decoded, though no packet of
+    /// their own came with them.
+    pub fn drained(&mut self, now: Instant, pictures: u32) {
+        self.begin(now);
+        self.decoded += pictures;
     }
 
     /// What the decoder said of its own stages.
@@ -542,6 +575,13 @@ impl StreamStats {
         }
     }
 
+    /// A picture was dropped because the decoder never wrote it: its surface holds zeros, which
+    /// show as solid green ([`nv12_holds_no_picture`]).
+    pub fn not_written(&mut self, now: Instant) {
+        self.begin(now);
+        self.not_written += 1;
+    }
+
     /// A packet was not decoded: it refers to pictures the decoder does not have, since it
     /// came after a flush, the stream's start or a failed packet and before a key frame (see
     /// [`crate::video_keyframe`]). Its picture would have been green.
@@ -602,17 +642,19 @@ impl StreamStats {
         let line = format!(
             "video: {}{size} over {seconds:.1} s: {} packets, {} pictures decoded ({:.1}/s), {} \
              handed on ({:.1}/s), {} dropped ({} flushed, {} malformed, {} before a key \
-             frame); average ms: decode {:.2} (copy out of the GPU {:.2}){copied}{shared}{surface}",
+             frame, {} not written by the decoder); average ms: decode {:.2} (copy out of the \
+             GPU {:.2}){copied}{shared}{surface}",
             codec.name(),
             self.packets,
             self.decoded,
             f64::from(self.decoded) / seconds,
             self.handed_on + self.in_slots,
             f64::from(self.handed_on + self.in_slots) / seconds,
-            self.flushed + self.malformed + self.before_keyframe,
+            self.flushed + self.malformed + self.before_keyframe + self.not_written,
             self.flushed,
             self.malformed,
             self.before_keyframe,
+            self.not_written,
             average(self.decode, self.packets),
             average(self.readback, self.readbacks),
         );
@@ -1093,6 +1135,9 @@ fn run_stream(
                     gate.rearm();
                     result = match decoder.drain() {
                         Ok(pictures) => {
+                            outgoing
+                                .stats()
+                                .drained(Instant::now(), pictures.len() as u32);
                             send_pictures(connection, outgoing, &mut pending, slots, pictures)
                         }
                         Err(why) => outgoing

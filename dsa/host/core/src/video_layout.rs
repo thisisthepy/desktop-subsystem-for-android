@@ -260,6 +260,35 @@ pub fn picture_stride(width: u32) -> u32 {
     width + (width & 1)
 }
 
+/// The luma rows [`nv12_holds_no_picture`] looks at: every eighth, and the last.
+pub const BLANK_ROW_STEP: u32 = 8;
+
+/// Whether the `width` by `height` NV12 picture in `nv12` (rows `stride` bytes long, the
+/// interleaved chroma after `stride * height` bytes) has a part the decoder never wrote: a
+/// luma row of zeros over a chroma row of zeros, among every [`BLANK_ROW_STEP`]th row and the
+/// last. No encoder makes such a row (luma 0 with Cb and Cr 0 lies outside every colour range;
+/// black is chroma 128), but it is what a surface holds before a picture is decoded into it,
+/// and it shows as solid green. A picture too short for its size says nothing here: the
+/// checks of its length decide what becomes of it.
+pub fn nv12_holds_no_picture(nv12: &[u8], width: u32, height: u32, stride: u32) -> bool {
+    let (w, h, stride) = (width as usize, height as usize, stride as usize);
+    let chroma_width = w.div_ceil(2) * 2;
+    if w == 0 || h == 0 || stride < chroma_width {
+        return false;
+    }
+    let Some(len) = stride.checked_mul(h + h.div_ceil(2)) else {
+        return false;
+    };
+    if nv12.len() < len {
+        return false;
+    }
+    let zero = |start: usize, bytes: usize| nv12[start..start + bytes].iter().all(|&b| b == 0);
+    let step = BLANK_ROW_STEP as usize;
+    (0..h)
+        .filter(|row| row % step == 0 || row + 1 == h)
+        .any(|row| zero(row * stride, w) && zero((h + row / 2) * stride, chroma_width))
+}
+
 /// As [`picture_from_surface_area`], into `out`, which is exactly the picture's NV12 length
 /// for a stride of [`picture_stride`] (a slot of the shared picture region, say). False, with
 /// `out` left as it may be, when the geometry does not fit.
