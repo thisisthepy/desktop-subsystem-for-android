@@ -49,7 +49,10 @@ image.json describes them under "framework". When the framework build has DSA's 
 in place of the KeyMint APEX, which the image then does not select. When it has services.jar
 (FRAMEWORK_JAVA_FILES), built from source with the window manager that gives a dialog no caption
 bar inset, the system partition carries that jar in place of the build's own, which is then not
-dex edited: the patches it is built with make the same changes.
+dex edited: the patches it is built with make the same changes. framework.jar comes with it,
+built with the change that rebuilds the views of a task set to forced system scaling at its new
+density; it is on the boot class path, so the image compiles the boot images again for it, and
+every odex compiled against them (rebuild_boot_images).
 """
 
 import argparse
@@ -3310,10 +3313,11 @@ def edit_services_jar(data, name):
 
 
 def image_services_jar(data):
-    """The framework build's services.jar as the image carries it: its dex files stored and
-    aligned, as the published build stores them, so system_server maps them from the file. The
-    services build makes no odex, and a build without dexpreopt compresses a jar's dex files;
-    make-image.py compiles the jar itself (EDITED_JARS). The jar needs no dex edit: the patches it
+    """A jar of the framework build (services.jar, framework.jar) as the image carries it: its
+    dex files stored and aligned, as the published build stores them, so a process maps them
+    from the file. The services build makes no odex, and a build without dexpreopt compresses a
+    jar's dex files; make-image.py compiles services.jar itself (EDITED_JARS), and the boot images
+    again for framework.jar (rebuild_boot_images). services.jar needs no dex edit: the patches it
     is built with make the changes SERVICES_CODE makes to the published build's."""
     return aligned_zip(data, store_dex=True)
 
@@ -4325,6 +4329,13 @@ FRAMEWORK_FILES = list(framework_lock.OUTPUTS)
 # not edit, and compiles it as it compiles an edited jar. A framework build whose services build
 # failed, or from before it, has no services.jar, and the image edits the published build's.
 FRAMEWORK_JAVA_FILES = list(framework_lock.JAVA_OUTPUTS)
+# framework.jar from the same build, with the change that rebuilds the views of a task set to
+# forced system scaling at its new density: it comes with services.jar, whose window manager calls
+# it, or not at all. It is on the boot class path, so the image compiles the boot images and
+# everything compiled against them again for it (rebuild_boot_images), and it must carry the
+# hidden API flags the build encodes into a boot jar's dex.
+FRAMEWORK_JAR = framework_lock.FRAMEWORK_JAR
+BOOT_CLASS_PATH_JAVA_FILES = [FRAMEWORK_JAR]
 GPU_RESET_PROPERTY = "debug.dsa.gpu.resets"
 GPU_RESET_RULE = "(allow surfaceflinger debug_prop (property_service (set)))"
 
@@ -4647,6 +4658,9 @@ def framework_problems(description, build_id, android_major, arch, read):
                             f"not {arch} ({machine})")
         if name in FRAMEWORK_JAVA_FILES and not dex_jar(data):
             problems.append(f"the framework's {name} is not a jar with dex code")
+        elif name in BOOT_CLASS_PATH_JAVA_FILES and not jar_has_hidden_api_flags(data):
+            problems.append(f"the framework's {name} carries no hidden API flags in its dex, so apps could "
+                            "reach every hidden API of the framework")
     return problems
 
 
@@ -4655,6 +4669,40 @@ def dex_jar(data):
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             return "classes.dex" in z.namelist() and z.read("classes.dex")[:4] == b"dex\n"
+    except zipfile.BadZipFile:
+        return False
+
+
+# The map item a dex file of the boot class path carries its hidden API flags in
+# (TYPE_HIDDENAPI_CLASS_DATA_ITEM): the build encodes them into every dex of a boot jar, and ART
+# reads them to keep apps away from the framework's hidden API.
+DEX_HIDDEN_API_CLASS_DATA = 0xF000
+
+
+def dex_has_hidden_api_flags(dex):
+    """Whether the dex file `dex` has a hidden API class data section in its map list."""
+    if len(dex) < 0x38 or dex[:4] != b"dex\n":
+        return False
+    (map_off,) = struct.unpack_from("<I", dex, 0x34)
+    if map_off + 4 > len(dex):
+        return False
+    (count,) = struct.unpack_from("<I", dex, map_off)
+    for i in range(count):
+        at = map_off + 4 + 12 * i
+        if at + 12 > len(dex):
+            return False
+        (kind,) = struct.unpack_from("<H", dex, at)
+        if kind == DEX_HIDDEN_API_CLASS_DATA:
+            return True
+    return False
+
+
+def jar_has_hidden_api_flags(data):
+    """Whether every dex file of the jar `data` carries hidden API flags."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            dexes = [n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)]
+            return bool(dexes) and all(dex_has_hidden_api_flags(z.read(n)) for n in dexes)
     except zipfile.BadZipFile:
         return False
 
@@ -4748,8 +4796,10 @@ def check_framework(manifest, names, read):
         if name not in names:
             problems.append(f"{name} is missing from the image")
         elif hashlib.sha256(read(name)).hexdigest() != files[name]:
-            problems.append(f"{name} is not the framework build's file that image.json names, so a "
-                            "dialog in a window is drawn below the place that takes its taps")
+            effect = ("an app set to forced system scaling keeps the sizes its views took at the old "
+                      "density" if name == FRAMEWORK_JAR else
+                      "a dialog in a window is drawn below the place that takes its taps")
+            problems.append(f"{name} is not the framework build's file that image.json names, so {effect}")
     policy = "SYSTEM/etc/selinux/plat_sepolicy.cil"
     if policy in names and GPU_RESET_RULE not in read(policy).decode(errors="replace"):
         problems.append(f"SurfaceFlinger may not set {GPU_RESET_PROPERTY}, so the apps never hear of a "
@@ -8124,11 +8174,15 @@ def apex_jar_sources(bootclasspath, names):
 
 
 def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_images, contexts,
-                    filter, profile=None, extra=(), app_image=None):
+                    filter, profile=None, extra=(), app_image=None, oat_location=None):
     """The dex2oat command line the build itself uses to compile a system app, aimed at the
-    guest's boot image (COMPILED_ISA), with an app image (.art) at `app_image` when given."""
+    guest's boot image (COMPILED_ISA), with an app image (.art) at `app_image` when given. The
+    odex is named as beside the APK or jar unless `oat_location` says where the device has it
+    (a system server jar of an APEX has its odex in /system/framework/oat)."""
     host_context, stored_context = contexts
     jars = bootclasspath.split(":")
+    if oat_location is None:
+        oat_location = f"{dex_location.rsplit('/', 1)[0]}/oat/{COMPILED_ISA}/{Path(odex).name}"
     cmd = [
         dex2oat, "--avoid-storing-invocation",
         # The build's own heap size: the heap must fit in the low 4 GiB, and 2 GiB did not.
@@ -8139,7 +8193,7 @@ def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_
         f"--stored-class-loader-context={stored_context}",
         "--boot-image=" + ":".join(f"{root}{i}" for i in boot_images),
         f"--dex-file={apk}", f"--dex-location={dex_location}",
-        f"--oat-file={odex}", f"--oat-location={dex_location.rsplit('/', 1)[0]}/oat/{COMPILED_ISA}/{Path(odex).name}",
+        f"--oat-file={odex}", f"--oat-location={oat_location}",
         f"--android-root={root}/empty",
         f"--instruction-set={COMPILED_ISA}", f"--instruction-set-variant={COMPILED_ISA_VARIANT}",
         "--instruction-set-features=default",
@@ -8153,6 +8207,332 @@ def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_
     if app_image is not None:
         cmd += [f"--app-image-file={app_image}", "--image-format=lz4"]
     return cmd
+
+
+# framework.jar from the Framework build (framework_lock.FRAMEWORK_JAR), built from the published
+# build's source with DSA's change that rebuilds the views of a task set to forced system scaling
+# at its new density. It is on the boot class path, and its code is in the primary boot image
+# (boot.art, .oat and .vdex and one more of each per jar: the ART module's jars, framework.jar and
+# the other framework jars, compiled together). ART throws a boot image away whole when one of its
+# jars is not the dex it was compiled from, and every process then runs the framework from its
+# dex, interpreted, with the framework's classes in its own memory. So when a jar of the system
+# partition on the boot class path differs from the one the published boot image was compiled from
+# (stale_boot_jars), the image compiles the boot images again (rebuild_boot_images) as the build
+# compiles them (build/soong's java/dexpreopt_bootjars.go): the primary image, then each extension
+# (the mainline one, boot-framework-adservices.art) against it, with the published build's
+# profiles, dirty image objects, preloaded classes, filters and base address. Every odex names the
+# checksums of the boot images it was compiled against, so every odex the image ships is then
+# compiled again too: the system server's and the other framework jars' (boot_image_jar_jobs) and
+# every app the published build compiled (compile_jobs). boot_image_problems checks the result.
+BOOT_IMAGE_PROFILE = "SYSTEM/etc/boot-image.prof"
+BOOT_IMAGE_DIRTY_OBJECTS = "SYSTEM/etc/dirty-image-objects"
+BOOT_IMAGE_PRELOADED_CLASSES = "SYSTEM/etc/preloaded-classes"
+# The boot image profile an APEX of the boot class path carries for its own jars (the ART module's).
+APEX_BOOT_IMAGE_PROFILE = "etc/boot-image.prof"
+# The partitions whose framework jars have their odex in framework/oat/<isa>/.
+FRAMEWORK_OAT_PARTITIONS = ("SYSTEM", "SYSTEM_EXT", "PRODUCT", "VENDOR", "ODM")
+
+
+def art_header(data):
+    """The fields of a boot image (.art) header that say which image it is: its component count
+    (0 for a later component of a multi-image), the address it is mapped at, its checksum, and
+    the same three of the image it extends (0 for a primary image)."""
+    if data[:4] != b"art\n":
+        raise ValueError("not an ART image")
+    fields = struct.unpack_from("<14I", data, 8)
+    return {"components": fields[1], "begin": fields[2], "checksum": fields[4],
+            "boot_begin": fields[10], "boot_components": fields[12], "boot_checksum": fields[13]}
+
+
+def boot_image_chunks(names, read):
+    """The guest's boot images, as ART loads them: [(art member, header)], the primary image
+    (boot.art) first, then each extension by the address it is mapped at. A multi-image's later
+    components (boot-framework.art) are part of the image before them, not images of their own."""
+    folder = f"SYSTEM/framework/{COMPILED_ISA}/"
+    primary = folder + "boot.art"
+    if primary not in names:
+        return []
+    extensions = []
+    for name in sorted(names):
+        rest = name[len(folder):]
+        if not name.startswith(folder) or "/" in rest or not rest.endswith(".art") or name == primary:
+            continue
+        header = art_header(read(name))
+        if header["components"] and header["boot_components"]:
+            extensions.append((name, header))
+    return [(primary, art_header(read(primary)))] + sorted(extensions, key=lambda chunk: chunk[1]["begin"])
+
+
+def boot_image_checksums(names, read):
+    """What an odex compiled against the guest's boot images records of them at the start of its
+    bootclasspath-checksums: i;<component count>/<checksum> for each image, as dex2oat writes it."""
+    return ":".join(f"i;{header['components']}/{header['checksum']:08x}"
+                    for _, header in boot_image_chunks(names, read))
+
+
+def boot_image_vdex(index, jar):
+    """The vdex of the primary boot image's `index`th jar (boot.vdex for the first, then one
+    named after each jar), where the system partition keeps it: beside the images' folder, which
+    links to it."""
+    stem = "boot" if index == 0 else f"boot-{Path(jar).stem}"
+    return f"SYSTEM/framework/{stem}.vdex"
+
+
+def system_jar_member(jar):
+    """The target_files member of a boot class path jar of the system partition, or None for a
+    jar of an APEX."""
+    return "SYSTEM" + jar[len("/system"):] if jar.startswith("/system/") else None
+
+
+def stale_boot_jars(names, read, bootclasspath):
+    """The boot class path jars of the system partition, in the primary boot image, whose dex is
+    not the dex the image was compiled from (the checksums its vdex was made for)."""
+    chunks = boot_image_chunks(names, read)
+    if not chunks:
+        return []
+    stale = []
+    for index, jar in enumerate(bootclasspath.split(":")[:chunks[0][1]["components"]]):
+        member = system_jar_member(jar)
+        if member is None:
+            continue
+        vdex = boot_image_vdex(index, jar)
+        if member not in names or vdex not in names or vdex_checksums(read(vdex)) != apk_dex_checksums(read(member)):
+            stale.append(jar)
+    return stale
+
+
+def boot_image_command(dex2oat, root, out, name, jars, base, filter, profiles=(), dirty=None,
+                       preloaded=None, extra=(), base_images=(), deps=(), single_image=False):
+    """The dex2oat command line the build compiles a boot image with (build/soong's
+    buildBootImageVariant), aimed at the guest (COMPILED_ISA): `jars` (device paths, their copies
+    under `root`) into out/<name>.art, .oat and .vdex. A primary image is mapped at `base`; an
+    extension is compiled against `base_images` (device paths of the images before it) with the
+    boot class path `deps`, every jar up to its own."""
+    cmd = [dex2oat, "--avoid-storing-invocation",
+           "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx1024m"]
+    cmd += [f"--profile-file={profile}" for profile in profiles]
+    if dirty is not None:
+        cmd.append(f"--dirty-image-objects={dirty}")
+    if base_images:
+        cmd += ["--runtime-arg", "-Xbootclasspath:" + ":".join(f"{root}{jar}" for jar in deps),
+                "--runtime-arg", "-Xbootclasspath-locations:" + ":".join(deps),
+                "--boot-image=" + ":".join(f"{root}{image}" for image in base_images)]
+    else:
+        cmd.append(f"--base={base:#x}")
+    if preloaded is not None:
+        cmd.append(f"--preloaded-classes={preloaded}")
+    cmd += [f"--dex-file={root}{jar}" for jar in jars]
+    cmd += [f"--dex-location={jar}" for jar in jars]
+    cmd += [
+        "--generate-debug-info", "--generate-build-id", "--image-format=lz4hc",
+        f"--oat-symbols={Path(out) / 'symbols' / (name + '.oat')}",
+        f"--oat-file={Path(out) / (name + '.oat')}",
+        f"--oat-location=/system/framework/{COMPILED_ISA}/{name}.oat",
+        f"--image={Path(out) / (name + '.art')}",
+        f"--instruction-set={COMPILED_ISA}", f"--android-root={root}/empty",
+        "--no-inline-from=core-oj.jar", "--force-determinism", "--abort-on-hard-verifier-error",
+        "--strip", f"--compiler-filter={filter}",
+    ]
+    if single_image:
+        cmd.append("--single-image")
+    cmd += [f"--instruction-set-variant={COMPILED_ISA_VARIANT}", "--instruction-set-features=default", *extra]
+    return cmd
+
+
+def boot_image_member(path):
+    """Where the system partition keeps a boot image file dex2oat made: the .art and .oat files
+    in framework/<isa>/, the .vdex files in framework/, which the images' folder links to."""
+    if path.suffix == ".vdex":
+        return f"SYSTEM/framework/{path.name}"
+    return f"SYSTEM/framework/{COMPILED_ISA}/{path.name}"
+
+
+def rebuild_boot_images(z, names, root, work, dex2oat, extra, env, bootclasspath):
+    """Compiles the guest's boot images again from the jars in the signed target_files `z`
+    (rebuild_boot_images' notes above), in place of the published ones under `root`, where the
+    apps are compiled against them next. Returns the members it made, by name."""
+    jars = bootclasspath.split(":")
+    out = Path(work) / "boot-image"
+    shutil.rmtree(out, ignore_errors=True)
+    inputs = out / "inputs"
+    inputs.mkdir(parents=True)
+
+    def written(member):
+        if member not in names:
+            return None
+        path = inputs / Path(member).name
+        path.write_bytes(z.read(member))
+        return path
+
+    framework_profile = written(BOOT_IMAGE_PROFILE)
+    dirty = written(BOOT_IMAGE_DIRTY_OBJECTS)
+    preloaded = written(BOOT_IMAGE_PRELOADED_CLASSES)
+    compiled, images, first = {}, [], 0
+    for index, (member, header) in enumerate(boot_image_chunks(names, z.read)):
+        count = header["components"]
+        image_jars = jars[first:first + count]
+        if len(image_jars) != count:
+            raise ValueError(f"{member} has {count} jars, but the boot class path has {len(jars) - first} left")
+        name = Path(member).stem
+        keys = oat_key_values(z.read(member[:-len(".art")] + ".oat"))
+        filter = keys.get("compiler-filter", "speed-profile")
+        profiles = []
+        if filter == "speed-profile":
+            profiles = [framework_profile] if framework_profile is not None else []
+            for apex in sorted({jar.split("/")[2] for jar in image_jars if jar.startswith("/apex/")}):
+                profile = root / "apex" / apex / APEX_BOOT_IMAGE_PROFILE
+                if profile.is_file():
+                    profiles.append(profile)
+        # A multi-image has an image file per jar; an image of several jars in one file was
+        # compiled as a single image.
+        single = count > 1 and not any(
+            f"SYSTEM/framework/{COMPILED_ISA}/boot-{Path(jar).stem}.art" in names for jar in image_jars[1:])
+        chunk = out / name
+        (chunk / "symbols").mkdir(parents=True)
+        run(*boot_image_command(dex2oat, root, chunk, name, image_jars, header["begin"], filter, profiles,
+                                dirty, preloaded, extra, base_images=images, deps=jars[:first + count],
+                                single_image=single),
+            env=dict(env, ANDROID_LOG_TAGS="*:e"))
+        made = sorted(path for path in chunk.iterdir() if path.is_file() and path.suffix in (".art", ".oat", ".vdex"))
+        if not any(path.suffix == ".art" for path in made):
+            raise ValueError(f"dex2oat made no {name}.art")
+        for path in made:
+            data = path.read_bytes()
+            target = boot_image_member(path)
+            compiled[target] = data
+            host = root / "system" / target[len("SYSTEM/"):]
+            host.parent.mkdir(parents=True, exist_ok=True)
+            if host.is_symlink():
+                host.unlink()
+            host.write_bytes(data)
+        print(f"compiled the boot image {name} ({count} jars, {filter}): "
+              f"{sum(len(path.read_bytes()) for path in made) >> 10} KiB", flush=True)
+        images.append(f"/system/framework/{name}.art")
+        first += count
+    shutil.rmtree(out, ignore_errors=True)
+    return compiled
+
+
+def boot_image_jar_jobs(names, read):
+    """The framework jars whose odex the image ships and that compile_jobs does not compile: the
+    system server's (those of APEXes too, whose odex is in /system/framework/oat) and the other
+    jars of the framework folders, [{"jar": member or None, "location": device path, "odex":
+    member, "filter": f, "classpath": c, "app_image": bool}], each with the filter and the shared
+    libraries the published build compiled it with. A jar of an APEX has no member of its own."""
+    names = set(names)
+    record = json.loads(read(PREBUILT_OAT_RECORD)) if PREBUILT_OAT_RECORD in names else {}
+    pattern = re.compile(rf"((?:{'|'.join(FRAMEWORK_OAT_PARTITIONS)})/framework)/oat/{COMPILED_ISA}/([^/]+)\.odex")
+    jobs = []
+    for odex in sorted(names):
+        match = pattern.fullmatch(odex)
+        if not match:
+            continue
+        stem = match.group(2)
+        if stem.startswith("apex@"):
+            # apex@com.android.wifi@javalib@service-wifi.jar@classes
+            parts = stem.split("@")
+            jar, location = None, "/" + "/".join(parts[:-1])
+        else:
+            jar = f"{match.group(1)}/{stem}.jar"
+            if jar not in names or jar in record:
+                continue
+            location = device_path(jar)
+        keys = oat_key_values(read(odex))
+        jobs.append({"jar": jar, "location": location, "odex": odex,
+                     "filter": keys.get("compiler-filter", "speed"),
+                     "classpath": keys.get("classpath", DEFAULT_CLASS_LOADER_CONTEXT),
+                     "app_image": odex[:-len(".odex")] + ".art" in names})
+    return jobs
+
+
+def compile_boot_image_jars(z, names, root, out, dex2oat, extra, env, bootclasspath, boot_images,
+                            compiled, sizes):
+    """Compiles each framework jar boot_image_jar_jobs lists again, against the boot images
+    rebuild_boot_images made under `root`, with the filter, shared libraries and app image the
+    published build compiled it with, and its profile (the binary one the build installs beside
+    the jar, <jar>.prof); adds the files to `compiled` and their size to `sizes`. A jar compiled
+    with speed-profile that has no profile beside it is compiled with speed, which compiles all
+    of what speed-profile compiles."""
+    for job in boot_image_jar_jobs(names, z.read):
+        location = job["location"]
+        host_jar = root / location.lstrip("/")
+        if not host_jar.is_file():
+            raise ValueError(f"{job['odex']} is compiled from {location}, which the image does not have")
+        profile = None
+        if job["jar"] is not None and job["jar"] + ".prof" in names:
+            profile = out / "profiles" / (job["jar"] + ".prof")
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_bytes(z.read(job["jar"] + ".prof"))
+        elif job["jar"] is None and Path(f"{host_jar}.prof").is_file():
+            profile = Path(f"{host_jar}.prof")
+        filter = job["filter"]
+        if filter == "speed-profile" and profile is None:
+            print(f"{location}: the published build compiled it with speed-profile and no profile is "
+                  "beside it, so it is compiled with speed", flush=True)
+            filter = "speed"
+        odex = out / job["odex"]
+        odex.parent.mkdir(parents=True, exist_ok=True)
+        run(*dex2oat_command(dex2oat, host_jar, location, odex, root, bootclasspath, boot_images,
+                             class_loader_contexts(job["classpath"], root), filter,
+                             profile=profile if filter == "speed-profile" else None, extra=extra,
+                             app_image=odex.with_suffix(".art") if job["app_image"] else None,
+                             oat_location=device_path(job["odex"])),
+            env=dict(env, ANDROID_LOG_TAGS="*:e"))
+        stem = job["odex"][:-len(".odex")]
+        members = [job["odex"], stem + ".vdex"] + ([stem + ".art"] if job["app_image"] else [])
+        for member in members:
+            compiled[member] = (out / member).read_bytes()
+        sizes[location] = sum(len(compiled[member]) for member in members)
+        print(f"compiled {location} with {filter} against the new boot images: {sizes[location] >> 10} KiB",
+              flush=True)
+
+
+def system_server_apexes(names):
+    """The APEXes whose jars have their odex in a framework/oat folder, by name, each with the
+    member that holds it."""
+    found = {}
+    for name in names:
+        match = re.search(rf"/framework/oat/{COMPILED_ISA}/apex@([^@/]+)@", name)
+        if not match or match.group(1) in found:
+            continue
+        apex = match.group(1)
+        members = [f"{p}/apex/{apex}{ext}" for p in PARTITION_DIRS for ext in (".apex", ".capex")
+                   if f"{p}/apex/{apex}{ext}" in names]
+        if not members:
+            raise ValueError(f"{name} is compiled from the {apex} APEX, which no partition has")
+        found[apex] = members[0]
+    return found
+
+
+def boot_image_problems(z):
+    """What is wrong with the boot images in a target_files: a jar of the system partition on the
+    boot class path that is not the dex the primary image was compiled from, an extension
+    compiled against another primary image, or a framework jar's or an app's odex compiled
+    against other boot images than the guest's."""
+    names = set(z.namelist())
+    chunks = boot_image_chunks(names, z.read)
+    if not chunks or FRAMEWORK_ODEX not in names:
+        return []
+    problems = []
+    bootclasspath = oat_key_values(z.read(FRAMEWORK_ODEX)).get("bootclasspath", "")
+    for jar in stale_boot_jars(names, z.read, bootclasspath):
+        problems.append(f"{jar} is not the dex the boot image was compiled from, so ART throws the boot "
+                        "image away and every process runs the framework interpreted")
+    primary = chunks[0][1]
+    for member, header in chunks[1:]:
+        if header["boot_checksum"] != primary["checksum"]:
+            problems.append(f"{member} extends another boot image than the guest's boot.art, so ART "
+                            "does not load it")
+    expected = boot_image_checksums(names, z.read)
+    pattern = re.compile(rf"(?:{'|'.join(PARTITION_DIRS)})/.+/oat/{COMPILED_ISA}/[^/]+\.odex")
+    for odex in sorted(names):
+        if not pattern.fullmatch(odex):
+            continue
+        found = oat_key_values(z.read(odex)).get("bootclasspath-checksums", "")
+        if found != expected and not found.startswith(expected + ":"):
+            problems.append(f"{odex} was compiled against boot images {found.split(':d/')[0]}, but the "
+                            f"guest's are {expected}, so ART throws it away")
+    return problems
 
 
 def compiled_app_problems(z):
@@ -8270,12 +8650,14 @@ def prebuilt_oat_problems(z):
     return problems
 
 
-def compile_jobs(names, read):
+def compile_jobs(names, read, boot_image_rebuilt=False):
     """What compile_apps compiles in a signed target_files: [(apk, filter, class loader
     context, whether it has an app image)]. COMPILED_APPS come first, their filter None (speed,
     or speed-profile when the APK carries a profile, see compiler_filter). Then each app the
     published build compiled (PREBUILT_OAT_RECORD) whose odex no longer matches its APK's dex,
-    with the filter, the shared libraries and the app image it was compiled with."""
+    with the filter, the shared libraries and the app image it was compiled with; with
+    `boot_image_rebuilt`, every one of them, as each odex names the boot image it was compiled
+    against (rebuild_boot_images)."""
     names = set(names)
     jobs = []
     for apk in COMPILED_APPS:
@@ -8290,7 +8672,8 @@ def compile_jobs(names, read):
         if apk in COMPILED_APPS or apk not in names:
             continue
         vdex = entry["files"][0][:-len(".odex")] + ".vdex"
-        if vdex in names and vdex_checksums(read(vdex)) == apk_dex_checksums(read(apk)):
+        if (not boot_image_rebuilt and vdex in names
+                and vdex_checksums(read(vdex)) == apk_dex_checksums(read(apk))):
             continue
         app_image = any(member.endswith(".art") for member in entry["files"])
         jobs.append((apk, entry["filter"], entry["classpath"], app_image))
@@ -8522,7 +8905,15 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
         boot_images = boot_image_locations(bootclasspath, framework["bootclasspath-checksums"])
         for partition, folder in PARTITION_DIRS.items():
             extract_tree(z, f"{partition}/framework/", root / folder / "framework")
-        for apex, member in apex_jar_sources(bootclasspath, names).items():
+        # framework.jar from the Framework build is not the dex the published boot image was
+        # compiled from: the boot images, and everything compiled against them, are compiled
+        # again (rebuild_boot_images), the system server's jars of the APEXes among them.
+        stale = stale_boot_jars(names, z.read, bootclasspath)
+        apexes = apex_jar_sources(bootclasspath, names)
+        if stale:
+            print(f"{', '.join(stale)} changed, so the boot images are compiled again", flush=True)
+            apexes = {**system_server_apexes(names), **apexes}
+        for apex, member in apexes.items():
             packed = work / "apex" / Path(member).name
             packed.parent.mkdir(parents=True, exist_ok=True)
             packed.write_bytes(z.read(member))
@@ -8540,10 +8931,15 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
                 raise ValueError(f"the image has no {COMPILED_ISA} boot image at {image}")
 
         compiled, sizes, rules = {}, {}, {}
+        if stale:
+            compiled.update(rebuild_boot_images(z, names, root, work, dex2oat, extra, env, bootclasspath))
+            sizes["boot images"] = sum(len(data) for data in compiled.values())
+            compile_boot_image_jars(z, names, root, out, dex2oat, extra, env, bootclasspath,
+                                    boot_images, compiled, sizes)
         for apk in COMPILED_APPS:
             if apk not in names:
                 print(f"not compiling {apk}: the image does not have it", flush=True)
-        for apk, filter, context, app_image in compile_jobs(names, z.read):
+        for apk, filter, context, app_image in compile_jobs(names, z.read, boot_image_rebuilt=bool(stale)):
             data = z.read(apk)
             host_apk = out / apk
             host_apk.parent.mkdir(parents=True, exist_ok=True)
@@ -8617,7 +9013,7 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
                 zout.writestr(info, data)
     updated.replace(signed)
     with zipfile.ZipFile(signed) as z:
-        problems = compiled_app_problems(z) + prebuilt_oat_problems(z)
+        problems = compiled_app_problems(z) + prebuilt_oat_problems(z) + boot_image_problems(z)
     if problems:
         raise ValueError("; ".join(problems))
     print(f"compiled system apps: {sum(sizes.values()) >> 20} MiB in all", flush=True)

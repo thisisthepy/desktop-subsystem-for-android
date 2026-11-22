@@ -287,6 +287,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     # The apps the published build shipped compiled keep their odex, vdex and app image,
     # valid for their dex and the guest's boot image, with the filter they were compiled with.
     problems += make_image.prebuilt_oat_problems(z)
+    # The boot images are compiled from the boot class path jars the image ships (framework.jar
+    # from the Framework build among them), and every odex against those boot images, or ART
+    # throws them away and the framework and the apps run interpreted.
+    problems += make_image.boot_image_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     elif b"zram_backingdev_size=" not in z.read("VENDOR/etc/fstab.dsa"):
