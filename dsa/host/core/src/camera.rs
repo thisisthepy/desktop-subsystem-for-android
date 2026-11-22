@@ -300,8 +300,45 @@ pub fn choose_mode(modes: &[Mode], width: u32, height: u32, fps: u32) -> Option<
     Some((mode, rate))
 }
 
+/// A region of a camera's picture: its left and top edges, width and height.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Crop {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The region of a `picture_width` by `picture_height` picture that a `width` by `height`
+/// picture is made from: the largest one of that shape, at the centre, at even offsets so it
+/// starts on a chroma sample. A picture of another shape is cropped, never stretched, so a
+/// 4:3 photo of a 16:9 camera is not distorted. The guest's camera HAL crops its streams by
+/// the same rule.
+pub fn center_crop(picture_width: u32, picture_height: u32, width: u32, height: u32) -> Crop {
+    let mut crop = Crop {
+        x: 0,
+        y: 0,
+        width: picture_width,
+        height: picture_height,
+    };
+    if picture_width == 0 || picture_height == 0 || width == 0 || height == 0 {
+        return crop;
+    }
+    let wide = u64::from(picture_width) * u64::from(height);
+    let tall = u64::from(picture_height) * u64::from(width);
+    if wide > tall {
+        crop.width = ((tall / u64::from(height)) as u32).max(1);
+    } else if tall > wide {
+        crop.height = ((wide / u64::from(width)) as u32).max(1);
+    }
+    crop.x = ((picture_width - crop.width) / 2) & !1;
+    crop.y = ((picture_height - crop.height) / 2) & !1;
+    crop
+}
+
 /// `frame` scaled to `width` by `height` (each even and at least 2) by taking the nearest
-/// pixel, which is what a still or a smaller stream needs from a camera's picture.
+/// pixel, which is what a still or a smaller stream needs from a camera's picture. A size of
+/// another shape is cut from the centre first ([`center_crop`]).
 pub fn scale_nv12(frame: &Frame, width: u32, height: u32) -> Option<Frame> {
     if !frame.is_whole() || width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
         return None;
@@ -309,29 +346,37 @@ pub fn scale_nv12(frame: &Frame, width: u32, height: u32) -> Option<Frame> {
     if width == frame.width && height == frame.height {
         return Some(frame.clone());
     }
+    let crop = center_crop(frame.width, frame.height, width, height);
     let (sw, sh, ss) = (
         frame.width as usize,
         frame.height as usize,
         frame.stride as usize,
     );
+    let (cx, cy, cw, ch) = (
+        crop.x as usize,
+        crop.y as usize,
+        crop.width as usize,
+        crop.height as usize,
+    );
     let (dw, dh) = (width as usize, height as usize);
     let mut nv12 = vec![0u8; dw * (dh + dh / 2)];
     for y in 0..dh {
-        let sy = y * sh / dh;
+        let sy = cy + y * ch / dh;
         let src = &frame.nv12[sy * ss..sy * ss + sw];
         let dst = &mut nv12[y * dw..(y + 1) * dw];
         for (x, out) in dst.iter_mut().enumerate() {
-            *out = src[x * sw / dw];
+            *out = src[cx + x * cw / dw];
         }
     }
     let chroma = ss * sh;
     let (scw, sch) = (sw.div_ceil(2), sh.div_ceil(2));
+    let (ccx, ccy, ccw, cch) = (cx / 2, cy / 2, cw.div_ceil(2), ch.div_ceil(2));
     for y in 0..dh / 2 {
-        let sy = (y * sch / (dh / 2)).min(sch - 1);
+        let sy = (ccy + y * cch / (dh / 2)).min(sch - 1);
         let row = chroma + sy * ss;
         let out = dw * dh + y * dw;
         for x in 0..dw / 2 {
-            let sx = (x * scw / (dw / 2)).min(scw - 1);
+            let sx = (ccx + x * ccw / (dw / 2)).min(scw - 1);
             nv12[out + 2 * x] = frame.nv12[row + 2 * sx];
             nv12[out + 2 * x + 1] = frame.nv12[row + 2 * sx + 1];
         }

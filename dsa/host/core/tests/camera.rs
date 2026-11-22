@@ -7,9 +7,9 @@ use std::thread;
 use std::time::Duration;
 
 use dsa_host_core::camera::{
-    choose_mode, facing_of, list_text, nv12_to_bgr, offered_modes, parse_list_text, scale_nv12,
-    sensor_orientation, serve_connection, Camera, CameraEnd, CameraStream, Cameras, Facing, Frame,
-    Mode, Panel,
+    center_crop, choose_mode, facing_of, list_text, nv12_to_bgr, offered_modes, parse_list_text,
+    scale_nv12, sensor_orientation, serve_connection, Camera, CameraEnd, CameraStream, Cameras,
+    Facing, Frame, Mode, Panel,
 };
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
@@ -456,8 +456,9 @@ fn fr26_a_picture_scales_and_converts_for_a_still() {
         nv12: vec![10, 20, 30, 40, 10, 20, 30, 40, 100, 200, 110, 210],
         timestamp_ns: 5,
     };
+    // 2x2 is another shape: the square at the left, from an even offset, not a squeeze.
     let half = scale_nv12(&frame, 2, 2).expect("scales");
-    assert_eq!(half.nv12, vec![10, 30, 10, 30, 100, 200]);
+    assert_eq!(half.nv12, vec![10, 20, 10, 20, 100, 200]);
     assert_eq!(half.timestamp_ns, 5);
     assert_eq!(scale_nv12(&frame, 3, 2), None);
 
@@ -491,4 +492,46 @@ fn nfr1_a_camera_line_that_does_not_read_is_left_out() {
     let parsed = parse_list_text("id\tname\tback\t0\t0\t640x480@1-30,bad,1x2\n");
     assert_eq!(parsed.len(), 1);
     assert_eq!(parsed[0].modes, vec![mode(640, 480, 1, 30)]);
+}
+
+#[test]
+fn nfr8_a_4_3_still_of_a_16_9_picture_is_cropped_at_the_centre_not_stretched() {
+    use dsa_host_core::camera::Crop;
+    let crop = |x, y, width, height| Crop {
+        x,
+        y,
+        width,
+        height,
+    };
+    assert_eq!(
+        center_crop(1920, 1080, 1440, 1080),
+        crop(240, 0, 1440, 1080)
+    );
+    assert_eq!(center_crop(1280, 720, 640, 480), crop(160, 0, 960, 720));
+    assert_eq!(center_crop(640, 480, 1280, 720), crop(0, 60, 640, 360));
+    assert_eq!(center_crop(1280, 720, 320, 180), crop(0, 0, 1280, 720));
+    // A 16x4 picture whose luma is its column number, into an 8x6 (4:3) still: only columns
+    // 4 to 8 of the middle, in order, so nothing is squeezed.
+    let mut nv12 = Vec::new();
+    for _ in 0..4 {
+        nv12.extend(0u8..16);
+    }
+    for _ in 0..2 {
+        for x in 0..8u8 {
+            nv12.extend([100 + x, 200 + x]);
+        }
+    }
+    let frame = Frame {
+        width: 16,
+        height: 4,
+        stride: 16,
+        nv12,
+        timestamp_ns: 0,
+    };
+    assert_eq!(center_crop(16, 4, 8, 6), crop(4, 0, 5, 4));
+    let still = scale_nv12(&frame, 8, 6).expect("scales");
+    let row = &still.nv12[..8];
+    assert!(row.iter().all(|&v| (4..9).contains(&v)), "{row:?}");
+    assert!(row.windows(2).all(|w| w[0] <= w[1]), "{row:?}");
+    assert_eq!(still.nv12[8 * 6], 102);
 }
