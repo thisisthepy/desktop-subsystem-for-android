@@ -2673,4 +2673,38 @@ Uygulamanın x86_64 veya arm64-v8a derlemesini alın.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Aç</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Oyunlar</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Oyunlar</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Yenile</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>DSA'da oyunları daha rahat oynamak için ayarlar.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Oyun ayarları okunamadı veya değiştirilemedi</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Oyun kolaylığı</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Oyun odağını koru</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Aşağıda açılan uygulamalar başka bir pencereye tıkladığınızda da çalışmaya devam eder, odak kaybında duran oyunlar bile.
+Tuşlar ve yazılanlar yine yalnızca kullandığınız pencereye gider.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Tümünü seç</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Android'de henüz yüklü uygulama yok.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Oyun · {0}</value>
+  </data>
 </root>

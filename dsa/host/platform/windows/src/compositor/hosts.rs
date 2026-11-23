@@ -34,6 +34,7 @@ use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::keep_focus::FocusKeeper;
 use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
 use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::shown_windows::{CoverWatch, ShownWindows};
@@ -954,6 +955,9 @@ struct Manager {
     focused: std::collections::BTreeSet<i32>,
     /// Whether a task window was the active window, as `fronts` was last told.
     front: bool,
+    /// Where the guest's input focus goes for the apps that keep it while their window is
+    /// not the active one.
+    keep_focus: FocusKeeper,
     setup: ManagerSetup,
 }
 
@@ -979,6 +983,7 @@ pub fn manage(setup: ManagerSetup) {
         covers_checked: Instant::now(),
         focused: std::collections::BTreeSet::new(),
         front: false,
+        keep_focus: FocusKeeper::new(),
         setup,
     };
     // A window that opens with no frame asks the guest for its task's frame until one arrives.
@@ -1080,6 +1085,8 @@ impl Manager {
                 }
             }
             ManagerEvent::AppWindows(apps) => {
+                self.keep_focus
+                    .set_kept(&dsa_host_core::app_windows::keep_focus_packages(&apps.apps));
                 let mut changes = self.windows.set_app_windows(&apps.apps);
                 changes.extend(self.windows.set_full_screen_defaults(apps.defaults));
                 self.change(changes, now);
@@ -1115,6 +1122,7 @@ impl Manager {
                             continue;
                         };
                         // The new window becomes the active window when the user picks it.
+                        self.keep_focus.closed(task_id);
                         if self.focused.remove(&task_id) {
                             self.focus_changed();
                         }
@@ -1143,6 +1151,7 @@ impl Manager {
                     };
                     // A window that went with its program is no longer the active window,
                     // though it never said so.
+                    self.keep_focus.closed(task_id);
                     if self.focused.remove(&task_id) {
                         self.focus_changed();
                     }
@@ -1219,6 +1228,13 @@ impl Manager {
                     self.focused.remove(&task_id);
                 }
                 self.focus_changed();
+                // An app that keeps its focus has its task focused in Android as its window,
+                // or another task's, gains the desktop focus.
+                let package = self.windows.package_of(task_id).map(str::to_string);
+                let requests =
+                    self.keep_focus
+                        .window_focus(task_id, package.as_deref(), focused, now);
+                self.request(requests);
             }
             FromHost::Shown { task_id, shown } => self.shown.reported(task_id, shown),
             FromHost::MenuChosen { task_id, action } => {
@@ -1331,6 +1347,7 @@ impl Manager {
         let mut changed = false;
         for change in changes {
             if let WindowChange::Close { task_id } = change {
+                self.keep_focus.closed(*task_id);
                 changed |= self.focused.remove(task_id);
             }
         }
@@ -1428,6 +1445,9 @@ impl Manager {
     }
 
     fn tick(&mut self) {
+        // A kept app's task takes the focus back once no task window is the active one.
+        let requests = self.keep_focus.tick(Instant::now());
+        self.request(requests);
         self.follow_gpu_resets(Instant::now());
         self.follow_frame_stall(Instant::now());
         self.follow_blank_windows(Instant::now());

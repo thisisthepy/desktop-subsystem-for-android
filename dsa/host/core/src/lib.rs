@@ -58,6 +58,7 @@
 //! - [`system_settings`]: the host's time zone, languages, regional format, theme and accent
 //!   color, which each user's Android follows.
 //! - [`gamepads`]: the host's game controllers, shown to the guest as gamepads.
+//! - [`games`]: the Games page's list of apps, games first, and its Select all.
 //! - [`app_windows`]: a user's window settings for each app.
 //! - [`gapps`]: Google Play for a user who asks for it, downloaded and laid over the guest's
 //!   system as an erofs image.
@@ -118,6 +119,7 @@ pub mod files;
 pub mod files_door;
 pub mod follower;
 pub mod gamepads;
+pub mod games;
 pub mod gapps;
 pub mod geocode;
 pub mod graphics_memory;

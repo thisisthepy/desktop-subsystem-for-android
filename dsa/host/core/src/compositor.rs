@@ -30,6 +30,7 @@ pub mod frame_follow;
 pub mod frame_requests;
 pub mod frame_stall;
 pub mod gpu_reset;
+pub mod keep_focus;
 pub mod overlay_windows;
 pub mod present_watch;
 pub mod program_exit;

@@ -2673,4 +2673,38 @@ Android 会拒绝安装它。</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>打开</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>游戏</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>游戏</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>刷新</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>让游戏在 DSA 中玩得更顺手的设置。</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>无法读取或更改游戏设置</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>游戏便利</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>保持游戏焦点</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>下方打开的应用在你点击其他窗口时仍会继续运行，失去焦点就会暂停的游戏也会继续。
+按键和文字输入仍只发送到你正在使用的窗口。</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>全选</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Android 中还没有安装任何应用。</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>游戏 · {0}</value>
+  </data>
 </root>

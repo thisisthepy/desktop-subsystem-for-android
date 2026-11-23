@@ -201,4 +201,16 @@ public interface InstalledAppOrBuilder extends
    */
   com.google.protobuf.ByteString
       getSharedUserIdBytes();
+
+  /**
+   * <pre>
+   * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+   * sets the older android:isGame. The host lists games first where it offers settings for
+   * games.
+   * </pre>
+   *
+   * <code>bool game = 15;</code>
+   * @return The game.
+   */
+  boolean getGame();
 }

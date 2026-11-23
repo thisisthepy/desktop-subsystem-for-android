@@ -95,6 +95,14 @@ pub struct UninstallResult {
     #[prost(string, tag = "3")]
     pub message: ::prost::alloc::string::String,
 }
+/// Asks the caller's Android to give a task the input focus, for an app that keeps its focus
+/// while its window is not the active one (AppWindowSettings.keep_focus). Keys still go to a
+/// window only while it is the active one: its window host sends them.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct FocusTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
 /// The user closed a task's window: asks the caller's Android to end the task.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CloseTask {
@@ -1610,6 +1618,11 @@ pub struct AppInfo {
     /// app shows them together. Empty for an app with a user ID of its own, and for a task's app.
     #[prost(string, tag = "18")]
     pub shared_user_id: ::prost::alloc::string::String,
+    /// Whether the app says it is a game (ApplicationInfo.category CATEGORY_GAME, or the older
+    /// android:isGame), in the list of installed apps. A settings app lists games first. False
+    /// for a task's app.
+    #[prost(bool, tag = "19")]
+    pub game: bool,
 }
 /// One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
 /// one it published, or one pinned at its request. The host's jump list (Dock menu, desktop
@@ -3342,6 +3355,12 @@ pub struct AppWindowSettings {
     /// from the next time a window of the app opens.
     #[prost(bool, tag = "8")]
     pub below_title_bar: bool,
+    /// Whether the app keeps the input focus inside Android while its window is not the active
+    /// one on the desktop ("keep game focus"), so a game that pauses when it loses the focus
+    /// keeps running behind another window. Keys and text still go to a window only while it is
+    /// the active one. Off by default.
+    #[prost(bool, tag = "9")]
+    pub keep_focus: bool,
 }
 /// The user's full screen choices for every app, which an app's own choice overrides. Never
 /// DEFAULT in an answer from the service.
@@ -3380,7 +3399,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715, 740"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715, 750, 740"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -3582,6 +3601,8 @@ pub mod request {
         LaunchPlacement(super::LaunchPlacement),
         #[prost(message, tag = "715")]
         SetCaptionCompat(super::SetCaptionCompat),
+        #[prost(message, tag = "750")]
+        FocusTask(super::FocusTask),
         #[prost(message, tag = "740")]
         GetWidgetPreviews(super::GetWidgetPreviews),
     }

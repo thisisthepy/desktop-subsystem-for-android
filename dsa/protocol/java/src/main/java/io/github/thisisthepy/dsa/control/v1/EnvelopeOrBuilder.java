@@ -2285,6 +2285,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.CaptionCompat getCaptionCompat();
 
   /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   * @return Whether the focusTask field is set.
+   */
+  boolean hasFocusTask();
+  /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   * @return The focusTask.
+   */
+  io.github.thisisthepy.dsa.control.v1.FocusTask getFocusTask();
+
+  /**
    * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
    * @return Whether the getWidgetPreviews field is set.
    */

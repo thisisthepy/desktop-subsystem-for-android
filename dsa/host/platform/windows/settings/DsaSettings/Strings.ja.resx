@@ -2673,4 +2673,38 @@ Android はこれを拒否します。</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>開く</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>ゲーム</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>ゲーム</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>最新の情報に更新</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>DSA でゲームを快適に遊ぶための設定です。</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>ゲームの設定を読み取れないか、変更できませんでした</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>ゲームの快適さ</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>ゲームのフォーカスを維持</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>下でオンにしたアプリは、別のウィンドウをクリックしても動き続けます。フォーカスを失うと止まるゲームも止まりません。
+キー入力と文字入力は、今までどおり使っているウィンドウにだけ送られます。</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>すべて選択</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Android にはまだアプリがインストールされていません。</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>ゲーム · {0}</value>
+  </data>
 </root>

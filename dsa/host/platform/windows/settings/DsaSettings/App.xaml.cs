@@ -22,6 +22,7 @@ public partial class App : Application
     private static WidgetsViewModel? _widgets;
     private static DeviceIdentityViewModel? _deviceIdentity;
     private static BackgroundViewModel? _background;
+    private static GamesViewModel? _games;
     private static AndroidVersionViewModel? _androidVersion;
     internal static LogViewModel Logs => _logs ??= new(Cli, Service, Text);
     internal static GeneralViewModel General => _general ??= new(Service, Text);
@@ -33,6 +34,7 @@ public partial class App : Application
     internal static WidgetsViewModel Widgets => _widgets ??= new(Service, Text, Cli);
     internal static DeviceIdentityViewModel DeviceIdentity => _deviceIdentity ??= new(Cli, Service, Text);
     internal static BackgroundViewModel Background => _background ??= new(Service, Text);
+    internal static GamesViewModel Games => _games ??= new(Service, Text);
     internal static AndroidVersionViewModel AndroidVersion => _androidVersion ??= new(Cli, Text);
 
     /// <summary>The argument that names an APK to install. Earlier releases associated APK files

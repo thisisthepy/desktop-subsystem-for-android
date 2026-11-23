@@ -94,8 +94,19 @@ class AndroidLauncherApps(
             primaryAbi = application?.let { AndroidApks.primaryAbi(it) }.orEmpty(),
             nativeLibraries = application?.let { apks.libraries(it) }.orEmpty(),
             sharedUserId = sharedUserId,
+            game = application?.let(::isGame) ?: false,
         )
     }
+
+    /**
+     * Whether the app says it is a game: its category is CATEGORY_GAME, or it sets the older
+     * android:isGame, which the package manager keeps as FLAG_IS_GAME and still reports for
+     * apps that have no category.
+     */
+    @Suppress("DEPRECATION")
+    private fun isGame(application: ApplicationInfo): Boolean =
+        application.category == ApplicationInfo.CATEGORY_GAME ||
+            application.flags and ApplicationInfo.FLAG_IS_GAME != 0
 
     private val apks = AndroidApks()
 

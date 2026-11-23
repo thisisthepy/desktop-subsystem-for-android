@@ -2673,4 +2673,38 @@ Obtenha a versão x86_64 ou arm64-v8a do app.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Abrir</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Jogos</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Jogos</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Atualizar</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Configurações para jogar melhor no DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Não foi possível ler ou alterar as configurações de jogos</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Conforto nos jogos</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Manter o foco do jogo</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Os apps ativados abaixo continuam rodando quando você clica em outra janela, até jogos que pausam sem foco.
+Teclas e digitação continuam indo só para a janela que você está usando.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Selecionar tudo</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Ainda não há nenhum app instalado no Android.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Jogo · {0}</value>
+  </data>
 </root>

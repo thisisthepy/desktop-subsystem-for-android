@@ -2674,4 +2674,38 @@ Get the app's x86_64 or arm64-v8a build.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Open</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Games</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Games</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Settings that make games play better in DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>The game settings could not be read or changed</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Game convenience</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Keep game focus</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Apps turned on below keep running when you click another window, so a game that pauses without focus plays on.
+Keys and typing still go only to the window you are using.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Select all</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>No app is installed in Android yet.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Game · {0}</value>
+  </data>
 </root>

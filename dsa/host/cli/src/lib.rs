@@ -24,7 +24,8 @@
 //! dsa background [list | open <package> | stop <package>]
 //! dsa app-window [<package> [--fixed-size on|off] [--start-size <width>x<height>|auto]
 //!     [--dpi-scaling app|system|system-forced|auto] [--below-title-bar on|off]
-//!     | <package> reset]
+//!     [--keep-focus on|off] | <package> reset]
+//! dsa games [list | keep-focus on|off <package>... | select-all]
 //! dsa logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...]
 //! dsa logs collect -o <file.zip>
 //! dsa arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default]
@@ -80,15 +81,26 @@
 //! unified title bar, the app's content begins under the band and the band takes the app's own
 //! bar color. It is for an app whose top bar is squeezed or hidden under the title bar, is off
 //! by default, and counts from the next time a window of the app opens.
+//! `--keep-focus on|off` keeps the app focused inside Android while its window is not the
+//! active one, so a game that pauses when it loses the focus keeps running behind another
+//! window. Keys and text still go to a window only while it is the active one. Off by default.
 //! `reset` puts the app back to the defaults. With `--json` it prints `apps`, each with `package`, `fixed_size`, `start_size`
 //! (null for none, else `[width, height]`), `dpi_scaling`, `default_dpi_scaling` (what `auto`
 //! is for that app: `system` for an app on the built-in list, else `auto`, its own way),
-//! `fullscreen`, `immersive` and `below_title_bar`,
+//! `fullscreen`, `immersive`, `below_title_bar` and `keep_focus`,
 //! `system_forced_available`, whether `system-forced` does what it says,
 //! `system_scaled_by_default`, the packages whose `auto` is `system`,
 //! `below_title_bar_by_default`, the packages that start below the title bar unless the user
 //! says otherwise (none for now), and `defaults`,
 //! the `fullscreen` and `immersive` choices every app without its own follows.
+//!
+//! `dsa games` lists the installed apps as the settings app's Games page does, games first (the
+//! apps whose Android category is game), each with whether it keeps its focus (`--keep-focus`
+//! above). `dsa games keep-focus on|off <package>...` turns it on or off for each app named,
+//! and `dsa games select-all` turns it on for every installed app, or off for every app when
+//! every one is on already, as the page's Select all does. None of them starts Android: the
+//! list is the one the service keeps. With `--json` they print `apps`, each with `package`,
+//! `label`, `game`, `keep_focus` and `icon_png` (base64).
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
 //! operating system, so there is no option to name another one.
@@ -504,8 +516,9 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      shortcut <package> <id> | desktop-shortcut <package>] | \
      background [list | open <package> | stop <package>] | \
      app-window [<package> [--fixed-size on|off] [--start-size <w>x<h>|auto] \
-     [--dpi-scaling app|system|system-forced|auto] [--below-title-bar on|off] | \
-     <package> reset] | \
+     [--dpi-scaling app|system|system-forced|auto] [--below-title-bar on|off] \
+     [--keep-focus on|off] | <package> reset] | \
+     games [list | keep-focus on|off <package>... | select-all] | \
      logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip> | \
      arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default] | \
      files [open] | gapps [status | install [--progress] | remove] | \
@@ -596,6 +609,9 @@ pub enum Command {
     Apps,
     /// Show or change the window settings of apps ([`Invocation::app_window`]).
     AppWindow,
+    /// List the apps of the Games page, or turn keep focus on or off
+    /// ([`Invocation::games`]).
+    Games,
     /// Say where the host's file manager shows Android's shared storage.
     Files,
     /// Open Android's shared storage in the host's file manager.
@@ -636,7 +652,8 @@ pub enum AppWindowAction {
     /// Change one app's: whether its windows keep their size, the size they open at
     /// (`Some(None)` for the size Android gives the task), and how it follows its window to a
     /// monitor of another scale, where it shows a clear full screen request and its bars
-    /// hidden alone, and whether it starts below the title bar.
+    /// hidden alone, whether it starts below the title bar, and whether it keeps its focus
+    /// while its window is not the active one.
     Set {
         package: String,
         fixed_size: Option<bool>,
@@ -645,9 +662,21 @@ pub enum AppWindowAction {
         fullscreen: Option<FullScreenPlace>,
         immersive: Option<FullScreenPlace>,
         below_title_bar: Option<bool>,
+        keep_focus: Option<bool>,
     },
     /// Put one app's back to the defaults.
     Reset(String),
+}
+
+/// What `dsa games` does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GamesAction {
+    /// List the installed apps, games first, with whether each keeps its focus.
+    List,
+    /// Turn keep focus on (`true`) or off for each app named.
+    KeepFocus(bool, Vec<String>),
+    /// Turn keep focus on for every installed app, or off for every app when all are on.
+    SelectAll,
 }
 
 /// A start size as `dsa app-window --start-size` takes it: `auto`, or `<width>x<height>` in
@@ -983,6 +1012,8 @@ pub struct Invocation {
     pub background: Option<BackgroundAction>,
     /// What to do with the window settings of apps, for `dsa app-window`.
     pub app_window: Option<AppWindowAction>,
+    /// What to do with the Games page's apps, for `dsa games`.
+    pub games: Option<GamesAction>,
     /// Print the answer as JSON.
     pub json: bool,
     /// Print each step of `dsa install` as it happens.
@@ -1046,6 +1077,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut apps = None;
     let mut background = None;
     let mut app_window: Option<AppWindowAction> = None;
+    let mut games: Option<GamesAction> = None;
     let mut json = false;
     let mut yes = false;
     let mut android = None;
@@ -1065,6 +1097,38 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         match arg.as_str() {
             "logcat" if command.is_none() => command = Some(Command::Logcat),
             "app-window" if command.is_none() => command = Some(Command::AppWindow),
+            "games" if command.is_none() => command = Some(Command::Games),
+            "list" if command == Some(Command::Games) && games.is_none() => {
+                games = Some(GamesAction::List);
+            }
+            "select-all" if command == Some(Command::Games) && games.is_none() => {
+                games = Some(GamesAction::SelectAll);
+            }
+            "keep-focus" if command == Some(Command::Games) && games.is_none() => {
+                let value = args
+                    .next()
+                    .ok_or("dsa games keep-focus needs on or off, then the apps' packages")?;
+                let on = match value.to_ascii_lowercase().as_str() {
+                    "on" | "true" | "yes" | "1" => true,
+                    "off" | "false" | "no" | "0" => false,
+                    _ => return Err(format!("dsa games keep-focus is on or off, not {value:?}")),
+                };
+                games = Some(GamesAction::KeepFocus(on, Vec::new()));
+            }
+            name if command == Some(Command::Games)
+                && matches!(games, Some(GamesAction::KeepFocus(..)))
+                && !name.starts_with('-') =>
+            {
+                if !is_package_name(name) {
+                    return Err(format!(
+                        "{name:?} is not a package name; dsa games lists them, such as \
+                         com.example.chess"
+                    ));
+                }
+                if let Some(GamesAction::KeepFocus(_, packages)) = games.as_mut() {
+                    packages.push(name.to_string());
+                }
+            }
             name if command == Some(Command::AppWindow)
                 && app_window.is_none()
                 && !name.starts_with('-') =>
@@ -1084,7 +1148,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 _ => return Err("dsa app-window reset follows the app's package".into()),
             },
             flag @ ("--fixed-size" | "--start-size" | "--dpi-scaling" | "--fullscreen"
-            | "--immersive" | "--below-title-bar")
+            | "--immersive" | "--below-title-bar" | "--keep-focus")
                 if command == Some(Command::AppWindow) =>
             {
                 let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -1096,9 +1160,10 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     mut fullscreen,
                     mut immersive,
                     mut below_title_bar,
+                    mut keep_focus,
                 ) = match app_window.take() {
                     Some(AppWindowAction::Show(package)) => {
-                        (package, None, None, None, None, None, None)
+                        (package, None, None, None, None, None, None, None)
                     }
                     Some(AppWindowAction::Set {
                         package,
@@ -1108,6 +1173,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         fullscreen,
                         immersive,
                         below_title_bar,
+                        keep_focus,
                     }) => (
                         package,
                         fixed_size,
@@ -1116,6 +1182,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         fullscreen,
                         immersive,
                         below_title_bar,
+                        keep_focus,
                     ),
                     _ => return Err(format!("dsa app-window {flag} follows the app's package")),
                 };
@@ -1127,6 +1194,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 match flag {
                     "--fixed-size" => fixed_size = Some(on_or_off(value)?),
                     "--below-title-bar" => below_title_bar = Some(on_or_off(value)?),
+                    "--keep-focus" => keep_focus = Some(on_or_off(value)?),
                     "--start-size" => start_size = Some(parse_start_size(value)?),
                     "--dpi-scaling" => dpi_scaling = Some(parse_dpi_scaling(value)?),
                     "--fullscreen" => fullscreen = Some(parse_full_screen_place(flag, value)?),
@@ -1140,6 +1208,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     fullscreen,
                     immersive,
                     below_title_bar,
+                    keep_focus,
                 });
             }
             "apps" if command.is_none() => command = Some(Command::Apps),
@@ -1684,6 +1753,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let apps = (command == Command::Apps).then(|| apps.unwrap_or(AppsAction::List));
     let app_window =
         (command == Command::AppWindow).then(|| app_window.unwrap_or(AppWindowAction::List));
+    if let Some(GamesAction::KeepFocus(_, packages)) = &games {
+        if packages.is_empty() {
+            return Err(
+                "dsa games keep-focus on|off needs the apps' packages; dsa games lists \
+                        them"
+                    .into(),
+            );
+        }
+    }
+    let games = (command == Command::Games).then(|| games.unwrap_or(GamesAction::List));
     let background =
         (command == Command::Background).then(|| background.unwrap_or(BackgroundAction::List));
     if command == Command::Install && file.is_none() {
@@ -1766,6 +1845,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         apps,
         background,
         app_window,
+        games,
         json,
         progress,
         log_filter,
@@ -2532,6 +2612,7 @@ fn app_window_json(app: &AppWindowSettings) -> Value {
         "fullscreen": app.fullscreen.name(),
         "immersive": app.immersive.name(),
         "below_title_bar": starts_below_title_bar(&app.package_name, Some(app)),
+        "keep_focus": app.keep_focus,
     })
 }
 
@@ -2600,6 +2681,9 @@ fn describe_app_window(app: &AppWindowSettings) -> String {
     if starts_below_title_bar(&app.package_name, Some(app)) {
         line.push_str(", starts below the title bar");
     }
+    if app.keep_focus {
+        line.push_str(", keeps its focus behind other windows");
+    }
     line
 }
 
@@ -2635,6 +2719,7 @@ fn app_window(invocation: &Invocation, mut client: HostApiClient) -> Result<Stri
             fullscreen,
             immersive,
             below_title_bar,
+            keep_focus,
         } => {
             let current = apps
                 .into_iter()
@@ -2647,6 +2732,7 @@ fn app_window(invocation: &Invocation, mut client: HostApiClient) -> Result<Stri
                 fullscreen: fullscreen.unwrap_or(current.fullscreen),
                 immersive: immersive.unwrap_or(current.immersive),
                 below_title_bar: below_title_bar.or(current.below_title_bar),
+                keep_focus: keep_focus.unwrap_or(current.keep_focus),
                 ..current
             };
             let now = client
@@ -2679,6 +2765,73 @@ fn app_window(invocation: &Invocation, mut client: HostApiClient) -> Result<Stri
         shown
             .iter()
             .map(describe_app_window)
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
+}
+
+/// `dsa games`: the installed apps as the Games page lists them, games first, with whether each
+/// keeps its focus; or turns that on or off for the apps named, or for every app (Select all).
+/// It never starts Android: the list is the one the service keeps.
+fn games(invocation: &Invocation, mut client: HostApiClient) -> Result<String, String> {
+    use dsa_host_core::games::{game_apps, select_all_turns_on, with_keep_focus};
+    let action = invocation.games.clone().unwrap_or(GamesAction::List);
+    let installed = client
+        .installed_apps()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    let mut windows = client.app_windows().map_err(|e| e.to_string())?.apps;
+    let turn = |client: &mut HostApiClient,
+                windows: &mut Vec<AppWindowSettings>,
+                packages: &[String],
+                on: bool|
+     -> Result<(), String> {
+        for package in packages {
+            let wanted = with_keep_focus(windows, package, on);
+            *windows = client
+                .set_app_window_settings(&wanted)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    };
+    match action {
+        GamesAction::List => {}
+        GamesAction::KeepFocus(on, packages) => turn(&mut client, &mut windows, &packages, on)?,
+        GamesAction::SelectAll => {
+            let list = game_apps(&installed, &windows);
+            let on = select_all_turns_on(&list);
+            let packages: Vec<String> = list.into_iter().map(|app| app.package_name).collect();
+            turn(&mut client, &mut windows, &packages, on)?;
+        }
+    }
+    let list = game_apps(&installed, &windows);
+    Ok(if invocation.json {
+        let apps: Vec<Value> = list
+            .iter()
+            .map(|app| {
+                json!({
+                    "package": app.package_name,
+                    "label": app.label,
+                    "game": app.game,
+                    "keep_focus": app.keep_focus,
+                    "icon_png": base64(&app.icon_png),
+                })
+            })
+            .collect();
+        json!({ "apps": apps }).to_string()
+    } else if list.is_empty() {
+        "No app is installed in Android yet".to_string()
+    } else {
+        list.iter()
+            .map(|app| {
+                format!(
+                    "{} ({}){}: keep focus {}",
+                    app.label,
+                    app.package_name,
+                    if app.game { ", a game" } else { "" },
+                    if app.keep_focus { "on" } else { "off" }
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     })
@@ -5856,6 +6009,7 @@ pub fn run_with_starter(
         Command::Apps => return apps(invocation, client, connector),
         Command::Background => return background(invocation, client),
         Command::AppWindow => return app_window(invocation, client),
+        Command::Games => return games(invocation, client),
         Command::Open | Command::Share => {
             return open_file(invocation, client, connector);
         }

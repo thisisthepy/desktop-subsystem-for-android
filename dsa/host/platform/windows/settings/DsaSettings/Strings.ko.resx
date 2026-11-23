@@ -2671,4 +2671,38 @@ Android가 설치를 거부합니다.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>열기</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>게임</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>게임</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>새로 고침</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>DSA에서 게임을 더 편하게 하는 설정입니다.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>게임 설정을 읽거나 바꾸지 못했습니다</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>게임 편의성</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>게임 포커스 유지</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>아래에서 켠 앱은 다른 창을 눌러도 계속 실행되어, 포커스를 잃으면 멈추는 게임도 계속 돕니다.
+키 입력과 글자 입력은 지금처럼 사용 중인 창에만 갑니다.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>전체 선택</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>아직 Android에 설치된 앱이 없습니다.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>게임 · {0}</value>
+  </data>
 </root>

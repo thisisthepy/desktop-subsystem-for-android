@@ -24,6 +24,7 @@ use std::time::Instant;
 use dsa_host_core::app_windows::AppWindows;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::keep_focus::FocusKeeper;
 use dsa_host_core::compositor::shown_windows::ShownWindows;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
@@ -135,6 +136,9 @@ pub struct Manager<P: Platform> {
     resets: GpuResetWindows,
     /// Whether the guest draws again after a GPU reset.
     stall: FrameStall,
+    /// Where the guest's input focus goes for the apps that keep it while their window is
+    /// not the active one.
+    keep_focus: FocusKeeper,
     platform: P,
 }
 
@@ -156,6 +160,7 @@ impl<P: Platform> Manager<P> {
             routes: None,
             resets: GpuResetWindows::new(),
             stall: FrameStall::new(),
+            keep_focus: FocusKeeper::new(),
             platform,
         }
     }
@@ -256,6 +261,8 @@ impl<P: Platform> Manager<P> {
                 }
             }
             ManagerEvent::AppWindows(apps) => {
+                self.keep_focus
+                    .set_kept(&dsa_host_core::app_windows::keep_focus_packages(&apps.apps));
                 let mut changes = self.windows.set_app_windows(&apps.apps);
                 changes.extend(self.windows.set_full_screen_defaults(apps.defaults));
                 self.change(changes, now);
@@ -267,6 +274,9 @@ impl<P: Platform> Manager<P> {
     /// Looks at the timers: windows whose task did not take their size, and window hosts
     /// that are late.
     pub fn tick(&mut self, now: Instant) {
+        // A kept app's task takes the focus back once no task window is the active one.
+        let requests = self.keep_focus.tick(now);
+        self.request(requests);
         // A window kept through a GPU reset whose app did not come back closes.
         let late = self.resets.tick(now);
         if !late.is_empty() {
@@ -354,6 +364,13 @@ impl<P: Platform> Manager<P> {
                 } else {
                     self.focused.remove(&task_id);
                 }
+                // An app that keeps its focus has its task focused in Android as its window,
+                // or another task's, gains the desktop focus.
+                let package = self.windows.package_of(task_id).map(str::to_string);
+                let requests =
+                    self.keep_focus
+                        .window_focus(task_id, package.as_deref(), focused, now);
+                self.request(requests);
             }
             FromHost::Shown { task_id, shown } => {
                 self.shown.reported(task_id, shown);
@@ -506,6 +523,7 @@ impl<P: Platform> Manager<P> {
         let windows = self.windows.windows();
         self.hidden.retain(|task_id| windows.contains(task_id));
         self.focused.retain(|task_id| windows.contains(task_id));
+        self.keep_focus.retain(|task_id| windows.contains(&task_id));
         let focused = !self.focused.is_empty();
         if focused != self.told_focused {
             self.told_focused = focused;

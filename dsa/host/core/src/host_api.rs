@@ -1745,6 +1745,7 @@ fn app_to_wire(app: AppInfo) -> types::AppInfo {
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_to_wire).collect(),
         shared_user_id: app.shared_user_id,
+        game: app.game,
     }
 }
 
@@ -1812,6 +1813,7 @@ fn app_from_wire(app: types::AppInfo) -> AppInfo {
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_from_wire).collect(),
         shared_user_id: app.shared_user_id,
+        game: app.game,
     }
 }
 
@@ -5523,6 +5525,12 @@ impl HostApiService {
                     task_id: close.task_id,
                 },
             ),
+            Some(request::Body::FocusTask(focus)) => self.request(
+                peer,
+                TaskRequest::Focus {
+                    task_id: focus.task_id,
+                },
+            ),
             Some(request::Body::LaunchApp(launch)) if launch.new_window => self.request(
                 peer,
                 TaskRequest::NewWindow {
@@ -5700,6 +5708,7 @@ impl HostApiService {
                         | request::Body::UninstallApp(_)
                         | request::Body::WatchTasks(_)
                         | request::Body::CloseTask(_)
+                        | request::Body::FocusTask(_)
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
@@ -8279,6 +8288,12 @@ impl HostApiClient {
         self.done(request::Body::CloseTask(types::CloseTask { task_id }))
     }
 
+    /// Asks the caller's Android to give a task the input focus, for an app that keeps its
+    /// focus while its window is not the active one.
+    pub fn focus_task(&mut self, task_id: i32) -> Result<(), ClientError> {
+        self.done(request::Body::FocusTask(types::FocusTask { task_id }))
+    }
+
     /// Asks the caller's Android to end every process of an app and give its memory back,
     /// even one a widget or a foreground service keeps running: the user's Stop.
     pub fn stop_app(&mut self, package_name: &str) -> Result<(), ClientError> {
@@ -8391,6 +8406,7 @@ impl HostApiClient {
     pub fn request(&mut self, request: &TaskRequest) -> Result<(), ClientError> {
         match request {
             TaskRequest::Close { task_id } => self.close_task(*task_id),
+            TaskRequest::Focus { task_id } => self.focus_task(*task_id),
             TaskRequest::Launch { package_name } => self.launch_app(package_name),
             TaskRequest::NewWindow { package_name } => self.new_window(package_name),
             TaskRequest::OpenAppSettings { package_name, page } => {

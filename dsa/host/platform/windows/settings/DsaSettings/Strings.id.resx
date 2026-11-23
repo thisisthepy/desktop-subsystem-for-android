@@ -2673,4 +2673,38 @@ Dapatkan build x86_64 atau arm64-v8a dari aplikasi tersebut.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Buka</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Game</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Game</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Pengaturan agar game lebih nyaman dimainkan di DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Pengaturan game tidak dapat dibaca atau diubah</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Kenyamanan game</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Pertahankan fokus game</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Aplikasi yang diaktifkan di bawah tetap berjalan saat Anda mengeklik jendela lain, termasuk game yang berhenti tanpa fokus.
+Tombol dan ketikan tetap hanya dikirim ke jendela yang sedang Anda gunakan.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Pilih semua</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Belum ada aplikasi yang terpasang di Android.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Game · {0}</value>
+  </data>
 </root>

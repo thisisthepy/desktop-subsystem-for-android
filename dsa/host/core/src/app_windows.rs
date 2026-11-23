@@ -1,6 +1,7 @@
 //! A user's window settings for each app: whether the app's windows may be resized, the size
-//! they open at, how the app follows its window to a monitor of another scale, and where its
-//! full screen shows.
+//! they open at, how the app follows its window to a monitor of another scale, where its full
+//! screen shows, and whether it keeps the input focus inside Android while its window is not
+//! the active one (the Games page's "keep game focus").
 //!
 //! The settings app's Apps page and `dsa app-window` change them through the local API; the
 //! service keeps them beside the user's other settings, and the user's window manager reads
@@ -377,6 +378,11 @@ pub struct AppWindowSettings {
     /// choice for the app ([`starts_below_title_bar`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub below_title_bar: Option<bool>,
+    /// Whether the app keeps the input focus inside Android while its window is not the
+    /// active one on the desktop, so a game that pauses when it loses the focus keeps running
+    /// behind another window ([`crate::compositor::keep_focus`]). Off by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_focus: bool,
 }
 
 /// The apps that start below the title bar unless the user chose otherwise. None for now:
@@ -416,6 +422,7 @@ impl AppWindowSettings {
             && self.fullscreen == FullScreenPlace::Default
             && self.immersive == FullScreenPlace::Default
             && self.below_title_bar.is_none()
+            && !self.keep_focus
     }
 
     /// Checks the settings, as a client sent them: the package must be an Android package
@@ -454,6 +461,7 @@ impl AppWindowSettings {
             below_title_bar: (app.below_title_bar
                 != BELOW_TITLE_BAR_BY_DEFAULT.contains(&app.package_name.as_str()))
             .then_some(app.below_title_bar),
+            keep_focus: app.keep_focus,
         }
     }
 
@@ -469,8 +477,22 @@ impl AppWindowSettings {
             fullscreen: self.fullscreen.to_wire(),
             immersive: self.immersive.to_wire(),
             below_title_bar: starts_below_title_bar(&self.package_name, Some(self)),
+            keep_focus: self.keep_focus,
         }
     }
+}
+
+/// The packages that keep the input focus while their window is not the active one, sorted,
+/// each once: what the window manager follows.
+pub fn keep_focus_packages(apps: &[AppWindowSettings]) -> Vec<String> {
+    let mut packages: Vec<String> = apps
+        .iter()
+        .filter(|app| app.keep_focus)
+        .map(|app| app.package_name.clone())
+        .collect();
+    packages.sort();
+    packages.dedup();
+    packages
 }
 
 /// `apps` with `app` in place of its package's entry: removed when `app` has the defaults,
@@ -819,6 +841,65 @@ mod tests {
             assert!(crate::compositor::window_hosts::is_valid_package(package));
             assert!(!BELOW_TITLE_BAR_BY_DEFAULT[..i].contains(package));
         }
+    }
+
+    #[test]
+    fn fr44_keep_game_focus_is_off_for_every_app_by_default() {
+        // An app with no entry, a fresh entry, and settings stored before the switch existed.
+        assert!(!AppWindowSettings::default().keep_focus);
+        assert!(!notes(true, None).keep_focus);
+        let old: AppWindowSettings =
+            serde_json::from_str(r#"{"package_name":"com.example.notes","fixed_size":true}"#)
+                .unwrap();
+        assert!(!old.keep_focus);
+        assert!(keep_focus_packages(&[]).is_empty());
+        assert!(keep_focus_packages(&[notes(true, Some((400, 700))), old]).is_empty());
+    }
+
+    #[test]
+    fn fr44_keep_game_focus_is_stored_with_the_other_window_settings() {
+        let on = AppWindowSettings {
+            keep_focus: true,
+            ..notes(false, None)
+        };
+        // On is an entry of its own, and survives the wire and the stored file, so it holds
+        // across a restart of DSA.
+        assert!(!on.is_default());
+        assert!(on.to_wire().keep_focus);
+        assert_eq!(AppWindowSettings::from_wire(&on.to_wire()), on);
+        let stored = serde_json::to_string(&on).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AppWindowSettings>(&stored).unwrap(),
+            on
+        );
+        // Off is the default: no entry, nothing on the wire, nothing in the file.
+        let off = notes(false, None);
+        assert!(!off.to_wire().keep_focus);
+        assert!(!serde_json::to_string(&off).unwrap().contains("keep_focus"));
+        let list = replace(&[], on.clone()).unwrap();
+        assert_eq!(list, vec![on]);
+        assert!(replace(&list, off).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr44_the_window_manager_follows_the_apps_switched_on() {
+        let app = |package: &str, keep_focus: bool| AppWindowSettings {
+            package_name: package.into(),
+            fixed_size: true,
+            keep_focus,
+            ..AppWindowSettings::default()
+        };
+        assert_eq!(
+            keep_focus_packages(&[
+                app("com.ustwo.monumentvalley", true),
+                app("com.example.notes", false),
+                app("com.example.chess", true),
+            ]),
+            vec![
+                "com.example.chess".to_string(),
+                "com.ustwo.monumentvalley".to_string()
+            ]
+        );
     }
 
     #[test]

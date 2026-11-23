@@ -26,6 +26,7 @@ public partial class MainWindow : FluentWindow
         ["device"] = typeof(DeviceIdentityPage),
         ["about"] = typeof(AboutPage),
         ["widgets"] = typeof(WidgetsPage),
+        ["games"] = typeof(GamesPage),
         ["logs"] = typeof(LogsPage),
     };
 
@@ -284,7 +285,7 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>The page to open with: <c>--page memory</c> (general, memory, apps, background,
-    /// display, updates, network, advanced, device, about, widgets or logs) opens another than
+    /// display, updates, network, advanced, device, about, widgets, games or logs) opens another than
     /// General, and <c>--app com.example.notes</c> alone opens Apps, where that app's row is.</summary>
     private static Type StartPage()
     {

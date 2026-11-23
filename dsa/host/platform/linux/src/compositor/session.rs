@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_stall::{restart_in_background, FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::keep_focus::FocusKeeper;
 use dsa_host_core::compositor::resize_queue::{DrawnFrames, ResizeQueue};
 use dsa_host_core::compositor::shown_windows::ShownWindows;
 use dsa_host_core::compositor::task_watch::{follow_tasks, next_batch, send_request, TaskFeed};
@@ -863,6 +864,9 @@ struct Main {
     frames_shown: u64,
     /// Told of each frame a task window shows, so a size of a drag held back for it may go.
     drawn: DrawnFrames,
+    /// Where the guest's input focus goes for the apps that keep it while their window is
+    /// not the active one.
+    keep_focus: FocusKeeper,
 }
 
 impl Main {
@@ -948,6 +952,8 @@ impl Main {
     }
 
     fn after_changes(&mut self) {
+        let windows = self.windows.windows();
+        self.keep_focus.retain(|task_id| windows.contains(&task_id));
         if let Some(request) = self.shown.update_tasks(&self.windows.windows()) {
             self.request(request);
         }
@@ -1125,6 +1131,13 @@ impl Main {
                     self.focused = None;
                 }
                 self.active.store(self.focused.is_some(), Ordering::Relaxed);
+                // An app that keeps its focus has its task focused in Android as its window,
+                // or another task's, gains the desktop focus.
+                let package = self.windows.package_of(task_id).map(str::to_string);
+                let requests =
+                    self.keep_focus
+                        .window_focus(task_id, package.as_deref(), focused, now);
+                self.requests(requests);
             }
             FromHost::Dragging { task_id, dragging } => {
                 let requests = self.windows.window_dragging(task_id, dragging, now);
@@ -1256,6 +1269,9 @@ impl Main {
     }
 
     fn tick(&mut self, now: Instant) {
+        // A kept app's task takes the focus back once no task window is the active one.
+        let requests = self.keep_focus.tick(now);
+        self.requests(requests);
         self.follow_gpu_resets(now);
         let changes = self.windows.tick(now);
         if !changes.is_empty() {
@@ -1384,6 +1400,7 @@ pub fn run() -> Result<(), String> {
         stall: FrameStall::new(),
         frames_shown: 0,
         drawn,
+        keep_focus: FocusKeeper::new(),
     };
     // A window that opens with no frame asks the guest for its task's frame until one arrives.
     main.windows.watch_frames(main.drawn.clone());
@@ -1403,6 +1420,10 @@ pub fn run() -> Result<(), String> {
             match read {
                 Some(windows) => {
                     if known.as_ref() != Some(&windows) {
+                        main.keep_focus
+                            .set_kept(&dsa_host_core::app_windows::keep_focus_packages(
+                                &windows.apps,
+                            ));
                         let mut changes = main.windows.set_app_windows(&windows.apps);
                         changes.extend(main.windows.set_full_screen_defaults(windows.defaults));
                         main.changes(changes);

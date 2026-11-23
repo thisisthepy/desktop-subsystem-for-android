@@ -98,6 +98,7 @@ object Messages {
             .setPrimaryAbi(app.primaryAbi)
             .addAllNativeLibraries(io.github.thisisthepy.dsa.agent.install.NativeLibraries.messages(app.nativeLibraries))
             .setSharedUserId(app.sharedUserId)
+            .setGame(app.game)
         return Envelope.newBuilder().setInstalledApp(info).build().toByteArray()
     }
 

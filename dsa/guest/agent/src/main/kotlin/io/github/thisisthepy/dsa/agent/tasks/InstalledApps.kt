@@ -29,6 +29,11 @@ class LauncherApp(
      * treats them as one group for root elevation and shows them together.
      */
     val sharedUserId: String = "",
+    /**
+     * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+     * sets the older android:isGame. The host lists games first on its Games page.
+     */
+    val game: Boolean = false,
 ) {
     /** Whether the host would show [other] exactly as this. */
     fun sameAs(other: LauncherApp): Boolean =
@@ -45,7 +50,8 @@ class LauncherApp(
             cacheBytes == other.cacheBytes &&
             primaryAbi == other.primaryAbi &&
             nativeLibraries == other.nativeLibraries &&
-            sharedUserId == other.sharedUserId
+            sharedUserId == other.sharedUserId &&
+            game == other.game
 }
 
 /** The installed apps a launcher lists, and word of every change to them. */

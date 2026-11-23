@@ -296,6 +296,17 @@ message RequestTaskFrame {
   int32 task_id = 1;
 }
 
+// Host to guest: give the task the input focus (IActivityTaskManager.setFocusedTask), so its
+// top window is the one Android sends keys to and the one its app hears it has the focus
+// in. The host sends it for an app the user set to keep its focus while its window is not
+// the active one on the desktop ("keep game focus"): when such an app's window becomes the
+// active one, when another task's window becomes active while such an app holds the focus,
+// and when no task window is active and such an app was the last to be. For every other
+// app the focus follows the user's clicks and keys alone, as before.
+message FocusTask {
+  int32 task_id = 1;
+}
+
 // Host to guest: the user closed the task's window; the agent ends the task.
 message CloseTask {
   int32 task_id = 1;
@@ -477,6 +488,10 @@ message InstalledApp {
   // treats them as one group wherever only the uid tells them apart, as root elevation does.
   // Empty for an app with a user ID of its own.
   string shared_user_id = 14;
+  // Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+  // sets the older android:isGame. The host lists games first where it offers settings for
+  // games.
+  bool game = 15;
 }
 
 // The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
@@ -3736,6 +3751,7 @@ message Envelope {
     DnsAnswer dns_answer = 691;
     LaunchPlacement launch_placement = 710;
     CaptionCompat caption_compat = 715;
+    FocusTask focus_task = 750;
     GetWidgetPreviews get_widget_previews = 740;
     WidgetPreviews widget_previews = 741;
   }

@@ -227,6 +227,7 @@ public  final class Envelope extends
     DNS_ANSWER(691),
     LAUNCH_PLACEMENT(710),
     CAPTION_COMPAT(715),
+    FOCUS_TASK(750),
     GET_WIDGET_PREVIEWS(740),
     WIDGET_PREVIEWS(741),
     BODY_NOT_SET(0);
@@ -451,6 +452,7 @@ public  final class Envelope extends
         case 691: return DNS_ANSWER;
         case 710: return LAUNCH_PLACEMENT;
         case 715: return CAPTION_COMPAT;
+        case 750: return FOCUS_TASK;
         case 740: return GET_WIDGET_PREVIEWS;
         case 741: return WIDGET_PREVIEWS;
         case 0: return BODY_NOT_SET;
@@ -10824,6 +10826,56 @@ public  final class Envelope extends
     }
   }
 
+  public static final int FOCUS_TASK_FIELD_NUMBER = 750;
+  /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   */
+  @java.lang.Override
+  public boolean hasFocusTask() {
+    return bodyCase_ == 750;
+  }
+  /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.FocusTask getFocusTask() {
+    if (bodyCase_ == 750) {
+       return (io.github.thisisthepy.dsa.control.v1.FocusTask) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.FocusTask.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   */
+  private void setFocusTask(io.github.thisisthepy.dsa.control.v1.FocusTask value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 750;
+  }
+  /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   */
+  private void mergeFocusTask(io.github.thisisthepy.dsa.control.v1.FocusTask value) {
+    value.getClass();
+  if (bodyCase_ == 750 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.FocusTask.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.FocusTask.newBuilder((io.github.thisisthepy.dsa.control.v1.FocusTask) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 750;
+  }
+  /**
+   * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+   */
+  private void clearFocusTask() {
+    if (bodyCase_ == 750) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static final int GET_WIDGET_PREVIEWS_FIELD_NUMBER = 740;
   /**
    * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
@@ -20972,6 +21024,54 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+     */
+    @java.lang.Override
+    public boolean hasFocusTask() {
+      return instance.hasFocusTask();
+    }
+    /**
+     * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.FocusTask getFocusTask() {
+      return instance.getFocusTask();
+    }
+    /**
+     * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+     */
+    public Builder setFocusTask(io.github.thisisthepy.dsa.control.v1.FocusTask value) {
+      copyOnWrite();
+      instance.setFocusTask(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+     */
+    public Builder setFocusTask(
+        io.github.thisisthepy.dsa.control.v1.FocusTask.Builder builderForValue) {
+      copyOnWrite();
+      instance.setFocusTask(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+     */
+    public Builder mergeFocusTask(io.github.thisisthepy.dsa.control.v1.FocusTask value) {
+      copyOnWrite();
+      instance.mergeFocusTask(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FocusTask focus_task = 750;</code>
+     */
+    public Builder clearFocusTask() {
+      copyOnWrite();
+      instance.clearFocusTask();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
      */
     @java.lang.Override
@@ -21294,9 +21394,10 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.class,
             io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews.class,
             io.github.thisisthepy.dsa.control.v1.WidgetPreviews.class,
+            io.github.thisisthepy.dsa.control.v1.FocusTask.class,
           };
           java.lang.String info =
-              "\u0000\u00d1\u0001\u0000\u0001\u02e5\u00d1\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u00d2\u0001\u0000\u0001\u02ee\u00d2\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
               "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
@@ -21325,7 +21426,7 @@ public  final class Envelope extends
               "\u028b<\u0000\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290<\u0000\u0291" +
               "<\u0000\u0292<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000\u02ac<\u0000" +
               "\u02b2<\u0000\u02b3<\u0000\u02c6<\u0000\u02cb<\u0000\u02da<\u0000\u02db<\u0000\u02e4" +
-              "<\u0000\u02e5<\u0000";
+              "<\u0000\u02e5<\u0000\u02ee<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

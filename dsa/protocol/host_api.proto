@@ -172,6 +172,13 @@ message UninstallResult {
   string message = 3;
 }
 
+// Asks the caller's Android to give a task the input focus, for an app that keeps its focus
+// while its window is not the active one (AppWindowSettings.keep_focus). Keys still go to a
+// window only while it is the active one: its window host sends them.
+message FocusTask {
+  int32 task_id = 1;
+}
+
 // The user closed a task's window: asks the caller's Android to end the task.
 message CloseTask {
   int32 task_id = 1;
@@ -1517,6 +1524,10 @@ message AppInfo {
   // one group for root elevation: their level and grace apply to all of them, and a settings
   // app shows them together. Empty for an app with a user ID of its own, and for a task's app.
   string shared_user_id = 18;
+  // Whether the app says it is a game (ApplicationInfo.category CATEGORY_GAME, or the older
+  // android:isGame), in the list of installed apps. A settings app lists games first. False
+  // for a task's app.
+  bool game = 19;
 }
 
 // One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
@@ -2957,6 +2968,11 @@ message AppWindowSettings {
   // app whose top bar is squeezed or hidden under the title bar. Off by default; it counts
   // from the next time a window of the app opens.
   bool below_title_bar = 8;
+  // Whether the app keeps the input focus inside Android while its window is not the active
+  // one on the desktop ("keep game focus"), so a game that pauses when it loses the focus
+  // keeps running behind another window. Keys and text still go to a window only while it is
+  // the active one. Off by default.
+  bool keep_focus = 9;
 }
 
 // Where a window shows an app that asks to fill the screen.
@@ -3115,6 +3131,7 @@ message Request {
     RemoveWidevine remove_widevine = 702;
     LaunchPlacement launch_placement = 710;
     SetCaptionCompat set_caption_compat = 715;
+    FocusTask focus_task = 750;
     GetWidgetPreviews get_widget_previews = 740;
   }
 }

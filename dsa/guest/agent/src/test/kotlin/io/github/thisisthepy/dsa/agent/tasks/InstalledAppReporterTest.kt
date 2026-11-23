@@ -145,6 +145,21 @@ class InstalledAppReporterTest {
     }
 
     @Test
+    fun fr44_the_host_hears_which_apps_are_games() {
+        val game = LauncherApp("com.ustwo.monumentvalley", "Monument Valley", byteArrayOf(1), game = true)
+        reporter.update(listOf(game, app("org.example.notes")))
+
+        val byPackage = sent.filter { it.hasInstalledApp() }.associate { it.installedApp.packageName to it.installedApp }
+        assertEquals(true, byPackage.getValue("com.ustwo.monumentvalley").game)
+        assertEquals(false, byPackage.getValue("org.example.notes").game)
+
+        // An app whose category changes in an update is described again.
+        sent.clear()
+        reporter.update(listOf(game, LauncherApp("org.example.notes", "Name of org.example.notes", byteArrayOf(1, 2, 3), game = true)))
+        assertEquals(listOf("org.example.notes"), described())
+    }
+
+    @Test
     fun fr23_a_new_version_or_size_describes_the_app_again() {
         reporter.update(listOf(detailed()))
         sent.clear()

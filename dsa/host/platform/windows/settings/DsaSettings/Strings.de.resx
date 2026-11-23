@@ -2673,4 +2673,38 @@ Laden Sie den x86_64- oder arm64-v8a-Build der App herunter.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Öffnen</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Spiele</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Spiele</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Aktualisieren</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Einstellungen, mit denen Spiele in DSA besser laufen.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Die Spieleinstellungen konnten nicht gelesen oder geändert werden</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Spielkomfort</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Spielfokus behalten</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Unten eingeschaltete Apps laufen weiter, wenn Sie ein anderes Fenster anklicken, auch Spiele, die ohne Fokus pausieren.
+Tasten und Texteingaben gehen weiterhin nur an das Fenster, das Sie gerade benutzen.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Alle auswählen</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>In Android ist noch keine App installiert.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Spiel · {0}</value>
+  </data>
 </root>

@@ -2673,4 +2673,38 @@ Android его отклонит.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Открыть</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Игры</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Игры</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Обновить</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Настройки для удобной игры в DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Не удалось прочитать или изменить настройки игр</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Удобство в играх</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Сохранять фокус игры</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Включённые ниже приложения продолжают работать, когда вы щёлкаете другое окно, даже игры, которые без фокуса встают на паузу.
+Нажатия клавиш и ввод текста по-прежнему идут только в окно, с которым вы работаете.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Выбрать все</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>В Android ещё не установлено ни одного приложения.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Игра · {0}</value>
+  </data>
 </root>

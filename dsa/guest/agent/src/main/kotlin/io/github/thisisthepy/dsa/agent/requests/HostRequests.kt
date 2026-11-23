@@ -176,6 +176,13 @@ sealed interface RequestResult {
     data class CloseRefused(val taskId: Int, val reason: String) : RequestResult
 
     /**
+     * The task took the input focus, for an app the user set to keep its focus while its
+     * window is not the active one on the desktop.
+     */
+    data class Focused(val taskId: Int) : RequestResult
+    data class FocusRefused(val taskId: Int, val reason: String) : RequestResult
+
+    /**
      * The host resized the task's window; the task takes [size]. [live] while the user is
      * still dragging the window's edge. The first one with [live] false after a drag ends
      * the drag, even when [size] is the size the task already has.
@@ -245,6 +252,7 @@ class HostRequests(
             Envelope.BodyCase.OPEN_APP_SETTINGS ->
                 settings(envelope.openAppSettings.packageName, pageOf(envelope.openAppSettings.page))
             Envelope.BodyCase.CLOSE_TASK -> close(envelope.closeTask.taskId)
+            Envelope.BodyCase.FOCUS_TASK -> focus(envelope.focusTask.taskId)
             Envelope.BodyCase.RESIZE_TASK -> envelope.resizeTask.let {
                 resize(it.taskId, it.width, it.height, it.live)
             }
@@ -321,6 +329,12 @@ class HostRequests(
         !reported(taskId) -> RequestResult.CloseRefused(taskId, "the host was never told about this task")
         actions.closeTask(taskId) -> RequestResult.Closed(taskId)
         else -> RequestResult.CloseRefused(taskId, "the framework has no such task or refused to end it")
+    }
+
+    private fun focus(taskId: Int): RequestResult = when {
+        !reported(taskId) -> RequestResult.FocusRefused(taskId, "the host was never told about this task")
+        actions.focusTask(taskId) -> RequestResult.Focused(taskId)
+        else -> RequestResult.FocusRefused(taskId, "the framework has no such task or refused to focus it")
     }
 
     // The sizes are unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.

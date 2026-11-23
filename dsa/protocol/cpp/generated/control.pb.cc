@@ -209,6 +209,19 @@ struct RequestTaskFrameDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RequestTaskFrameDefaultTypeInternal _RequestTaskFrame_default_instance_;
+PROTOBUF_CONSTEXPR FocusTask::FocusTask(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct FocusTaskDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR FocusTaskDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~FocusTaskDefaultTypeInternal() {}
+  union {
+    FocusTask _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 FocusTaskDefaultTypeInternal _FocusTask_default_instance_;
 PROTOBUF_CONSTEXPR CloseTask::CloseTask(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.task_id_)*/0
@@ -361,6 +374,7 @@ PROTOBUF_CONSTEXPR InstalledApp::InstalledApp(
   , /*decltype(_impl_.data_bytes_)*/uint64_t{0u}
   , /*decltype(_impl_.cache_bytes_)*/uint64_t{0u}
   , /*decltype(_impl_.system_app_)*/false
+  , /*decltype(_impl_.game_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct InstalledAppDefaultTypeInternal {
   PROTOBUF_CONSTEXPR InstalledAppDefaultTypeInternal()
@@ -9748,6 +9762,186 @@ std::string RequestTaskFrame::GetTypeName() const {
 
 // ===================================================================
 
+class FocusTask::_Internal {
+ public:
+};
+
+FocusTask::FocusTask(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.FocusTask)
+}
+FocusTask::FocusTask(const FocusTask& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  FocusTask* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.task_id_ = from._impl_.task_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.FocusTask)
+}
+
+inline void FocusTask::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+FocusTask::~FocusTask() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.FocusTask)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void FocusTask::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void FocusTask::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void FocusTask::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.FocusTask)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.task_id_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* FocusTask::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* FocusTask::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.FocusTask)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.FocusTask)
+  return target;
+}
+
+size_t FocusTask::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.FocusTask)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void FocusTask::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const FocusTask*>(
+      &from));
+}
+
+void FocusTask::MergeFrom(const FocusTask& from) {
+  FocusTask* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.FocusTask)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void FocusTask::CopyFrom(const FocusTask& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.FocusTask)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool FocusTask::IsInitialized() const {
+  return true;
+}
+
+void FocusTask::InternalSwap(FocusTask* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.task_id_, other->_impl_.task_id_);
+}
+
+std::string FocusTask::GetTypeName() const {
+  return "dsa.control.v1.FocusTask";
+}
+
+
+// ===================================================================
+
 class CloseTask::_Internal {
  public:
 };
@@ -12046,6 +12240,7 @@ InstalledApp::InstalledApp(const InstalledApp& from)
     , decltype(_impl_.data_bytes_){}
     , decltype(_impl_.cache_bytes_){}
     , decltype(_impl_.system_app_){}
+    , decltype(_impl_.game_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -12098,8 +12293,8 @@ InstalledApp::InstalledApp(const InstalledApp& from)
       _this->GetArenaForAllocation());
   }
   ::memcpy(&_impl_.version_code_, &from._impl_.version_code_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.system_app_) -
-    reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.game_) -
+    reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.game_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstalledApp)
 }
 
@@ -12122,6 +12317,7 @@ inline void InstalledApp::SharedCtor(
     , decltype(_impl_.data_bytes_){uint64_t{0u}}
     , decltype(_impl_.cache_bytes_){uint64_t{0u}}
     , decltype(_impl_.system_app_){false}
+    , decltype(_impl_.game_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.package_name_.InitDefault();
@@ -12188,8 +12384,8 @@ void InstalledApp::Clear() {
   _impl_.primary_abi_.ClearToEmpty();
   _impl_.shared_user_id_.ClearToEmpty();
   ::memset(&_impl_.version_code_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.system_app_) -
-      reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
+      reinterpret_cast<char*>(&_impl_.game_) -
+      reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.game_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -12324,6 +12520,14 @@ const char* InstalledApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* 
           ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
           CHK_(ptr);
           CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool game = 15;
+      case 15:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 120)) {
+          _impl_.game_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
@@ -12462,6 +12666,12 @@ uint8_t* InstalledApp::_InternalSerialize(
         14, this->_internal_shared_user_id(), target);
   }
 
+  // bool game = 15;
+  if (this->_internal_game() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(15, this->_internal_game(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -12562,6 +12772,11 @@ size_t InstalledApp::ByteSizeLong() const {
     total_size += 1 + 1;
   }
 
+  // bool game = 15;
+  if (this->_internal_game() != 0) {
+    total_size += 1 + 1;
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -12623,6 +12838,9 @@ void InstalledApp::MergeFrom(const InstalledApp& from) {
   if (from._internal_system_app() != 0) {
     _this->_internal_set_system_app(from._internal_system_app());
   }
+  if (from._internal_game() != 0) {
+    _this->_internal_set_game(from._internal_game());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -12668,8 +12886,8 @@ void InstalledApp::InternalSwap(InstalledApp* other) {
       &other->_impl_.shared_user_id_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.system_app_)
-      + sizeof(InstalledApp::_impl_.system_app_)
+      PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.game_)
+      + sizeof(InstalledApp::_impl_.game_)
       - PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.version_code_)>(
           reinterpret_cast<char*>(&_impl_.version_code_),
           reinterpret_cast<char*>(&other->_impl_.version_code_));
@@ -73622,6 +73840,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::DnsAnswer& dns_answer(const Envelope* msg);
   static const ::dsa::control::v1::LaunchPlacement& launch_placement(const Envelope* msg);
   static const ::dsa::control::v1::CaptionCompat& caption_compat(const Envelope* msg);
+  static const ::dsa::control::v1::FocusTask& focus_task(const Envelope* msg);
   static const ::dsa::control::v1::GetWidgetPreviews& get_widget_previews(const Envelope* msg);
   static const ::dsa::control::v1::WidgetPreviews& widget_previews(const Envelope* msg);
 };
@@ -74453,6 +74672,10 @@ Envelope::_Internal::launch_placement(const Envelope* msg) {
 const ::dsa::control::v1::CaptionCompat&
 Envelope::_Internal::caption_compat(const Envelope* msg) {
   return *msg->_impl_.body_.caption_compat_;
+}
+const ::dsa::control::v1::FocusTask&
+Envelope::_Internal::focus_task(const Envelope* msg) {
+  return *msg->_impl_.body_.focus_task_;
 }
 const ::dsa::control::v1::GetWidgetPreviews&
 Envelope::_Internal::get_widget_previews(const Envelope* msg) {
@@ -77567,6 +77790,21 @@ void Envelope::set_allocated_caption_compat(::dsa::control::v1::CaptionCompat* c
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.caption_compat)
 }
+void Envelope::set_allocated_focus_task(::dsa::control::v1::FocusTask* focus_task) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (focus_task) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(focus_task);
+    if (message_arena != submessage_arena) {
+      focus_task = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, focus_task, submessage_arena);
+    }
+    set_has_focus_task();
+    _impl_.body_.focus_task_ = focus_task;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.focus_task)
+}
 void Envelope::set_allocated_get_widget_previews(::dsa::control::v1::GetWidgetPreviews* get_widget_previews) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -78647,6 +78885,11 @@ Envelope::Envelope(const Envelope& from)
     case kCaptionCompat: {
       _this->_internal_mutable_caption_compat()->::dsa::control::v1::CaptionCompat::MergeFrom(
           from._internal_caption_compat());
+      break;
+    }
+    case kFocusTask: {
+      _this->_internal_mutable_focus_task()->::dsa::control::v1::FocusTask::MergeFrom(
+          from._internal_focus_task());
       break;
     }
     case kGetWidgetPreviews: {
@@ -79940,6 +80183,12 @@ void Envelope::clear_body() {
     case kCaptionCompat: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.caption_compat_;
+      }
+      break;
+    }
+    case kFocusTask: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.focus_task_;
       }
       break;
     }
@@ -81651,6 +81900,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.FocusTask focus_task = 750;
+      case 750:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 114)) {
+          ptr = ctx->ParseMessage(_internal_mutable_focus_task(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -83143,6 +83400,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::widget_previews(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.FocusTask focus_task = 750;
+  if (_internal_has_focus_task()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(750, _Internal::focus_task(this),
+        _Internal::focus_task(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -84609,6 +84873,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.caption_compat_);
       break;
     }
+    // .dsa.control.v1.FocusTask focus_task = 750;
+    case kFocusTask: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.focus_task_);
+      break;
+    }
     // .dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;
     case kGetWidgetPreviews: {
       total_size += 2 +
@@ -85684,6 +85955,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_caption_compat());
       break;
     }
+    case kFocusTask: {
+      _this->_internal_mutable_focus_task()->::dsa::control::v1::FocusTask::MergeFrom(
+          from._internal_focus_task());
+      break;
+    }
     case kGetWidgetPreviews: {
       _this->_internal_mutable_get_widget_previews()->::dsa::control::v1::GetWidgetPreviews::MergeFrom(
           from._internal_get_widget_previews());
@@ -85776,6 +86052,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::TaskFrames >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::RequestTaskFrame*
 Arena::CreateMaybeMessage< ::dsa::control::v1::RequestTaskFrame >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::RequestTaskFrame >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::FocusTask*
+Arena::CreateMaybeMessage< ::dsa::control::v1::FocusTask >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::FocusTask >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::CloseTask*
 Arena::CreateMaybeMessage< ::dsa::control::v1::CloseTask >(Arena* arena) {

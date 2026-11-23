@@ -246,6 +246,10 @@ pub struct AppInfo {
     /// elevation treats them as one group and the settings apps show them together. Empty for
     /// an app with a user ID of its own, and for an app that only has a task.
     pub shared_user_id: String,
+    /// Whether the app says it is a game (Android's `ApplicationInfo.category` is
+    /// `CATEGORY_GAME`), in the list of installed apps. The Games page lists games first.
+    /// False for an app that only has a task.
+    pub game: bool,
 }
 
 /// One of an app's launcher shortcuts in Android (`ShortcutManager`): a static one from its
@@ -425,6 +429,10 @@ pub enum TaskRequest {
     CaptionCompat { below_title_bar: Vec<String> },
     /// The user closed the task's window; the agent ends the task.
     Close { task_id: i32 },
+    /// Give the task the input focus in Android, for an app that keeps its focus while its
+    /// window is not the active one ([`crate::compositor::keep_focus`]). Only the latest
+    /// counts.
+    Focus { task_id: i32 },
     /// Start the app's launcher activity as a new task in its own window.
     Launch { package_name: String },
     /// Start another task of an app that supports several windows, even when it has one, in
@@ -498,6 +506,7 @@ impl TaskRequest {
     pub fn describe(&self) -> String {
         match self {
             TaskRequest::Close { task_id } => format!("end task {task_id}"),
+            TaskRequest::Focus { task_id } => format!("give task {task_id} the input focus"),
             TaskRequest::CaptionCompat { below_title_bar } => format!(
                 "start the tasks of {} apps below the title bar",
                 below_title_bar.len()
@@ -619,6 +628,7 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                 (TaskRequest::WindowsShown { .. }, TaskRequest::WindowsShown { .. }) => true,
                 (TaskRequest::TasksShown { .. }, TaskRequest::TasksShown { .. }) => true,
                 (TaskRequest::CaptionCompat { .. }, TaskRequest::CaptionCompat { .. }) => true,
+                (TaskRequest::Focus { .. }, TaskRequest::Focus { .. }) => true,
                 (
                     TaskRequest::RequestFrame { task_id: a },
                     TaskRequest::RequestFrame { task_id: b },

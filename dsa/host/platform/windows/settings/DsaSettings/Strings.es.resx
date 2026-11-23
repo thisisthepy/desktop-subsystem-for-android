@@ -2673,4 +2673,38 @@ Obtenga la compilación x86_64 o arm64-v8a de la aplicación.</value>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Abrir</value>
   </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Juegos</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Juegos</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Actualizar</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Ajustes para jugar mejor en DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>No se pudieron leer ni cambiar los ajustes de juegos</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Comodidad de juego</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Mantener el foco del juego</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Las apps activadas abajo siguen funcionando al hacer clic en otra ventana, también los juegos que se pausan sin foco.
+Las teclas y el texto siguen yendo solo a la ventana que está usando.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Seleccionar todo</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Aún no hay ninguna app instalada en Android.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Juego · {0}</value>
+  </data>
 </root>

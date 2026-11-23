@@ -229,6 +229,8 @@
                                        Icon="{ui:SymbolIcon Play24}" />
                 <l:PaneItem Content="{l:Text NavWidgets.Content}" TargetPageType="{x:Type pages:WidgetsPage}"
                                        Icon="{ui:SymbolIcon Apps24}" />
+                <l:PaneItem Content="{l:Text NavGames.Content}" TargetPageType="{x:Type pages:GamesPage}"
+                                       Icon="{ui:SymbolIcon Games24}" />
                 <l:PaneItem Content="{l:Text NavDisplay.Content}" TargetPageType="{x:Type pages:DisplayPage}"
                                        Icon="{ui:SymbolIcon Desktop24}" />
                 <l:PaneItem Content="{l:Text NavIdentity.Content}" TargetPageType="{x:Type pages:DeviceIdentityPage}"
