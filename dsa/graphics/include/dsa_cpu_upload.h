@@ -254,6 +254,61 @@ inline uint64_t fingerprint(const uint8_t* mapped, size_t mappedSize, const Sour
     return hash == 0 ? 1 : hash;
 }
 
+// Where each plane lies in planes packed as `layout` packs them (packPlanes): one after the
+// other, rows without padding.
+inline void packedSources(const UploadLayout& layout, SourcePlane out[3]) {
+    uint64_t offset = 0;
+    for (uint32_t i = 0; i < layout.planeCount && i < 3; ++i) {
+        out[i] = SourcePlane{offset, layout.planes[i].rowBytes};
+        offset += uint64_t(layout.planes[i].rowBytes) * layout.planes[i].rows;
+    }
+}
+
+// The fingerprint of planes packed as `layout` packs them: the same value fingerprint() gives
+// for the buffer they were packed from, so the two can be compared.
+inline uint64_t packedFingerprint(const uint8_t* packed, const UploadLayout& layout) {
+    if (!packed || !layout.valid()) return 0;
+    SourcePlane sources[3];
+    packedSources(layout, sources);
+    return fingerprint(packed, layout.packedSize(), sources, layout.planeCount, layout);
+}
+
+// Whether packed YUV planes hold a picture no one wrote: a sampled luma row of zeros over
+// chroma rows of zeros (every kFingerprintRowStep-th row, and the last). No encoder makes that
+// (black is chroma 128), and the host shows it as solid green. A real picture, black in either
+// range included, has a nonzero byte within the first row it looks at, so this costs little.
+// RGB is never such a picture: zeros there are transparent black, which an app may draw.
+inline bool packedHoldsNoPicture(const uint8_t* packed, const UploadLayout& layout) {
+    if (!packed || (layout.kind != UploadKind::Yuv420TwoPlane &&
+                    layout.kind != UploadKind::Yuv420ThreePlane)) {
+        return false;
+    }
+    SourcePlane sources[3];
+    packedSources(layout, sources);
+    const auto zero = [packed](uint64_t start, uint32_t bytes) {
+        const uint8_t* at = packed + start;
+        for (uint32_t i = 0; i < bytes; ++i) {
+            if (at[i] != 0) return false;
+        }
+        return true;
+    };
+    const UploadPlane& luma = layout.planes[0];
+    for (uint32_t row = 0; row < luma.rows; ++row) {
+        if (row % kFingerprintRowStep != 0 && row + 1 != luma.rows) continue;
+        if (!zero(sources[0].offset + uint64_t(sources[0].stride) * row, luma.rowBytes)) continue;
+        bool chromaZero = true;
+        for (uint32_t i = 1; i < layout.planeCount && chromaZero; ++i) {
+            const UploadPlane& plane = layout.planes[i];
+            if (plane.rows == 0) continue;
+            const uint32_t chromaRow = row / 2 < plane.rows ? row / 2 : plane.rows - 1;
+            chromaZero = zero(sources[i].offset + uint64_t(sources[i].stride) * chromaRow,
+                              plane.rowBytes);
+        }
+        if (chromaZero) return true;
+    }
+    return false;
+}
+
 // The fingerprint each buffer was last uploaded with, by buffer.
 class UploadTracker {
    public:

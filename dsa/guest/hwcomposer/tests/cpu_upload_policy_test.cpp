@@ -5,7 +5,9 @@
 // copied up to the host.
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "cpu_upload_policy.h"
 #include "dsa_hardware_buffer_import.h"
@@ -223,6 +225,42 @@ TEST(fr26_a_copy_up_that_fails_on_every_picture_keeps_being_logged) {
     log.reset();
     EXPECT_TRUE(log.shouldLog(&count));  // a new run after a success
     EXPECT_EQ(count, 1u);
+}
+
+// fr26: the upload line counts the planes' packed size. It counted the stream's own staging
+// copy, which is empty when the planes go through the graphics memory the host shares, so a
+// 1080x1920 Short's 30 copies a second read "copied 0 KiB".
+TEST(fr26_the_upload_line_counts_what_reached_the_host_on_either_path) {
+    const dsa::UploadLayout layout =
+        dsa::uploadLayout(fourcc('N', 'V', '1', '2'), 1080, 1920, true);
+    EXPECT_EQ(layout.packedSize(), size_t(1080) * 1920 * 3 / 2);
+    dsa::hwc::UploadTally tally;
+    std::string line;
+    EXPECT_TRUE(!tally.uploaded(0, layout, &line));
+    EXPECT_TRUE(!tally.uploaded(500000000, layout, &line));
+    EXPECT_TRUE(tally.uploaded(1000000000, layout, &line));
+    // 3 x 3110400 bytes.
+    EXPECT_TRUE(line.find("copied 9112 KiB") != std::string::npos);
+    EXPECT_TRUE(line.find("in 3 uploads over 1000 ms") != std::string::npos);
+    EXPECT_TRUE(line.find("kept from the host") == std::string::npos);
+}
+
+// fr26: a picture kept from the host (zeros, or changed while the host read it) is said in the
+// next line, so a green frame can be traced to where its zeros came from.
+TEST(fr26_the_upload_line_says_which_pictures_were_kept_from_the_host) {
+    const dsa::UploadLayout layout = dsa::uploadLayout(fourcc('N', 'V', '1', '2'), 720, 1280, true);
+    dsa::hwc::UploadTally tally;
+    std::string line;
+    tally.heldNoPicture();
+    tally.changedUnderHost();
+    tally.changedUnderHost();
+    EXPECT_TRUE(!tally.uploaded(0, layout, &line));
+    EXPECT_TRUE(tally.uploaded(2000000000, layout, &line));
+    EXPECT_TRUE(line.find("1 that held no picture (zeros), 2 that changed") != std::string::npos);
+    // The next window starts its counts again.
+    EXPECT_TRUE(!tally.uploaded(3000000000ULL, layout, &line));
+    EXPECT_TRUE(tally.uploaded(4000000000ULL, layout, &line));
+    EXPECT_TRUE(line.find("kept from the host") == std::string::npos);
 }
 
 int main() { return ::dsa::test::runAll(); }

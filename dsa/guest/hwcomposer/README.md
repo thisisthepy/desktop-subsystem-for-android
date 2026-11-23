@@ -169,7 +169,13 @@ So the hwcomposer copies them up (`src/cpu_upload.*`, with the rules in
   green. A failure is logged at its first, then once in 600 with its count. A layer whose
   buffer changed holds a new picture and is copied; a buffer seen again is copied only when
   a fingerprint of every eighth row of its planes changed. A buffer the GPU draws is never
-  copied. The bytes copied each second are logged at debug level.
+  copied. The bytes copied each second (the planes' packed size, through the shared graphics
+  memory or the stream) are logged at debug level.
+- A YUV buffer whose planes hold no picture (a luma row of zeros over chroma rows of zeros,
+  which no encoder makes and the host shows as solid green) is not copied up, and its layer
+  keeps its last picture. Planes packed into the graphics memory the host shares are checked
+  again once the host has read them: if they changed meanwhile, the ColorBuffer may hold
+  something else, and the layer keeps its last picture too. The debug line counts both.
 - A YUV buffer gets a YUV ColorBuffer from a host that lists
   `ANDROID_EMU_dsa_yuv_color_buffers` (`dsa/graphics/patches/0019-*.patch`), and its planes
   go up packed as the host's image lays them out. The host's compositor samples RGB images

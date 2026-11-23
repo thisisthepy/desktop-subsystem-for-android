@@ -10,6 +10,9 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <string>
+
+#include "dsa_cpu_upload.h"
 
 namespace dsa::hwc {
 
@@ -88,6 +91,26 @@ class UploadFailureLog {
    private:
     uint32_t mEvery;
     uint32_t mCount = 0;
+};
+
+// The hwcomposer's upload line, once a second: the bytes and copies that reached the host, and
+// the pictures it kept from the host. The bytes are the planes' packed size, whichever way
+// they went (the shared graphics memory or the stream).
+class UploadTally {
+   public:
+    // A copy of `layout`'s planes reached the host at `nowNs`. True, with the line in `*line`,
+    // when a second or more has passed since the window began; the counts start again then.
+    bool uploaded(uint64_t nowNs, const dsa::UploadLayout& layout, std::string* line);
+    // A buffer's planes held no picture (luma and chroma zeros, solid green) and were not sent.
+    void heldNoPicture() { ++mNoPicture; }
+    // Planes packed for the host changed before the host had read them, so its ColorBuffer may
+    // not hold them; the layer keeps its last picture.
+    void changedUnderHost() { ++mChanged; }
+
+   private:
+    dsa::UploadRate mRate;
+    uint32_t mNoPicture = 0;
+    uint32_t mChanged = 0;
 };
 
 }  // namespace dsa::hwc
