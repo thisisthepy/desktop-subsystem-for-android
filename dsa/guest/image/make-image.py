@@ -8308,8 +8308,12 @@ def boot_image_command(dex2oat, root, out, name, jars, base, filter, profiles=()
     under `root`) into out/<name>.art, .oat and .vdex. A primary image is mapped at `base`; an
     extension is compiled against `base_images` (device paths of the images before it) with the
     boot class path `deps`, every jar up to its own."""
+    # The build's own boot image heap (dalvik.vm.image-dex2oat-Xms and -Xmx, 64m each). The debug
+    # dex2oat keeps its heap in the low 4 GiB, where the primary image is mapped too, and the
+    # concurrent mark-compact collector reserves a from-space of the heap's size plus its
+    # alignment there: -Xmx1024m asked for 2 GiB less a page and aborted on the CI runner.
     cmd = [dex2oat, "--avoid-storing-invocation",
-           "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx1024m"]
+           "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx64m"]
     cmd += [f"--profile-file={profile}" for profile in profiles]
     if dirty is not None:
         cmd.append(f"--dirty-image-objects={dirty}")

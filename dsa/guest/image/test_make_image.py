@@ -8508,6 +8508,12 @@ class BootImageTests(unittest.TestCase):
             self.assertIn(flag, [str(part) for part in primary], flag)
         self.assertNotIn("--single-image", primary)
         self.assertFalse(any(str(part).startswith("--boot-image=") for part in primary))
+        # The build's boot image heap: -Xmx1024m made the debug dex2oat reserve a 2 GiB
+        # mark-compact from-space in the low 4 GiB, which the CI runner did not have.
+        heap = [str(part) for part in primary[1:6]]
+        self.assertEqual(heap, ["--avoid-storing-invocation", "--runtime-arg", "-Xms64m",
+                                "--runtime-arg", "-Xmx64m"])
+        self.assertEqual([part for part in map(str, primary) if part.startswith("-Xmx")], ["-Xmx64m"])
         extension = make_image.boot_image_command(
             "dex2oat", root, Path("/o/ext"), "boot-framework-adservices",
             ["/apex/com.android.adservices/javalib/framework-adservices.jar"], 0x72460000, "verify",
