@@ -12,8 +12,9 @@ and architecture, and check-image.py finds the same hashes in the image.
 Beside the framework's files (framework_lock.OUTPUTS) it holds DSA's KeyMint: the files the build installs
 (framework_lock.KEYMINT_OUTPUTS), and the VINTF fragments and the feature file the KeyMint APEX
 carries, which come from the tree as it was fetched (framework_lock.KEYMINT_SOURCES; hence
---top). With --services, it also holds services.jar from the services build
-(framework_lock.JAVA_OUTPUTS), which make-image.py takes in place of the published build's.
+--top). With --services, it also holds services.jar and framework.jar from the services build
+(framework_lock.JAVA_OUTPUTS), which make-image.py takes in place of the published build's. The
+two come together or not at all: the window manager in one calls the other's new code.
 
 The Framework build makes the native files and services.jar in separate jobs, which run at the
 same time, so it collects the native files first and adds the jar to that folder afterwards:

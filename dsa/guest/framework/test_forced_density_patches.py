@@ -86,8 +86,8 @@ def relaunches(joined, changes, handled, forced):
 
 class ForcedDensityPatchTests(unittest.TestCase):
     def test_fr4_the_patch_changes_the_window_manager_in_services_jar_only(self):
-        # framework.jar stays the published one, so the patch adds no API there: the agent
-        # reaches it through a shell command of the window manager's binder.
+        # The window manager alone: the agent reaches it through a shell command of the window
+        # manager's binder. What the app's process does with the new density is 0010's.
         for android in VERSIONS:
             headers = [l for l in patch(android).splitlines() if l.startswith(("--- ", "+++ "))]
             expected = [h for path in FILES for h in (f"--- a/{path}", f"+++ b/{path}")]

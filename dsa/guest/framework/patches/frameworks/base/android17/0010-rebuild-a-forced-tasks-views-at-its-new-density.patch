@@ -1,0 +1,1279 @@
+Subject: Rebuild the views of a forced task's activity at its new density without a relaunch
+
+DSA gives a task the density of the host monitor its window is on. A task the user set to forced
+system scaling takes a new density without a relaunch (0009): the activity, its process, its view
+models and its players survive. Its resources then answer at the new density, but its views keep
+every pixel size they read at the old one, so an app bar keeps its old height while a list grows
+with the items it inflates afresh, and items it reuses come back at the old size.
+
+The window manager now tells the app's process, with each configuration change of such an
+activity (ActivityConfigurationChangeItem.mDsaRescaleViews), that its views are rescaled: for an
+activity of a marked task whose manifest does not handle density. When the density of the
+activity's resources changes, ActivityThread converts the views of its windows (its own, its
+dialogs and its popups) to the new density in place, before the activity hears of the change
+(android.view.DsaDensityRescale). Each view and each set of layout parameters records the density
+its sizes are in. A view that is not in a window then, such as a list item a RecyclerView keeps
+for reuse, is converted when it is added to a parent or a window again, or when the app first
+reads or sets one of its sizes through the framework, so that a size the app sets at the new
+density is not converted twice.
+
+Converted: layout parameters (width, height, margins), padding, minimum size, elevation,
+translation, scroll position, the drawables' density (bitmap, nine-patch, vector, animated vector,
+shape, layer, state list and inset drawables, in place, so an animation keeps running), a text
+view's text size, line spacing, shadow, size limits, auto-size range and compound drawables, and
+an image view's drawable and size limits. Not converted: sizes kept in fields of the app's own
+classes or of its libraries, sizes in text spans, an image matrix, and drawables an app made
+without resources.
+
+Nothing changes in a process until the first such change reaches it, and nothing changes for an
+activity that handles density itself or for any task that is not marked.
+
+Applies to frameworks/base at 94b4c163b7dfe5ce3607f7bb8456f9573f7de57d (Android 17), after 0009.
+---
+diff --git a/core/java/android/app/ActivityThread.java b/core/java/android/app/ActivityThread.java
+--- a/core/java/android/app/ActivityThread.java
++++ b/core/java/android/app/ActivityThread.java
+@@ -690,6 +690,15 @@ public final class ActivityThread extends ClientTransactionHandler
+         @NonNull
+         private final ActivityWindowInfo mLastReportedActivityWindowInfo = new ActivityWindowInfo();
+ 
++        /**
++         * DSA: whether a change of density rescales this activity's views
++         * (android.view.DsaDensityRescale), as the window manager last said with an
++         * ActivityConfigurationChangeItem: for an activity of a task marked for forced system
++         * scaling whose manifest does not handle density.
++         * @hide
++         */
++        public boolean mDsaRescaleViews;
++
+         // Used for consolidating configs before sending on to Activity.
+         private final Configuration tmpConfig = new Configuration();
+         // Callback used for updating activity override config and camera compat control state.
+@@ -7125,6 +7134,16 @@ public final class ActivityThread extends ClientTransactionHandler
+                 amOverrideConfig, contextThemeWrapperOverrideConfig);
+         mResourcesManager.updateResourcesForActivity(activityToken, finalOverrideConfig, displayId);
+ 
++        // DSA: an activity of a task marked for forced system scaling takes a new density
++        // without a relaunch, so its views still hold the pixel sizes they took at the old one.
++        // They are rescaled to the new density now that the resources have it, and before the
++        // activity hears of the change, so that what the app sets in onConfigurationChanged is
++        // not scaled a second time.
++        if (r.mDsaRescaleViews && (diff & ActivityInfo.CONFIG_DENSITY) != 0
++                && (handledConfigChanges & ActivityInfo.CONFIG_DENSITY) == 0) {
++            android.view.DsaDensityRescale.rescaleWindowsOf(activityToken);
++        }
++
+         // Apply the ContextThemeWrapper override if necessary.
+         // NOTE: Make sure the configurations are not modified, as they are treated as immutable
+         // in many places.
+diff --git a/core/java/android/app/servertransaction/ActivityConfigurationChangeItem.java b/core/java/android/app/servertransaction/ActivityConfigurationChangeItem.java
+--- a/core/java/android/app/servertransaction/ActivityConfigurationChangeItem.java
++++ b/core/java/android/app/servertransaction/ActivityConfigurationChangeItem.java
+@@ -48,13 +48,28 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+     private final ActivityWindowInfo mActivityWindowInfo;
+     private final int mDisplayId;
+ 
++    /**
++     * DSA: whether the app's process rescales the activity's views when the density changes
++     * (android.view.DsaDensityRescale): the window manager sets it for an activity whose task
++     * is marked for forced system scaling and whose manifest does not handle density.
++     */
++    private final boolean mDsaRescaleViews;
++
+     public ActivityConfigurationChangeItem(@NonNull IBinder activityToken,
+             @NonNull Configuration config, @NonNull ActivityWindowInfo activityWindowInfo,
+             int displayId) {
++        this(activityToken, config, activityWindowInfo, displayId, false);
++    }
++
++    /** DSA: the item for an activity whose views are rescaled or not (mDsaRescaleViews). */
++    public ActivityConfigurationChangeItem(@NonNull IBinder activityToken,
++            @NonNull Configuration config, @NonNull ActivityWindowInfo activityWindowInfo,
++            int displayId, boolean dsaRescaleViews) {
+         super(activityToken);
+         mConfiguration = new Configuration(config);
+         mActivityWindowInfo = new ActivityWindowInfo(activityWindowInfo);
+         mDisplayId = displayId;
++        mDsaRescaleViews = dsaRescaleViews;
+     }
+ 
+     @Override
+@@ -75,6 +90,9 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+             @NonNull PendingTransactionActions pendingActions) {
+         // TODO(lifecycler): detect if PIP or multi-window mode changed and report it here.
+         Trace.traceBegin(TRACE_TAG_ACTIVITY_MANAGER, "activityConfigChanged");
++        // DSA: the mark goes with every item, so it holds for whichever item the client applies
++        // when it skips older ones.
++        r.mDsaRescaleViews = mDsaRescaleViews;
+         if (!com.android.window.flags.Flags.improveFluidResizingPerformance()) {
+             client.handleActivityConfigurationChanged(r, mConfiguration, INVALID_DISPLAY,
+                     mActivityWindowInfo);
+@@ -93,6 +111,7 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+         dest.writeTypedObject(mConfiguration, flags);
+         dest.writeTypedObject(mActivityWindowInfo, flags);
+         dest.writeInt(mDisplayId);
++        dest.writeBoolean(mDsaRescaleViews);
+     }
+ 
+     /** Reads from Parcel. */
+@@ -101,6 +120,7 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+         mConfiguration = requireNonNull(in.readTypedObject(Configuration.CREATOR));
+         mActivityWindowInfo = requireNonNull(in.readTypedObject(ActivityWindowInfo.CREATOR));
+         mDisplayId = in.readInt();
++        mDsaRescaleViews = in.readBoolean();
+     }
+ 
+     public static final @NonNull Creator<ActivityConfigurationChangeItem> CREATOR =
+@@ -125,7 +145,8 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+         final ActivityConfigurationChangeItem other = (ActivityConfigurationChangeItem) o;
+         return Objects.equals(mConfiguration, other.mConfiguration)
+                 && Objects.equals(mActivityWindowInfo, other.mActivityWindowInfo)
+-                && mDisplayId == other.mDisplayId;
++                && mDisplayId == other.mDisplayId
++                && mDsaRescaleViews == other.mDsaRescaleViews;
+     }
+ 
+     @Override
+@@ -135,6 +156,7 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+         result = 31 * result + Objects.hashCode(mConfiguration);
+         result = 31 * result + Objects.hashCode(mActivityWindowInfo);
+         result = 31 * result + mDisplayId;
++        result = 31 * result + (mDsaRescaleViews ? 1 : 0);
+         return result;
+     }
+ 
+@@ -143,6 +165,7 @@ public class ActivityConfigurationChangeItem extends ActivityTransactionItem {
+         return "ActivityConfigurationChange{" + super.toString()
+                 + ",config=" + mConfiguration
+                 + ",activityWindowInfo=" + mActivityWindowInfo
+-                + ",displayId=" + mDisplayId + "}";
++                + ",displayId=" + mDisplayId
++                + (mDsaRescaleViews ? ",dsaRescaleViews" : "") + "}";
+     }
+ }
+diff --git a/core/java/android/view/DsaDensityRescale.java b/core/java/android/view/DsaDensityRescale.java
+new file mode 100644
+--- /dev/null
++++ b/core/java/android/view/DsaDensityRescale.java
+@@ -0,0 +1,131 @@
++/*
++ * Copyright 2026 The DSA Authors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package android.view;
++
++import android.content.Context;
++import android.content.res.Resources;
++import android.os.IBinder;
++
++/**
++ * DSA: rebuilds the views of an activity at a new density without relaunching it.
++ *
++ * <p>DSA gives a task the density of the host monitor its window is on. A task the user set to
++ * forced system scaling takes a new density without a relaunch (the window manager treats the
++ * change as handled), so the activity, its process and everything it holds survive. Its
++ * resources then answer at the new density, but its views keep every pixel size they read at
++ * the old one: the height of an app bar, the padding and text size of a list item, the size of
++ * an icon. This class converts those sizes to the new density, in place, on the views the app
++ * already has, as if they had been inflated at it.
++ *
++ * <p>Each view and each set of layout parameters records the density its sizes are in
++ * ({@link View#mDsaDensityDpi}, {@link ViewGroup.LayoutParams#mDsaDensityDpi}). When the
++ * window manager says the activity's views are rescaled (ActivityConfigurationChangeItem), the
++ * activity's windows are converted at once ({@link #rescaleWindowsOf}). A view that is not in a
++ * window then (a list item a RecyclerView keeps for reuse, a page a pager keeps, a dialog's
++ * content) is converted when it is added to a parent or a window again, or when the app first
++ * touches one of its sizes through the framework (its layout parameters, its padding, its
++ * minimum size, its text size), so that a size the app sets at the new density is never
++ * converted a second time. A view converted once records the new density and is left alone.
++ *
++ * <p>What it converts: layout parameters (width, height, margins), padding, minimum size,
++ * elevation, translation, scroll position, the density of the drawables a view shows (bitmap,
++ * nine-patch, vector, shape, layer, state list and inset drawables), a text view's text size,
++ * line spacing, shadow, size limits, auto-size range and compound drawables, and an image
++ * view's drawable and size limits. What it cannot convert: sizes kept in fields of the app's
++ * own classes or of its libraries (a custom view's measurements, an androidx Toolbar's insets,
++ * a RecyclerView ItemDecoration's spacing, a ConstraintLayout guideline), sizes in text spans,
++ * an image matrix, and drawables an app made itself without resources.
++ *
++ * <p>Nothing changes in a process until the first such change reaches it, and no view of any
++ * other task is touched.
++ *
++ * @hide
++ */
++public final class DsaDensityRescale {
++    /**
++     * Set once this process has rebuilt a window at a new density. Until then no view checks
++     * its density, so nothing changes for an app that is never set to forced system scaling.
++     */
++    static volatile boolean sActive;
++
++    private DsaDensityRescale() {}
++
++    /**
++     * Converts every view in the windows of the activity whose token is {@code token} (its own
++     * window, its dialogs and popups) to the density their resources now have, and asks them to
++     * lay out and draw again. Called by ActivityThread after the activity's resources take a new
++     * density, before the activity hears of the change.
++     */
++    public static void rescaleWindowsOf(IBinder token) {
++        sActive = true;
++        for (ViewRootImpl root : WindowManagerGlobal.getInstance().getRootViews(token)) {
++            // A window of another thread is converted when that thread next adds or touches
++            // its views; a view may only be changed on the thread that owns its window.
++            if (root.mThread != Thread.currentThread()) {
++                continue;
++            }
++            final View view = root.getView();
++            if (view == null) {
++                continue;
++            }
++            rescaleTree(view);
++            view.requestLayout();
++            view.invalidate();
++        }
++    }
++
++    /** Converts {@code view} and every view below it whose sizes are at another density. */
++    static void rescaleTree(View view) {
++        view.dsaRescaleIfStale();
++        if (view instanceof ViewGroup group) {
++            final int count = group.getChildCount();
++            for (int i = 0; i < count; i++) {
++                final View child = group.getChildAt(i);
++                if (child != null) {
++                    rescaleTree(child);
++                }
++            }
++        }
++    }
++
++    /**
++     * {@link #rescaleTree} for a view about to join a parent or a window, once this process
++     * rebuilds windows at all.
++     */
++    static void rescaleTreeIfActive(View view) {
++        if (sActive && view != null) {
++            rescaleTree(view);
++        }
++    }
++
++    /** The density of {@code context}'s resources, or 0 for a context without any. */
++    static int densityOf(Context context) {
++        final Resources resources = context != null ? context.getResources() : null;
++        return resources != null ? resources.getDisplayMetrics().densityDpi : 0;
++    }
++
++    /** {@code px}, a size at {@code from} dpi, at {@code to} dpi. */
++    public static int scale(int px, int from, int to) {
++        if (px == 0 || from == to || from <= 0 || to <= 0) {
++            return px;
++        }
++        final float scaled = px * (float) to / from;
++        final int rounded = Math.round(scaled);
++        // As Resources rounds a dimension: a size that was not zero stays at least one pixel.
++        if (rounded == 0) {
++            return px > 0 ? 1 : -1;
++        }
++        return rounded;
++    }
++
++    /** {@code px}, a size at {@code from} dpi, at {@code to} dpi. */
++    public static float scale(float px, int from, int to) {
++        if (px == 0f || from == to || from <= 0 || to <= 0) {
++            return px;
++        }
++        return px * (float) to / from;
++    }
++}
+diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
+--- a/core/java/android/view/View.java
++++ b/core/java/android/view/View.java
+@@ -5509,6 +5509,13 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.P)
+     private int mMinWidth;
+ 
++    /**
++     * DSA: the density, in dpi, this view's own pixel sizes are in: its resources' when it
++     * was made, and the new one once DsaDensityRescale converts it. 0 for a view without
++     * resources, which is never converted.
++     */
++    int mDsaDensityDpi;
++
+     /**
+      * The delegate to handle touch events that are physically in this view
+      * but should be handled by another view.
+@@ -6016,6 +6023,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+     public View(Context context) {
+         mContext = context;
+         mResources = context != null ? context.getResources() : null;
++        mDsaDensityDpi = mResources != null ? mResources.getDisplayMetrics().densityDpi : 0;
+         mViewFlags = SOUND_EFFECTS_ENABLED | HAPTIC_FEEDBACK_ENABLED | FOCUSABLE_AUTO;
+         // Set some flags defaults
+         mPrivateFlags2 =
+@@ -20464,6 +20472,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @RemotableViewMethod
+     public void setElevation(float elevation) {
++        dsaRescaleIfActive();
+         if (elevation != getElevation()) {
+             elevation = sanitizeFloatPropertyValue(elevation, "elevation");
+             invalidateViewProperty(true, false);
+@@ -20499,6 +20508,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @RemotableViewMethod
+     public void setTranslationX(float translationX) {
++        dsaRescaleIfActive();
+         if (translationX != getTranslationX()) {
+             mPrivateFlags4 |= PFLAG4_HAS_MOVED;
+             invalidateViewProperty(true, false);
+@@ -20536,6 +20546,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @RemotableViewMethod
+     public void setTranslationY(float translationY) {
++        dsaRescaleIfActive();
+         if (translationY != getTranslationY()) {
+             mPrivateFlags4 |= PFLAG4_HAS_MOVED;
+             invalidateViewProperty(true, false);
+@@ -20565,6 +20576,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @RemotableViewMethod
+     public void setTranslationZ(float translationZ) {
++        dsaRescaleIfActive();
+         if (translationZ != getTranslationZ()) {
+             translationZ = sanitizeFloatPropertyValue(translationZ, "translationZ");
+             invalidateViewProperty(true, false);
+@@ -21119,6 +21131,8 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @ViewDebug.ExportedProperty(deepExport = true, prefix = "layout_")
+     public ViewGroup.LayoutParams getLayoutParams() {
++        // DSA: converted before the app changes them at the new density (DsaDensityRescale).
++        dsaRescaleIfActive();
+         return mLayoutParams;
+     }
+ 
+@@ -21135,6 +21149,8 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+         if (params == null) {
+             throw new NullPointerException("Layout parameters cannot be null");
+         }
++        dsaRescaleIfActive();
++        dsaAdoptLayoutParams(params);
+         mLayoutParams = params;
+         resolveLayoutParams();
+         if (mParent instanceof ViewGroup) {
+@@ -21143,6 +21159,107 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+         requestLayout();
+     }
+ 
++    /**
++     * DSA: gives {@code params}, when nothing says yet what density its sizes are in, this
++     * view's: whoever made them made them for this view (DsaDensityRescale).
++     */
++    final void dsaAdoptLayoutParams(ViewGroup.LayoutParams params) {
++        if (params != null && params.mDsaDensityDpi == 0) {
++            params.mDsaDensityDpi = mDsaDensityDpi;
++        }
++    }
++
++    /**
++     * DSA: {@link #dsaRescaleIfStale()}, once the process rebuilds windows at a new density at
++     * all (DsaDensityRescale). Until then a view never checks its density.
++     * @hide
++     */
++    public final void dsaRescaleIfActive() {
++        if (DsaDensityRescale.sActive) {
++            dsaRescaleIfStale();
++        }
++    }
++
++    /**
++     * DSA: converts this view's own pixel sizes to the density its resources now have, when
++     * they are at another one (DsaDensityRescale), and asks it to lay out and draw again. Its
++     * children are left to their own checks.
++     * @hide
++     */
++    public final void dsaRescaleIfStale() {
++        final int from = mDsaDensityDpi;
++        if (from == 0 || mResources == null) {
++            return;
++        }
++        final int to = mResources.getDisplayMetrics().densityDpi;
++        if (to == from || to == 0) {
++            return;
++        }
++        // First, so that whatever the conversion calls finds this view converted already.
++        mDsaDensityDpi = to;
++        try {
++            onDsaRescale(from, to);
++        } catch (RuntimeException e) {
++            // A view of the app's that cannot take the new sizes keeps the ones it has.
++            Log.w(VIEW_LOG_TAG, "could not rebuild " + this + " at " + to + " dpi", e);
++        }
++        forceLayout();
++        invalidate();
++    }
++
++    /**
++     * DSA: converts the sizes this view keeps in pixels from {@code fromDpi} to {@code toDpi}:
++     * its layout parameters, padding, minimum size, elevation, translation, scroll position and
++     * the density of its background and foreground. A subclass that keeps more converts those
++     * too and calls through.
++     * @hide
++     */
++    protected void onDsaRescale(int fromDpi, int toDpi) {
++        // A window's parameters belong to the window manager, which sizes the window.
++        if (mLayoutParams != null && !(mLayoutParams instanceof WindowManager.LayoutParams)) {
++            mLayoutParams.dsaRescale(fromDpi, toDpi);
++        }
++        if (mUserPaddingStart != UNDEFINED_PADDING) {
++            mUserPaddingStart = DsaDensityRescale.scale(mUserPaddingStart, fromDpi, toDpi);
++        }
++        if (mUserPaddingEnd != UNDEFINED_PADDING) {
++            mUserPaddingEnd = DsaDensityRescale.scale(mUserPaddingEnd, fromDpi, toDpi);
++        }
++        mUserPaddingLeftInitial = DsaDensityRescale.scale(mUserPaddingLeftInitial, fromDpi, toDpi);
++        mUserPaddingRightInitial =
++                DsaDensityRescale.scale(mUserPaddingRightInitial, fromDpi, toDpi);
++        // The padding as it was set, without the room for inset scroll bars, which
++        // internalSetPadding adds again.
++        internalSetPadding(DsaDensityRescale.scale(mUserPaddingLeft, fromDpi, toDpi),
++                DsaDensityRescale.scale(mPaddingTop, fromDpi, toDpi),
++                DsaDensityRescale.scale(mUserPaddingRight, fromDpi, toDpi),
++                DsaDensityRescale.scale(mUserPaddingBottom, fromDpi, toDpi));
++        mMinWidth = DsaDensityRescale.scale(mMinWidth, fromDpi, toDpi);
++        mMinHeight = DsaDensityRescale.scale(mMinHeight, fromDpi, toDpi);
++        setElevation(DsaDensityRescale.scale(getElevation(), fromDpi, toDpi));
++        setTranslationX(DsaDensityRescale.scale(getTranslationX(), fromDpi, toDpi));
++        setTranslationY(DsaDensityRescale.scale(getTranslationY(), fromDpi, toDpi));
++        setTranslationZ(DsaDensityRescale.scale(getTranslationZ(), fromDpi, toDpi));
++        // A web view's scroll position is the page's, which it keeps itself.
++        if ((mScrollX != 0 || mScrollY != 0) && !(this instanceof android.webkit.WebView)) {
++            scrollTo(DsaDensityRescale.scale(mScrollX, fromDpi, toDpi),
++                    DsaDensityRescale.scale(mScrollY, fromDpi, toDpi));
++        }
++        if (mScrollCache != null) {
++            mScrollCache.fadingEdgeLength =
++                    DsaDensityRescale.scale(mScrollCache.fadingEdgeLength, fromDpi, toDpi);
++        }
++        if (mBackground != null) {
++            mBackground.dsaRetargetDensity(fromDpi, toDpi);
++            mBackgroundSizeChanged = true;
++        }
++        if (mForegroundInfo != null && mForegroundInfo.mDrawable != null) {
++            mForegroundInfo.mDrawable.dsaRetargetDensity(fromDpi, toDpi);
++            mForegroundInfo.mBoundsChanged = true;
++        }
++        invalidateOutline();
++    }
++
+     /**
+      * Resolve the layout parameters depending on the resolved layout direction
+      *
+@@ -21162,6 +21279,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @param y the y position to scroll to
+      */
+     public void scrollTo(int x, int y) {
++        dsaRescaleIfActive();
+         if (mScrollX != x || mScrollY != y) {
+             int oldX = mScrollX;
+             int oldY = mScrollY;
+@@ -26910,6 +27028,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @Deprecated
+     public void setBackgroundDrawable(Drawable background) {
++        dsaRescaleIfActive();
+         computeOpaqueFlags();
+ 
+         if (background == mBackground) {
+@@ -27194,6 +27313,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @attr ref android.R.styleable#View_foreground
+      */
+     public void setForeground(Drawable foreground) {
++        dsaRescaleIfActive();
+         if (mForegroundInfo == null) {
+             if (foreground == null) {
+                 // Nothing to do.
+@@ -27536,6 +27656,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @param bottom the bottom padding in pixels
+      */
+     public void setPadding(int left, int top, int right, int bottom) {
++        dsaRescaleIfActive();
+         resetResolvedPaddingInternal();
+ 
+         mUserPaddingStart = UNDEFINED_PADDING;
+@@ -27630,6 +27751,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @param bottom the bottom padding in pixels
+      */
+     public void setPaddingRelative(int start, int top, int end, int bottom) {
++        dsaRescaleIfActive();
+         resetResolvedPaddingInternal();
+ 
+         mUserPaddingStart = start;
+@@ -27670,6 +27792,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @InspectableProperty
+     public int getPaddingTop() {
++        dsaRescaleIfActive();
+         return mPaddingTop;
+     }
+ 
+@@ -27682,6 +27805,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @InspectableProperty
+     public int getPaddingBottom() {
++        dsaRescaleIfActive();
+         return mPaddingBottom;
+     }
+ 
+@@ -27694,6 +27818,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @InspectableProperty
+     public int getPaddingLeft() {
++        dsaRescaleIfActive();
+         if (!isPaddingResolved()) {
+             resolvePadding();
+         }
+@@ -27708,6 +27833,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @return the start padding in pixels
+      */
+     public int getPaddingStart() {
++        dsaRescaleIfActive();
+         if (!isPaddingResolved()) {
+             resolvePadding();
+         }
+@@ -27724,6 +27850,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @InspectableProperty
+     public int getPaddingRight() {
++        dsaRescaleIfActive();
+         if (!isPaddingResolved()) {
+             resolvePadding();
+         }
+@@ -27738,6 +27865,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @return the end padding in pixels
+      */
+     public int getPaddingEnd() {
++        dsaRescaleIfActive();
+         if (!isPaddingResolved()) {
+             resolvePadding();
+         }
+@@ -29105,6 +29233,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @RemotableViewMethod
+     public void setMinimumHeight(int minHeight) {
++        dsaRescaleIfActive();
+         mMinHeight = minHeight;
+         requestLayout();
+     }
+@@ -29136,6 +29265,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     @RemotableViewMethod
+     public void setMinimumWidth(int minWidth) {
++        dsaRescaleIfActive();
+         mMinWidth = minWidth;
+         requestLayout();
+ 
+diff --git a/core/java/android/view/ViewGroup.java b/core/java/android/view/ViewGroup.java
+--- a/core/java/android/view/ViewGroup.java
++++ b/core/java/android/view/ViewGroup.java
+@@ -5425,6 +5425,10 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+                     "You must call removeView() on the child's parent first.");
+         }
+ 
++        // DSA: a view kept aside while its activity took a new density (DsaDensityRescale)
++        // joins at the new one.
++        DsaDensityRescale.rescaleTreeIfActive(child);
++
+         if (mTransition != null) {
+             mTransition.addChild(this, child);
+         }
+@@ -5434,6 +5438,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+         }
+ 
+         if (preventRequestLayout) {
++            child.dsaAdoptLayoutParams(params);
+             child.mLayoutParams = params;
+         } else {
+             child.setLayoutParams(params);
+@@ -6069,6 +6074,10 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+      * @see #detachViewFromParent(int)
+      */
+     protected void attachViewToParent(View child, int index, LayoutParams params) {
++        // DSA: a view a list detached and keeps for reuse (DsaDensityRescale) comes back at
++        // the density its activity has now.
++        DsaDensityRescale.rescaleTreeIfActive(child);
++        child.dsaAdoptLayoutParams(params);
+         child.mLayoutParams = params;
+ 
+         if (index < 0) {
+@@ -8511,6 +8520,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+                     R.styleable.ViewGroup_Layout_layout_width,
+                     R.styleable.ViewGroup_Layout_layout_height);
+             a.recycle();
++            mDsaDensityDpi = DsaDensityRescale.densityOf(c);
+         }
+ 
+         /**
+@@ -8537,6 +8547,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+         public LayoutParams(LayoutParams source) {
+             this.width = source.width;
+             this.height = source.height;
++            this.mDsaDensityDpi = source.mDsaDensityDpi;
+         }
+ 
+         /**
+@@ -8572,6 +8583,42 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+         public void resolveLayoutDirection(int layoutDirection) {
+         }
+ 
++        /**
++         * DSA: the density, in dpi, the sizes of these parameters are in, or 0 while that is
++         * not known: they then take the density of the view they are set on
++         * (View#dsaAdoptLayoutParams). DsaDensityRescale converts them to a new density.
++         * @hide
++         */
++        public int mDsaDensityDpi;
++
++        /**
++         * DSA: converts these parameters' sizes to {@code toDpi}, from the density they are in,
++         * or from {@code fromDpi}, that of the view they belong to, when that is not known.
++         * Parameters a view shares with another are converted once.
++         * @hide
++         */
++        public final void dsaRescale(int fromDpi, int toDpi) {
++            final int from = mDsaDensityDpi != 0 ? mDsaDensityDpi : fromDpi;
++            mDsaDensityDpi = toDpi;
++            if (from != toDpi) {
++                onDsaRescale(from, toDpi);
++            }
++        }
++
++        /**
++         * DSA: converts the sizes these parameters keep in pixels from {@code fromDpi} to
++         * {@code toDpi}. A subclass that keeps more converts those too and calls through.
++         * @hide
++         */
++        protected void onDsaRescale(int fromDpi, int toDpi) {
++            if (width > 0) {
++                width = DsaDensityRescale.scale(width, fromDpi, toDpi);
++            }
++            if (height > 0) {
++                height = DsaDensityRescale.scale(height, fromDpi, toDpi);
++            }
++        }
++
+         /**
+          * Returns a String representation of this set of layout parameters.
+          *
+@@ -8823,6 +8870,7 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+             mMarginFlags |= LAYOUT_DIRECTION_LTR;
+ 
+             a.recycle();
++            mDsaDensityDpi = DsaDensityRescale.densityOf(c);
+         }
+ 
+         public MarginLayoutParams(int width, int height) {
+@@ -8852,6 +8900,26 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+             this.endMargin = source.endMargin;
+ 
+             this.mMarginFlags = source.mMarginFlags;
++            this.mDsaDensityDpi = source.mDsaDensityDpi;
++        }
++
++        /**
++         * DSA: the margins too (LayoutParams#onDsaRescale).
++         * @hide
++         */
++        @Override
++        protected void onDsaRescale(int fromDpi, int toDpi) {
++            super.onDsaRescale(fromDpi, toDpi);
++            leftMargin = DsaDensityRescale.scale(leftMargin, fromDpi, toDpi);
++            topMargin = DsaDensityRescale.scale(topMargin, fromDpi, toDpi);
++            rightMargin = DsaDensityRescale.scale(rightMargin, fromDpi, toDpi);
++            bottomMargin = DsaDensityRescale.scale(bottomMargin, fromDpi, toDpi);
++            if (startMargin != DEFAULT_MARGIN_RELATIVE) {
++                startMargin = DsaDensityRescale.scale(startMargin, fromDpi, toDpi);
++            }
++            if (endMargin != DEFAULT_MARGIN_RELATIVE) {
++                endMargin = DsaDensityRescale.scale(endMargin, fromDpi, toDpi);
++            }
+         }
+ 
+         public MarginLayoutParams(LayoutParams source) {
+diff --git a/core/java/android/view/ViewRootImpl.java b/core/java/android/view/ViewRootImpl.java
+--- a/core/java/android/view/ViewRootImpl.java
++++ b/core/java/android/view/ViewRootImpl.java
+@@ -1649,6 +1649,9 @@ public final class ViewRootImpl implements ViewParent,
+     public void setView(View view, WindowManager.LayoutParams attrs, View panelParentView,
+             int userId) {
+         checkThreadCompat();
++        // DSA: a dialog's or a popup's views made before their activity took a new density
++        // (DsaDensityRescale) are shown at the new one.
++        DsaDensityRescale.rescaleTreeIfActive(view);
+         synchronized (this) {
+             if (mView == null) {
+                 mView = view;
+diff --git a/core/java/android/widget/ImageView.java b/core/java/android/widget/ImageView.java
+--- a/core/java/android/widget/ImageView.java
++++ b/core/java/android/widget/ImageView.java
+@@ -47,6 +47,7 @@ import android.os.Handler;
+ import android.text.TextUtils;
+ import android.util.AttributeSet;
+ import android.util.Log;
++import android.view.DsaDensityRescale;
+ import android.view.RemotableViewMethod;
+ import android.view.View;
+ import android.view.ViewDebug;
+@@ -403,6 +404,7 @@ public class ImageView extends View {
+      */
+     @android.view.RemotableViewMethod
+     public void setMaxWidth(int maxWidth) {
++        dsaRescaleIfActive();
+         mMaxWidth = maxWidth;
+     }
+ 
+@@ -442,6 +444,7 @@ public class ImageView extends View {
+      */
+     @android.view.RemotableViewMethod
+     public void setMaxHeight(int maxHeight) {
++        dsaRescaleIfActive();
+         mMaxHeight = maxHeight;
+     }
+ 
+@@ -1040,8 +1043,36 @@ public class ImageView extends View {
+         }
+     }
+ 
++    /**
++     * DSA: the image's density and the view's size limits too (View#onDsaRescale).
++     * @hide
++     */
++    @Override
++    protected void onDsaRescale(int fromDpi, int toDpi) {
++        super.onDsaRescale(fromDpi, toDpi);
++        if (mMaxWidth != Integer.MAX_VALUE) {
++            mMaxWidth = DsaDensityRescale.scale(mMaxWidth, fromDpi, toDpi);
++        }
++        if (mMaxHeight != Integer.MAX_VALUE) {
++            mMaxHeight = DsaDensityRescale.scale(mMaxHeight, fromDpi, toDpi);
++        }
++        if (mBaseline > 0) {
++            mBaseline = DsaDensityRescale.scale(mBaseline, fromDpi, toDpi);
++        }
++        if (mDrawable != null) {
++            mDrawable.dsaRetargetDensity(fromDpi, toDpi);
++            mDrawableWidth = mDrawable.getIntrinsicWidth();
++            mDrawableHeight = mDrawable.getIntrinsicHeight();
++            configureBounds();
++        }
++        requestLayout();
++        invalidate();
++    }
++
+     @UnsupportedAppUsage
+     private void updateDrawable(Drawable d) {
++        // DSA: converted first, so that the drawable set now keeps its own density.
++        dsaRescaleIfActive();
+         if (d != mRecycleableBitmapDrawable && mRecycleableBitmapDrawable != null) {
+             mRecycleableBitmapDrawable.setBitmap(null);
+         }
+diff --git a/core/java/android/widget/TextView.java b/core/java/android/widget/TextView.java
+--- a/core/java/android/widget/TextView.java
++++ b/core/java/android/widget/TextView.java
+@@ -180,6 +180,7 @@ import android.view.Choreographer;
+ import android.view.ContentInfo;
+ import android.view.ContextMenu;
+ import android.view.DragEvent;
++import android.view.DsaDensityRescale;
+ import android.view.Gravity;
+ import android.view.HapticFeedbackConstants;
+ import android.view.InputDevice;
+@@ -3177,6 +3178,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     public void setCompoundDrawables(@Nullable Drawable left, @Nullable Drawable top,
+             @Nullable Drawable right, @Nullable Drawable bottom) {
++        dsaRescaleIfActive();
+         Drawables dr = mDrawables;
+ 
+         // We're switching to absolute, discard relative.
+@@ -3374,6 +3376,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+     @android.view.RemotableViewMethod
+     public void setCompoundDrawablesRelative(@Nullable Drawable start, @Nullable Drawable top,
+             @Nullable Drawable end, @Nullable Drawable bottom) {
++        dsaRescaleIfActive();
+         Drawables dr = mDrawables;
+ 
+         // We're switching to relative, discard absolute.
+@@ -3608,6 +3611,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setCompoundDrawablePadding(int pad) {
++        dsaRescaleIfActive();
+         Drawables dr = mDrawables;
+         if (pad == 0) {
+             if (dr != null) {
+@@ -4468,6 +4472,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+     }
+ 
+     private void applyTextAppearance(TextAppearanceAttributes attributes) {
++        dsaRescaleIfActive();
+         if (attributes.mTextColor != null) {
+             setTextColor(attributes.mTextColor);
+         }
+@@ -4750,11 +4755,132 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      * @attr ref android.R.styleable#TextView_textSize
+      */
+     public void setTextSize(int unit, float size) {
++        // DSA: converted first, so that a size the app sets at the new density stays as set.
++        dsaRescaleIfActive();
+         if (!isAutoSizeEnabled()) {
+             setTextSizeInternal(unit, size, true /* shouldRequestLayout */);
+         }
+     }
+ 
++    /**
++     * DSA: the text's pixel sizes too: its size, line spacing, shadow, size limits, auto-size
++     * range and compound drawables (View#onDsaRescale).
++     * @hide
++     */
++    @Override
++    protected void onDsaRescale(int fromDpi, int toDpi) {
++        super.onDsaRescale(fromDpi, toDpi);
++        if (mAutoSizeTextType != AUTO_SIZE_TEXT_TYPE_NONE) {
++            if (mAutoSizeMinTextSizeInPx > 0) {
++                mAutoSizeMinTextSizeInPx =
++                        DsaDensityRescale.scale(mAutoSizeMinTextSizeInPx, fromDpi, toDpi);
++            }
++            if (mAutoSizeMaxTextSizeInPx > 0) {
++                mAutoSizeMaxTextSizeInPx =
++                        DsaDensityRescale.scale(mAutoSizeMaxTextSizeInPx, fromDpi, toDpi);
++            }
++            if (mAutoSizeStepGranularityInPx > 0) {
++                mAutoSizeStepGranularityInPx =
++                        DsaDensityRescale.scale(mAutoSizeStepGranularityInPx, fromDpi, toDpi);
++            }
++            final int[] sizes = mAutoSizeTextSizesInPx.clone();
++            for (int i = 0; i < sizes.length; i++) {
++                sizes[i] = DsaDensityRescale.scale(sizes[i], fromDpi, toDpi);
++            }
++            mAutoSizeTextSizesInPx = cleanupAutoSizePresetSizes(sizes);
++        }
++        // The spacing first: a line height set in sp is worked out again from the new text size
++        // as that is set, and replaces it.
++        mSpacingAdd = DsaDensityRescale.scale(mSpacingAdd, fromDpi, toDpi);
++        if (mLineHeightComplexDimen != 0 && TypedValue.getUnitFromComplexDimension(
++                mLineHeightComplexDimen) == TypedValue.COMPLEX_UNIT_PX) {
++            mLineHeightComplexDimen = TypedValue.createComplexDimension(
++                    DsaDensityRescale.scale(TypedValue.complexToFloat(mLineHeightComplexDimen),
++                            fromDpi, toDpi), TypedValue.COMPLEX_UNIT_PX);
++        }
++        setRawTextSize(DsaDensityRescale.scale(mTextPaint.getTextSize(), fromDpi, toDpi),
++                false /* shouldRequestLayout */);
++        if (mShadowRadius != 0 || mShadowDx != 0 || mShadowDy != 0) {
++            setShadowLayer(DsaDensityRescale.scale(mShadowRadius, fromDpi, toDpi),
++                    DsaDensityRescale.scale(mShadowDx, fromDpi, toDpi),
++                    DsaDensityRescale.scale(mShadowDy, fromDpi, toDpi), mShadowColor);
++        }
++        if (mMaxMode == PIXELS && mMaximum != Integer.MAX_VALUE) {
++            mMaximum = DsaDensityRescale.scale(mMaximum, fromDpi, toDpi);
++        }
++        if (mMinMode == PIXELS) {
++            mMinimum = DsaDensityRescale.scale(mMinimum, fromDpi, toDpi);
++        }
++        if (mMaxWidthMode == PIXELS && mMaxWidth != Integer.MAX_VALUE) {
++            mMaxWidth = DsaDensityRescale.scale(mMaxWidth, fromDpi, toDpi);
++        }
++        if (mMinWidthMode == PIXELS) {
++            mMinWidth = DsaDensityRescale.scale(mMinWidth, fromDpi, toDpi);
++        }
++        final Drawables dr = mDrawables;
++        if (dr != null) {
++            final ArraySet<Drawable> seen = new ArraySet<>();
++            for (Drawable d : dr.mShowing) {
++                dsaRescaleCompoundDrawable(d, seen, fromDpi, toDpi);
++            }
++            dsaRescaleCompoundDrawable(dr.mDrawableStart, seen, fromDpi, toDpi);
++            dsaRescaleCompoundDrawable(dr.mDrawableEnd, seen, fromDpi, toDpi);
++            dsaRescaleCompoundDrawable(dr.mDrawableLeftInitial, seen, fromDpi, toDpi);
++            dsaRescaleCompoundDrawable(dr.mDrawableRightInitial, seen, fromDpi, toDpi);
++            dsaRescaleCompoundDrawable(dr.mDrawableError, seen, fromDpi, toDpi);
++            dr.mDrawableSizeTop = DsaDensityRescale.scale(dr.mDrawableSizeTop, fromDpi, toDpi);
++            dr.mDrawableSizeBottom =
++                    DsaDensityRescale.scale(dr.mDrawableSizeBottom, fromDpi, toDpi);
++            dr.mDrawableSizeLeft = DsaDensityRescale.scale(dr.mDrawableSizeLeft, fromDpi, toDpi);
++            dr.mDrawableSizeRight =
++                    DsaDensityRescale.scale(dr.mDrawableSizeRight, fromDpi, toDpi);
++            dr.mDrawableSizeStart =
++                    DsaDensityRescale.scale(dr.mDrawableSizeStart, fromDpi, toDpi);
++            dr.mDrawableSizeEnd = DsaDensityRescale.scale(dr.mDrawableSizeEnd, fromDpi, toDpi);
++            dr.mDrawableSizeError =
++                    DsaDensityRescale.scale(dr.mDrawableSizeError, fromDpi, toDpi);
++            dr.mDrawableWidthTop = DsaDensityRescale.scale(dr.mDrawableWidthTop, fromDpi, toDpi);
++            dr.mDrawableWidthBottom =
++                    DsaDensityRescale.scale(dr.mDrawableWidthBottom, fromDpi, toDpi);
++            dr.mDrawableHeightLeft =
++                    DsaDensityRescale.scale(dr.mDrawableHeightLeft, fromDpi, toDpi);
++            dr.mDrawableHeightRight =
++                    DsaDensityRescale.scale(dr.mDrawableHeightRight, fromDpi, toDpi);
++            dr.mDrawableHeightStart =
++                    DsaDensityRescale.scale(dr.mDrawableHeightStart, fromDpi, toDpi);
++            dr.mDrawableHeightEnd =
++                    DsaDensityRescale.scale(dr.mDrawableHeightEnd, fromDpi, toDpi);
++            dr.mDrawableHeightError =
++                    DsaDensityRescale.scale(dr.mDrawableHeightError, fromDpi, toDpi);
++            dr.mDrawablePadding = DsaDensityRescale.scale(dr.mDrawablePadding, fromDpi, toDpi);
++        }
++        if (mAutoSizeTextType != AUTO_SIZE_TEXT_TYPE_NONE) {
++            setupAutoSizeText();
++        }
++        if (mLayout != null) {
++            nullLayouts();
++        }
++        requestLayout();
++        invalidate();
++    }
++
++    /**
++     * DSA: a compound drawable at the new density, its bounds (which the app or the text view
++     * set in pixels) with it. Each drawable once, however many slots show it.
++     */
++    private static void dsaRescaleCompoundDrawable(Drawable d, ArraySet<Drawable> seen,
++            int fromDpi, int toDpi) {
++        if (d == null || !seen.add(d)) {
++            return;
++        }
++        d.dsaRetargetDensity(fromDpi, toDpi);
++        final Rect bounds = d.getBounds();
++        d.setBounds(DsaDensityRescale.scale(bounds.left, fromDpi, toDpi),
++                DsaDensityRescale.scale(bounds.top, fromDpi, toDpi),
++                DsaDensityRescale.scale(bounds.right, fromDpi, toDpi),
++                DsaDensityRescale.scale(bounds.bottom, fromDpi, toDpi));
++    }
++
+     @NonNull
+     private DisplayMetrics getDisplayMetricsOrSystem() {
+         Context c = getContext();
+@@ -5718,6 +5844,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      * @attr ref android.R.styleable#TextView_shadowRadius
+      */
+     public void setShadowLayer(float radius, float dx, float dy, int color) {
++        dsaRescaleIfActive();
+         mTextPaint.setShadowLayer(radius, dx, dy, color);
+ 
+         mShadowRadius = radius;
+@@ -6132,6 +6259,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setMinHeight(int minPixels) {
++        dsaRescaleIfActive();
+         mMinimum = minPixels;
+         mMinMode = PIXELS;
+ 
+@@ -6211,6 +6339,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setMaxHeight(int maxPixels) {
++        dsaRescaleIfActive();
+         mMaximum = maxPixels;
+         mMaxMode = PIXELS;
+ 
+@@ -6273,6 +6402,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setHeight(int pixels) {
++        dsaRescaleIfActive();
+         mMaximum = mMinimum = pixels;
+         mMaxMode = mMinMode = PIXELS;
+ 
+@@ -6340,6 +6470,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setMinWidth(int minPixels) {
++        dsaRescaleIfActive();
+         mMinWidth = minPixels;
+         mMinWidthMode = PIXELS;
+ 
+@@ -6420,6 +6551,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setMaxWidth(int maxPixels) {
++        dsaRescaleIfActive();
+         mMaxWidth = maxPixels;
+         mMaxWidthMode = PIXELS;
+ 
+@@ -6481,6 +6613,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      */
+     @android.view.RemotableViewMethod
+     public void setWidth(int pixels) {
++        dsaRescaleIfActive();
+         mMaxWidth = mMinWidth = pixels;
+         mMaxWidthMode = mMinWidthMode = PIXELS;
+ 
+@@ -6501,6 +6634,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
+      * @attr ref android.R.styleable#TextView_lineSpacingMultiplier
+      */
+     public void setLineSpacing(float add, float mult) {
++        dsaRescaleIfActive();
+         if (mSpacingAdd != add || mSpacingMult != mult) {
+             mSpacingAdd = add;
+             mSpacingMult = mult;
+diff --git a/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java b/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
+--- a/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
++++ b/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
+@@ -671,6 +671,18 @@ public class AnimatedVectorDrawable extends Drawable implements Animatable2 {
+                 || super.canApplyTheme();
+     }
+ 
++    /**
++     * DSA: the vector it animates, which keeps playing.
++     * @hide
++     */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        if (mAnimatedVectorState != null && mAnimatedVectorState.mVectorDrawable != null) {
++            mAnimatedVectorState.mVectorDrawable.dsaRetargetDensity(fromDpi, toDpi);
++            invalidateSelf();
++        }
++    }
++
+     @Override
+     public void applyTheme(Theme t) {
+         super.applyTheme(t);
+diff --git a/graphics/java/android/graphics/drawable/BitmapDrawable.java b/graphics/java/android/graphics/drawable/BitmapDrawable.java
+--- a/graphics/java/android/graphics/drawable/BitmapDrawable.java
++++ b/graphics/java/android/graphics/drawable/BitmapDrawable.java
+@@ -302,6 +302,14 @@ public class BitmapDrawable extends Drawable {
+         }
+     }
+ 
++    /** @hide */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        if (mTargetDensity == fromDpi) {
++            setTargetDensity(toDpi);
++        }
++    }
++
+     /** Get the gravity used to position/stretch the bitmap within its bounds.
+      * See android.view.Gravity
+      * @return the gravity applied to the bitmap
+diff --git a/graphics/java/android/graphics/drawable/Drawable.java b/graphics/java/android/graphics/drawable/Drawable.java
+--- a/graphics/java/android/graphics/drawable/Drawable.java
++++ b/graphics/java/android/graphics/drawable/Drawable.java
+@@ -969,6 +969,17 @@ public abstract class Drawable {
+         return false;
+     }
+ 
++    /**
++     * DSA: moves a drawable whose pixel sizes are at {@code fromDpi} to {@code toDpi}, in
++     * place, for a view whose activity took a new density without a relaunch
++     * (android.view.DsaDensityRescale). A drawable that keeps no size of its own does nothing,
++     * and so does one whose sizes are at another density than {@code fromDpi}: that one was not
++     * made from the view's resources, and its sizes are what its maker set.
++     * @hide
++     */
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++    }
++
+     /**
+      * Return the opacity/transparency of this Drawable.  The returned value is
+      * one of the abstract format constants in
+diff --git a/graphics/java/android/graphics/drawable/DrawableContainer.java b/graphics/java/android/graphics/drawable/DrawableContainer.java
+--- a/graphics/java/android/graphics/drawable/DrawableContainer.java
++++ b/graphics/java/android/graphics/drawable/DrawableContainer.java
+@@ -636,6 +636,29 @@ public class DrawableContainer extends Drawable implements Drawable.Callback {
+         return mDrawableContainerState.canApplyTheme();
+     }
+ 
++    /**
++     * DSA: every child made so far. A child made later comes from the container's resources,
++     * which have the new density by then.
++     * @hide
++     */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        final DrawableContainerState state = mDrawableContainerState;
++        if (state.mDensity == fromDpi) {
++            state.mDensity = toDpi;
++        }
++        state.mCheckedConstantSize = false;
++        state.mCheckedPadding = false;
++        final Drawable[] drawables = state.mDrawables;
++        final int count = state.mNumChildren;
++        for (int i = 0; i < count; i++) {
++            if (drawables[i] != null) {
++                drawables[i].dsaRetargetDensity(fromDpi, toDpi);
++            }
++        }
++        invalidateSelf();
++    }
++
+     @Override
+     public ConstantState getConstantState() {
+         if (mDrawableContainerState.canConstantState()) {
+diff --git a/graphics/java/android/graphics/drawable/DrawableWrapper.java b/graphics/java/android/graphics/drawable/DrawableWrapper.java
+--- a/graphics/java/android/graphics/drawable/DrawableWrapper.java
++++ b/graphics/java/android/graphics/drawable/DrawableWrapper.java
+@@ -212,6 +212,23 @@ public abstract class DrawableWrapper extends Drawable implements Drawable.Callb
+         return (mState != null && mState.canApplyTheme()) || super.canApplyTheme();
+     }
+ 
++    /**
++     * DSA: the wrapper's own sizes (an inset drawable's insets), at the density it was inflated
++     * at, and the drawable it wraps.
++     * @hide
++     */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        if (mState != null && mState.mDensity == fromDpi) {
++            mState.setDensity(toDpi);
++        }
++        if (mDrawable != null) {
++            mDrawable.dsaRetargetDensity(fromDpi, toDpi);
++        }
++        onBoundsChange(getBounds());
++        invalidateSelf();
++    }
++
+     @Override
+     public void invalidateDrawable(@NonNull Drawable who) {
+         final Callback callback = getCallback();
+diff --git a/graphics/java/android/graphics/drawable/GradientDrawable.java b/graphics/java/android/graphics/drawable/GradientDrawable.java
+--- a/graphics/java/android/graphics/drawable/GradientDrawable.java
++++ b/graphics/java/android/graphics/drawable/GradientDrawable.java
+@@ -2502,6 +2502,25 @@ public class GradientDrawable extends Drawable {
+      *
+      * @param state Constant state from which the drawable inherits
+      */
++    /**
++     * DSA: the shape's sizes (corners, stroke, size, padding) are in its state, at the density
++     * it was inflated at. A state several drawables share is converted once, and each of them
++     * takes its stroke and padding from it again.
++     * @hide
++     */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        final GradientState state = mGradientState;
++        if (state.mDensity == fromDpi) {
++            state.setDensity(toDpi);
++        }
++        if (state.mDensity == toDpi && fromDpi != toDpi) {
++            updateLocalState(null);
++            mPathIsDirty = true;
++            invalidateSelf();
++        }
++    }
++
+     private GradientDrawable(@NonNull GradientState state, @Nullable Resources res) {
+         mGradientState = state;
+ 
+diff --git a/graphics/java/android/graphics/drawable/LayerDrawable.java b/graphics/java/android/graphics/drawable/LayerDrawable.java
+--- a/graphics/java/android/graphics/drawable/LayerDrawable.java
++++ b/graphics/java/android/graphics/drawable/LayerDrawable.java
+@@ -409,6 +409,35 @@ public class LayerDrawable extends Drawable implements Drawable.Callback {
+         return mLayerState.canApplyTheme() || super.canApplyTheme();
+     }
+ 
++    /**
++     * DSA: the layers' insets and sizes, at the density the layer list was inflated at, and
++     * each layer's drawable.
++     * @hide
++     */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        final LayerState state = mLayerState;
++        final boolean own = state.mDensity == fromDpi;
++        if (own) {
++            state.setDensity(toDpi);
++        }
++        final ChildDrawable[] array = state.mChildren;
++        final int count = state.mNumChildren;
++        for (int i = 0; i < count; i++) {
++            final ChildDrawable layer = array[i];
++            if (own && layer.mDensity == fromDpi) {
++                layer.setDensity(toDpi);
++            }
++            if (layer.mDrawable != null) {
++                layer.mDrawable.dsaRetargetDensity(fromDpi, toDpi);
++            }
++        }
++        ensurePadding();
++        refreshPadding();
++        onBoundsChange(getBounds());
++        invalidateSelf();
++    }
++
+     /**
+      * @hide
+      */
+diff --git a/graphics/java/android/graphics/drawable/NinePatchDrawable.java b/graphics/java/android/graphics/drawable/NinePatchDrawable.java
+--- a/graphics/java/android/graphics/drawable/NinePatchDrawable.java
++++ b/graphics/java/android/graphics/drawable/NinePatchDrawable.java
+@@ -190,6 +190,14 @@ public class NinePatchDrawable extends Drawable {
+         }
+     }
+ 
++    /** @hide */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        if (mTargetDensity == fromDpi) {
++            setTargetDensity(toDpi);
++        }
++    }
++
+     @Override
+     public void draw(Canvas canvas) {
+         final NinePatchState state = mNinePatchState;
+diff --git a/graphics/java/android/graphics/drawable/VectorDrawable.java b/graphics/java/android/graphics/drawable/VectorDrawable.java
+--- a/graphics/java/android/graphics/drawable/VectorDrawable.java
++++ b/graphics/java/android/graphics/drawable/VectorDrawable.java
+@@ -384,6 +384,16 @@ public class VectorDrawable extends Drawable {
+         updateColorFilters(mVectorState.mBlendMode, mVectorState.mTint);
+     }
+ 
++    /** @hide */
++    @Override
++    public void dsaRetargetDensity(int fromDpi, int toDpi) {
++        if (mTargetDensity == fromDpi && toDpi > 0) {
++            mTargetDensity = toDpi;
++            mDpiScaledDirty = true;
++            invalidateSelf();
++        }
++    }
++
+     @Override
+     public Drawable mutate() {
+         if (!mMutated && super.mutate() == this) {
+diff --git a/services/core/java/com/android/server/wm/ActivityRecord.java b/services/core/java/com/android/server/wm/ActivityRecord.java
+--- a/services/core/java/com/android/server/wm/ActivityRecord.java
++++ b/services/core/java/com/android/server/wm/ActivityRecord.java
+@@ -1407,10 +1407,27 @@ final class ActivityRecord extends WindowToken {
+                 + "config: %s", this, config);
+ 
+         final ActivityConfigurationChangeItem item = new ActivityConfigurationChangeItem(token,
+-                config, activityWindowInfo, getDisplayId());
++                config, activityWindowInfo, getDisplayId(), dsaRescalesViews());
+         mAtmService.getLifecycleManager().scheduleTransactionItem(app.getThread(), item);
+     }
+ 
++    /**
++     * DSA: whether the app's process rescales this activity's views when its density changes
++     * (android.view.DsaDensityRescale): when its task is marked for forced system scaling and
++     * its manifest does not say it handles a change of density. Such an activity is given the
++     * new density without a relaunch (dsaForcedDensityMask), so without this its views would
++     * keep the pixel sizes they took at the old density. An activity that handles density
++     * itself redraws as the app decides, as for any task.
++     */
++    private boolean dsaRescalesViews() {
++        return dsaRescalesViews(dsaForcedDensity(), info.getRealConfigChanged());
++    }
++
++    /** DSA: {@link #dsaRescalesViews()} for a task that is marked or not. */
++    static boolean dsaRescalesViews(boolean forced, int handledChanges) {
++        return forced && (handledChanges & ActivityInfo.CONFIG_DENSITY) == 0;
++    }
++
+     boolean scheduleTopResumedActivityChanged(boolean onTop) {
+         if (!attachedToProcess() || isState(DESTROYING, DESTROYED)) {
+             ProtoLog.w(WM_DEBUG_STATES,
