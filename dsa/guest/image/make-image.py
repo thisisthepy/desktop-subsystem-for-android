@@ -9168,7 +9168,7 @@ def write_compiled_target_files(z, out, compiled, removed, rules):
 # What partition_image_problems compares between the target files and the partition images built
 # from them: compiled code (boot images, odex, vdex and app images) and the boot class path's jars.
 COMPILED_SUFFIXES = (".art", ".oat", ".odex", ".vdex")
-EROFS_MAGIC = struct.pack("<I", 0xE0F5E1E2)
+EROFS_MAGIC_BYTES = struct.pack("<I", 0xE0F5E1E2)
 SPARSE_MAGIC = struct.pack("<I", 0xED26FF3A)
 
 
@@ -9227,7 +9227,7 @@ def extract_partition_image(z, member, otatools, folder, env):
         image = raw
         with open(image, "rb") as f:
             head = f.read(1028)
-    if head[1024:1028] != EROFS_MAGIC:
+    if head[1024:1028] != EROFS_MAGIC_BYTES:
         raise ValueError(f"{member} is not an erofs image, so the image cannot check what it holds")
     tree = folder / "tree"
     run(otatools / "bin/fsck.erofs", f"--extract={tree}", image, env=env)
