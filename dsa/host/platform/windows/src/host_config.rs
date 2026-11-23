@@ -271,7 +271,7 @@ pub struct HostConfig {
     /// to the most it used, until the VM stops, and memory is taken only while video plays.
     #[serde(default)]
     pub video_shared_memory_mb: Option<u64>,
-    /// The size in MiB of the memory the VM shares with the graphics renderer (256 when absent,
+    /// The size in MiB of the memory the VM shares with the graphics renderer (512 when absent,
     /// 0 for none). Apps' Vulkan host-visible memory and gralloc buffers' CPU uploads and read
     /// backs go there instead of through the graphics stream; the size is fixed when the VM is
     /// made and only reserved. The system's commit limit is charged only for what grants used,
