@@ -24,7 +24,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
    whose package manager it edits so an app with arm64-v8a code
    only installs while ARM translation is on (SERVICES_ABI_CODE), and whose WebView service it
    edits so the WebView zygote starts with the first renderer (SERVICES_WEBVIEW_ZYGOTE_CODE);
-6. builds the images, and lays them out on the template of a user's Android disk.
+6. builds the images from those contents (the ones signing built before anything was compiled
+   are dropped), checks that they hold the boot images, odex and boot class path jars it made
+   (built_image_problems), and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
 
@@ -7448,7 +7450,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 continue
             if kept_modules.match(name):
                 continue
-            if name.startswith("IMAGES/"):
+            if name.startswith(PARTITION_IMAGES_FOLDER):
                 # Rebuilt after signing from the modified contents.
                 continue
             if name.endswith("/etc/selinux/precompiled_sepolicy"):
@@ -9130,6 +9132,138 @@ def services_profiles(spec, inputs):
     return {SERVICES_JAR: paths}
 
 
+# sign_target_files_apks builds the partition images itself once it has signed the apps
+# (IMAGES/system.img and the rest, through add_img_to_target_files), from the contents as they are
+# then, before compile_apps compiles anything. add_img_to_target_files -a after compile_apps only
+# adds the images that are missing, so an image signing left kept the published build's boot
+# images and odex beside the framework.jar and services.jar the image replaced, and none of the
+# apps compile_apps compiled: the guest ran a boot image compiled for another framework.jar
+# (artd reported its boot-framework.oat as made for other dex), and an app protected by Google
+# Play's PairIP crashed at its start. Every partition image is therefore dropped once the
+# contents change, and built again from them.
+PARTITION_IMAGES_FOLDER = "IMAGES/"
+
+
+def write_compiled_target_files(z, out, compiled, removed, rules):
+    """Writes the target_files `z` to `out` with what compile_apps made: the members in
+    `compiled` (name to bytes) in place of the ones of that name, the members in `removed` left
+    out, the filesystem rules of `rules` (config member to lines) added, and none of the partition
+    images (PARTITION_IMAGES_FOLDER), which add_img_to_target_files then builds from these
+    contents."""
+    with zipfile.ZipFile(out, "w", allowZip64=True) as zout:
+        for info in z.infolist():
+            if (info.filename in compiled or info.filename in removed
+                    or info.filename.startswith(PARTITION_IMAGES_FOLDER)):
+                continue
+            data = z.read(info)
+            if info.filename in rules:
+                data = add_filesystem_config(data.decode(), rules[info.filename]).encode()
+            zout.writestr(info, data)
+        for member, data in compiled.items():
+            info = zipfile.ZipInfo(member, date_time=(2008, 1, 1, 0, 0, 0))
+            info.external_attr = 0o100644 << 16
+            zout.writestr(info, data)
+
+
+# What partition_image_problems compares between the target files and the partition images built
+# from them: compiled code (boot images, odex, vdex and app images) and the boot class path's jars.
+COMPILED_SUFFIXES = (".art", ".oat", ".odex", ".vdex")
+EROFS_MAGIC = struct.pack("<I", 0xE0F5E1E2)
+SPARSE_MAGIC = struct.pack("<I", 0xED26FF3A)
+
+
+def partition_image_checked(name, partition, jars):
+    """Whether partition_image_problems compares the target_files member `name` of `partition`:
+    compiled code, or a jar of the boot class path (`jars`, target_files members)."""
+    return name.startswith(partition + "/") and (name.endswith(COMPILED_SUFFIXES) or name in jars)
+
+
+def partition_image_problems(partition, names, read, image_names, image_read, bootclasspath):
+    """What the image of `partition` (IMAGES/<partition>.img) carries other than the target
+    files it was built from (`names` and `read`, regular files only), given the files the image
+    holds as target_files members (`image_names` and `image_read`): compiled code or a boot class
+    path jar that is missing from the image, another in it, or left in it after the image removed
+    it. Each means the guest runs code compiled for other dex than it has."""
+    jars = {system_jar_member(jar) for jar in bootclasspath.split(":") if jar} - {None}
+    image = f"{PARTITION_IMAGES_FOLDER}{PARTITION_DIRS[partition]}.img"
+    problems = []
+    for name in sorted(n for n in names if partition_image_checked(n, partition, jars)):
+        if name not in image_names:
+            problems.append(f"{image} has no {device_path(name)}, which the image compiled")
+        elif image_read(name) != read(name):
+            problems.append(f"{image} holds another {device_path(name)} than the image made, so the guest "
+                            "runs code compiled for other dex than it has")
+    left = (n for n in image_names if partition_image_checked(n, partition, jars) and n not in names)
+    for name in sorted(left):
+        problems.append(f"{image} still has {device_path(name)}, which the image removed")
+    return problems
+
+
+def image_tree_members(root, partition):
+    """The regular files of an extracted partition image under `root`, as target_files members
+    ({member: path}). The system image holds the root file system with the system partition in
+    system/; a symbolic link is left out, as target_files keeps it as a link."""
+    base = root / "system" if partition == "SYSTEM" and (root / "system" / "build.prop").is_file() else root
+    members = {}
+    for path in base.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            members[f"{partition}/{path.relative_to(base).as_posix()}"] = path
+    return members
+
+
+def extract_partition_image(z, member, otatools, folder, env):
+    """Extracts the erofs partition image `member` of the target_files `z` into `folder`/tree
+    (an Android sparse image is unsparsed first) and returns that folder."""
+    folder.mkdir(parents=True, exist_ok=True)
+    image = folder / "partition.img"
+    with z.open(member) as source, open(image, "wb") as target:
+        shutil.copyfileobj(source, target, 1 << 22)
+    with open(image, "rb") as f:
+        head = f.read(1028)
+    if head[:4] == SPARSE_MAGIC:
+        raw = folder / "partition.raw"
+        run(otatools / "bin/simg2img", image, raw, env=env)
+        image.unlink()
+        image = raw
+        with open(image, "rb") as f:
+            head = f.read(1028)
+    if head[1024:1028] != EROFS_MAGIC:
+        raise ValueError(f"{member} is not an erofs image, so the image cannot check what it holds")
+    tree = folder / "tree"
+    run(otatools / "bin/fsck.erofs", f"--extract={tree}", image, env=env)
+    image.unlink()
+    return tree
+
+
+def built_image_problems(signed, otatools, work, env):
+    """What the partition images add_img_to_target_files built into the signed target_files carry
+    other than its contents (partition_image_problems), one partition at a time."""
+    problems = []
+    with zipfile.ZipFile(signed) as z:
+        infos = {i.filename: i for i in z.infolist()
+                 if not i.filename.endswith("/") and not stat.S_ISLNK(i.external_attr >> 16)}
+        names = set(infos)
+        bootclasspath = (oat_key_values(z.read(FRAMEWORK_ODEX)).get("bootclasspath", "")
+                         if FRAMEWORK_ODEX in names else "")
+        jars = {system_jar_member(jar) for jar in bootclasspath.split(":") if jar} - {None}
+        for partition, folder_name in PARTITION_DIRS.items():
+            if not any(partition_image_checked(n, partition, jars) for n in names):
+                continue
+            member = f"{PARTITION_IMAGES_FOLDER}{folder_name}.img"
+            if member not in names:
+                problems.append(f"the signed target files have no {member} to check")
+                continue
+            folder = work / "image-check" / folder_name
+            shutil.rmtree(folder, ignore_errors=True)
+            tree = extract_partition_image(z, member, otatools, folder, env)
+            built = {name: path for name, path in image_tree_members(tree, partition).items()
+                     if partition_image_checked(name, partition, jars)}
+            problems += partition_image_problems(partition, names, z.read, set(built),
+                                                 lambda name: built[name].read_bytes(), bootclasspath)
+            shutil.rmtree(folder, ignore_errors=True)
+    return problems
+
+
 def compile_apps(signed, tools_zip, otatools, work, env, profiles=None, published=None):
     """Compiles COMPILED_APPS in the signed target_files, and again each app or edited jar
     whose dex no longer matches the odex the published build shipped (compile_jobs), and adds
@@ -9284,18 +9418,7 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None, publishe
             rules.setdefault(config, []).extend(app_rules)
 
         updated = signed.with_name(signed.stem + "-compiled.zip")
-        with zipfile.ZipFile(updated, "w", allowZip64=True) as zout:
-            for info in z.infolist():
-                if info.filename in compiled or info.filename in removed:
-                    continue
-                data = z.read(info)
-                if info.filename in rules:
-                    data = add_filesystem_config(data.decode(), rules[info.filename]).encode()
-                zout.writestr(info, data)
-            for member, data in compiled.items():
-                info = zipfile.ZipInfo(member, date_time=(2008, 1, 1, 0, 0, 0))
-                info.external_attr = 0o100644 << 16
-                zout.writestr(info, data)
+        write_compiled_target_files(z, updated, compiled, removed, rules)
     updated.replace(signed)
     with zipfile.ZipFile(signed) as z:
         problems = compiled_app_problems(z) + prebuilt_oat_problems(z) + boot_image_problems(z)
@@ -9673,6 +9796,9 @@ def main():
     compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env,
                  profiles=services_profiles(spec, inputs), published=target_files)
     run(otatools / "bin/add_img_to_target_files", "-p", otatools, "-a", signed, env=env)
+    problems = built_image_problems(signed, otatools, work, env)
+    if problems:
+        raise ValueError("; ".join(problems))
 
     images = work / "images"
     with zipfile.ZipFile(signed) as z:

@@ -130,6 +130,16 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   compiled with `--abort-on-hard-verifier-error`, so an edited method the verifier
   rejects stops the build instead of closing the app when it loads. PermissionController is
   not compiled: it is inside the permission APEX, where ART takes no odex.
+- Signing builds the partition images (`IMAGES/system.img` and the rest) before anything is
+  compiled, and `add_img_to_target_files -a` keeps an image that is already there. So
+  `make-image.py` drops them once it has compiled, builds them again from the compiled
+  contents, and then reads each image back (`fsck.erofs --extract`): the build fails when an
+  image holds another boot image, odex, vdex, app image or boot class path jar than the target
+  files, or one the image removed. Images made before this kept the published boot image and
+  odex beside the rebuilt `framework.jar` and `services.jar` (artd reports the boot image's
+  `boot-framework.oat` as made for other dex than `framework.jar`), and the compiled system
+  apps were not in the image at all. On such an image FLO, an app that Google Play's PairIP
+  protects, crashed at its start.
 - The apps the published build itself compiled into their own partition (KeyChain,
   SettingsProvider, Telecom and a few more on Android 16) keep their odex, vdex and app image:
   signing leaves an APK's dex as it is. `make-image.py` records them from the published

@@ -8501,6 +8501,75 @@ class BootImageTests(unittest.TestCase):
         # An image without a boot image has nothing to compile again.
         self.assertEqual(make_image.stale_boot_jars(set(), self._read({}), self.BCP), [])
 
+    def test_fr4_compiling_drops_the_partition_images_signing_built(self):
+        # sign_target_files_apks builds IMAGES/system.img before anything is compiled, and
+        # add_img_to_target_files -a keeps an image that is there: the guest got the published
+        # boot image beside the new framework.jar, and a PairIP app crashed at its start.
+        folder = f"SYSTEM/framework/{self.ISA}"
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("IMAGES/system.img", b"published boot image inside")
+            z.writestr("IMAGES/vbmeta.img", b"hashes of that image")
+            z.writestr(f"{folder}/boot.art", b"published")
+            z.writestr("SYSTEM/app/A/oat/x86_64/A.art", b"app image")
+            z.writestr("META/filesystem_config.txt", "system/app/A 0 0 755\n")
+            z.writestr("SYSTEM/framework/framework.jar", b"rebuilt jar")
+        out = Path(tempfile.mkdtemp()) / "compiled.zip"
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as z:
+            make_image.write_compiled_target_files(
+                z, out, {f"{folder}/boot.art": b"compiled"}, {"SYSTEM/app/A/oat/x86_64/A.art"},
+                {"META/filesystem_config.txt": ["system/app/A/oat 0 0 755"]})
+        with zipfile.ZipFile(out) as z:
+            self.assertEqual(sorted(z.namelist()), sorted([
+                "META/filesystem_config.txt", "SYSTEM/framework/framework.jar", f"{folder}/boot.art"]))
+            self.assertEqual(z.read(f"{folder}/boot.art"), b"compiled")
+            self.assertIn(b"system/app/A/oat 0 0 755", z.read("META/filesystem_config.txt"))
+
+    def test_fr4_a_partition_image_with_another_boot_image_is_found(self):
+        files = self._files(framework_dex=b"dex\n035\0rebuilt")
+        files["SYSTEM/framework/oat/x86_64/telecom.odex"] = fake_odex()
+        names = set(files)
+        # The image as built from these contents.
+        self.assertEqual(make_image.partition_image_problems(
+            "SYSTEM", names, self._read(files), names, self._read(files), self.BCP), [])
+        # The image signing built: the published boot image and odex beside the new jar.
+        image = dict(files)
+        image[f"SYSTEM/framework/{self.ISA}/boot-framework.oat"] = b"published oat"
+        del image["SYSTEM/framework/oat/x86_64/telecom.odex"]
+        image["SYSTEM/framework/oat/x86_64/telecom.art"] = b"published app image"
+        problems = make_image.partition_image_problems(
+            "SYSTEM", names, self._read(files), set(image), self._read(image), self.BCP)
+        self.assertEqual(len(problems), 3, problems)
+        for expected in (f"IMAGES/system.img holds another /system/framework/{self.ISA}/boot-framework.oat",
+                         "IMAGES/system.img has no /system/framework/oat/x86_64/telecom.odex",
+                         "IMAGES/system.img still has /system/framework/oat/x86_64/telecom.art"):
+            self.assertTrue(any(problem.startswith(expected) for problem in problems), (expected, problems))
+        # A boot class path jar of the system partition is compared too, other files are not.
+        image = dict(files)
+        image["SYSTEM/framework/framework.jar"] = fake_dex_jar(b"dex\n035\0framework")
+        image["SYSTEM/etc/hosts"] = b"other"
+        problems = make_image.partition_image_problems(
+            "SYSTEM", names, self._read(files), set(image), self._read(image), self.BCP)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("/system/framework/framework.jar", problems[0])
+
+    def test_fr4_the_system_image_is_read_from_its_system_folder(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "system" / "framework" / self.ISA).mkdir(parents=True)
+        (root / "system" / "build.prop").write_text("ro.build.id=x\n")
+        (root / "system" / "framework" / self.ISA / "boot.art").write_bytes(b"art")
+        (root / "init").write_bytes(b"root file system")
+        try:
+            (root / "system" / "framework" / self.ISA / "boot.vdex").symlink_to("../boot.vdex")
+        except OSError:
+            pass
+        members = make_image.image_tree_members(root, "SYSTEM")
+        self.assertEqual(sorted(members), ["SYSTEM/build.prop", f"SYSTEM/framework/{self.ISA}/boot.art"])
+        product = Path(tempfile.mkdtemp())
+        (product / "app").mkdir()
+        (product / "app" / "A.odex").write_bytes(b"odex")
+        self.assertEqual(sorted(make_image.image_tree_members(product, "PRODUCT")), ["PRODUCT/app/A.odex"])
+
     def test_fr4_the_boot_images_are_the_primary_then_each_extension(self):
         files = self._files()
         chunks = make_image.boot_image_chunks(set(files), self._read(files), self.BCP)
