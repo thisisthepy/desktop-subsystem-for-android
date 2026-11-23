@@ -338,6 +338,16 @@ struct BufferSize {
 BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
                           int64_t taskHeight);
 
+// The longest side the display takes, at boot (ro.boot.dsa.display_width and _height) and
+// when it grows.
+constexpr int64_t kMaxDisplaySide = 16384;
+
+// The display's size once the host asks for `width` by `height` while it is `current`: each
+// side the larger of the two, and at most kMaxDisplaySide. It never shrinks, since a smaller
+// display would take size from task windows that are open; a request of 0 or less on a side
+// leaves that side as it is.
+BufferSize grownDisplaySize(BufferSize current, int64_t width, int64_t height);
+
 // Which host display carries each task's frames. A task keeps its display from its first
 // frame until it ends, so the host sees one stable pairing per window.
 class TaskDisplays {

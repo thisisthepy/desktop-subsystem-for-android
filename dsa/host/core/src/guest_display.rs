@@ -1,4 +1,5 @@
-//! The size of the guest's one display, chosen from the user's monitors when the VM starts.
+//! The size of the guest's one display, chosen from the user's monitors when the VM starts and
+//! grown while it runs when a window opens and the monitors connected then need more.
 //!
 //! A task cannot be larger than the guest's display, so the display has to be at least as
 //! large, in guest pixels, as the largest window the user can make. A task that follows its
@@ -11,14 +12,19 @@
 //!
 //! The display is square, as long on each side as the longest such side of any monitor: a
 //! monitor turned to portrait while Android runs then still fits, without a restart. What a
-//! task's frames cost follows the task's own size, not this one. It is never longer than
-//! [`MAX_SIDE`].
+//! task's frames cost follows the task's own size, not this one. The only bound is what the
+//! guest's display accepts ([`MAX_SIDE`]).
 //!
-//! The display's size cannot change while Android runs. On a monitor larger than the display,
-//! whether past [`MAX_SIDE`] or plugged in later, a window the user drags is kept at what the
-//! display holds, and a maximised, snapped or full screen window keeps the size the desktop
-//! gives it and shows the largest frame Android draws in it, 1:1 and centred, or for a task
-//! that keeps its density scaled to fit. That lasts until the next start of Android.
+//! The display starts at the size the monitors connected when Android starts need. Each time
+//! a task's window opens, the monitors connected at that moment are measured the same way,
+//! and a display smaller than they need grows to it while Android runs
+//! ([`grown_for_window`]): a monitor plugged in later, or one whose scale or resolution
+//! changed, is then accounted for without a restart. The display never shrinks while Android
+//! runs, so no open window loses size it has. The windows' size limit is the display's actual
+//! size, which the guest reports with every task. Until the display has grown, and on a monitor
+//! still larger than the guest accepts, a maximised, snapped or full screen window keeps the
+//! size the desktop gives it and shows the largest frame Android draws in it, 1:1 and centred,
+//! or for a task that keeps its density scaled to fit.
 //!
 //! The display's density is the main monitor's, as a task's window gives it
 //! ([`density_for_dpi`]): 130 dpi at a scale of 100%, 196 at 150%. Every app starts at the
@@ -58,10 +64,14 @@ pub fn font_scale(text_scale_percent: u32) -> f32 {
 /// The shortest side the display has, whatever the monitors.
 pub const MIN_SIDE: u32 = 1920;
 
-/// The longest side the display has: 4K. A longer monitor caps its windows here. A task
-/// window's texture and the guest's buffers for a task grow with the task up to this size,
-/// so a longer side would cost memory for every window that grows that far.
-pub const MAX_SIDE: u32 = 3840;
+/// The longest side the display has: the most the guest's display accepts. A task window's
+/// texture and the guest's buffers for a task grow with the task, not with the display, so a
+/// longer side costs nothing until a window is made that large.
+pub const MAX_SIDE: u32 = 16384;
+
+/// Reads the monitors connected now, when a task's window opens; `None` when they cannot be
+/// read, which leaves the display as it is.
+pub type MonitorSource = std::sync::Arc<dyn Fn() -> Option<Vec<Monitor>> + Send + Sync>;
 
 /// The kernel command line words that set the display's size. Android's `ro.boot` properties
 /// are write-once and init reads the command line in order, so the first of each wins.
@@ -212,6 +222,23 @@ pub fn display_or_smallest(monitors: Option<&[Monitor]>) -> (u32, u32) {
         .unwrap_or((MIN_SIDE, MIN_SIDE))
 }
 
+/// The size the display grows to when a task's window opens while the monitors connected are
+/// `monitors` and the display is `current` (its actual size, as the guest last reported it;
+/// `None` when unknown): the size [`display_for`] the monitors gives, never less than the
+/// display has on either side, or `None` when the display holds them already or no monitor is
+/// usable. The display only grows: a smaller size would take size from windows that are open.
+pub fn grown_for_window(current: Option<(u32, u32)>, monitors: &[Monitor]) -> Option<(u32, u32)> {
+    let needed = display_for(monitors)?;
+    match current.filter(|(width, height)| *width > 0 && *height > 0) {
+        Some((width, height)) if needed.0 <= width && needed.1 <= height => None,
+        Some((width, height)) => Some((
+            needed.0.max(width).min(MAX_SIDE),
+            needed.1.max(height).min(MAX_SIDE),
+        )),
+        None => Some(needed),
+    }
+}
+
 /// `cmdline` with the display set to `size`. An appended value would lose to the image's
 /// earlier one, so the image's are removed.
 pub fn with_display_size(cmdline: &str, size: (u32, u32)) -> String {
@@ -303,9 +330,13 @@ mod tests {
     }
 
     #[test]
-    fn fr4_the_display_is_never_below_1920_or_above_3840() {
+    fn fr4_the_display_is_never_below_1920_or_above_what_the_guest_accepts() {
         assert_eq!(display_for(&sized(&[(1280, 720)])), Some((1920, 1920)));
-        assert_eq!(display_for(&sized(&[(7680, 4320)])), Some((3840, 3840)));
+        // No cap at 4K: an 8K monitor gets a display that holds it.
+        assert_eq!(display_for(&sized(&[(7680, 4320)])), Some((7680, 7680)));
+        // The guest's hwcomposer takes no side longer than 16384.
+        assert_eq!(display_for(&sized(&[(20000, 4320)])), Some((16384, 16384)));
+        assert_eq!(MAX_SIDE, 16384);
     }
 
     #[test]
@@ -328,17 +359,15 @@ mod tests {
     fn fr4_the_display_is_sized_in_guest_pixels_for_monitors_of_mixed_scales() {
         // A main monitor at 200% and two at 125%: a task drawn at the main monitor's density
         // takes 192 / 120 = 1.6 guest pixels per pixel of a 125% monitor, so a window
-        // maximised there needs 4096 guest pixels across. That is past the cap, so the display
-        // is as large as it may be, not the main monitor's 2880.
+        // maximised there needs 4096 guest pixels across, and the display is that large, not
+        // the main monitor's 2880 and not cut to 4K.
         let monitors = [
             Monitor::at_dpi(2880, 1800, 192).as_main(),
             Monitor::at_dpi(2560, 1440, 120),
             Monitor::at_dpi(2560, 1440, 120),
         ];
         assert_eq!(monitors[1].guest_side(Some(192)), 4096);
-        let (side, _) = display_for(&monitors).unwrap();
-        assert!(side >= 3840 || side == MAX_SIDE, "{side}");
-        assert_eq!(display_for(&monitors), Some((MAX_SIDE, MAX_SIDE)));
+        assert_eq!(display_for(&monitors), Some((4096, 4096)));
         // Below the cap the guest side itself is the display: 1920 at 100% beside a 150%
         // main monitor is 2880 guest pixels.
         assert_eq!(
@@ -365,6 +394,97 @@ mod tests {
             ]),
             Some((2880, 2880))
         );
+    }
+
+    /// The owner's monitors: the main one at 200% and two at 125%.
+    fn owners_monitors() -> Vec<Monitor> {
+        vec![
+            Monitor::at_dpi(2880, 1800, 192).as_main(),
+            Monitor::at_dpi(2560, 1440, 120),
+            Monitor::at_dpi(2560, 1440, 120),
+        ]
+    }
+
+    #[test]
+    fn fr4_a_window_that_opens_sizes_the_display_from_the_monitors_connected_then() {
+        // Android started with only the main monitor: a display of 2880. A window opens
+        // after two 125% monitors were plugged in, so the display grows to hold them.
+        let main_only = [Monitor::at_dpi(2880, 1800, 192).as_main()];
+        let boot = display_for(&main_only).unwrap();
+        assert_eq!(boot, (2880, 2880));
+        assert_eq!(
+            grown_for_window(Some(boot), &owners_monitors()),
+            Some((4096, 4096))
+        );
+        // With the main monitor alone still connected, the window needs nothing more.
+        assert_eq!(grown_for_window(Some(boot), &main_only), None);
+    }
+
+    #[test]
+    fn fr4_a_lower_scale_monitor_grows_the_display_past_4k() {
+        // The display an older start chose (cut to 3840) is too small for a System-scaled
+        // window maximised on a 125% monitor: it grows to 4096 when the next window opens.
+        assert_eq!(
+            grown_for_window(Some((3840, 3840)), &owners_monitors()),
+            Some((4096, 4096))
+        );
+        // A display that holds them already stays as it is.
+        assert_eq!(
+            grown_for_window(Some((4096, 4096)), &owners_monitors()),
+            None
+        );
+    }
+
+    #[test]
+    fn fr4_the_display_never_shrinks_while_android_runs() {
+        // The monitors that needed 4096 were unplugged: a window that opens now leaves the
+        // display as large as it is, so the windows still open keep their size.
+        let small = [Monitor::at_dpi(1920, 1080, 96).as_main()];
+        assert_eq!(grown_for_window(Some((4096, 4096)), &small), None);
+        // A side that is longer already stays longer when the other one grows.
+        assert_eq!(
+            grown_for_window(Some((5000, 2000)), &owners_monitors()),
+            Some((5000, 4096))
+        );
+    }
+
+    #[test]
+    fn fr4_the_display_grows_no_further_than_the_guest_accepts() {
+        // An 8K monitor at 100% beside a main monitor at 200% needs 15360 guest pixels; at
+        // 100% beside a main monitor at 300%, 23040. The guest takes no side past 16384.
+        let eight_k = [
+            Monitor::at_dpi(1920, 1080, 192).as_main(),
+            Monitor::at_dpi(7680, 4320, 96),
+        ];
+        assert_eq!(
+            grown_for_window(Some((3840, 3840)), &eight_k),
+            Some((15360, 15360))
+        );
+        let past = [
+            Monitor::at_dpi(1920, 1080, 288).as_main(),
+            Monitor::at_dpi(7680, 4320, 96),
+        ];
+        assert_eq!(
+            grown_for_window(Some((3840, 3840)), &past),
+            Some((MAX_SIDE, MAX_SIDE))
+        );
+        assert_eq!(grown_for_window(Some((MAX_SIDE, MAX_SIDE)), &past), None);
+    }
+
+    #[test]
+    fn fr4_a_display_of_unknown_size_is_given_what_the_monitors_need() {
+        // The agent could not read the display: the guest is told what the monitors need,
+        // and its hwcomposer still only grows.
+        assert_eq!(
+            grown_for_window(None, &owners_monitors()),
+            Some((4096, 4096))
+        );
+        assert_eq!(
+            grown_for_window(Some((0, 0)), &owners_monitors()),
+            Some((4096, 4096))
+        );
+        // No usable monitor says nothing.
+        assert_eq!(grown_for_window(Some((2880, 2880)), &[]), None);
     }
 
     #[test]

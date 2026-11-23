@@ -5,6 +5,7 @@ import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
@@ -862,6 +863,26 @@ class AgentTest {
         tasks.change(listOf(appTask(1, densityDpi = 320)))
         scheduler.runDue()
         assertEquals(320, daemon.sentMessages().last().taskUpdated.densityDpi)
+    }
+
+    @Test
+    fun fr4_when_the_display_grows_every_task_is_told_its_new_largest_size() {
+        tasks.running = listOf(
+            appTask(1, bounds = TaskBounds(0, 0, 548, 974)),
+            appTask(2, bounds = TaskBounds(548, 0, 1096, 974)),
+        )
+        started()
+        assertEquals(setOf(1920), taskUpdates().map { it.maxWidth }.toSet())
+        val before = daemon.sentMessages().size
+
+        // The host grew the display for a window on a lower-scale monitor; nothing about the
+        // tasks themselves changed.
+        windowing.resize(Size(4096, 4096))
+        scheduler.runDue()
+
+        val again = daemon.sentMessages().drop(before).filter { it.hasTaskUpdated() }.map { it.taskUpdated }
+        assertEquals(setOf(1, 2), again.map { it.taskId }.toSet())
+        assertTrue(again.all { it.maxWidth == 4096 && it.maxHeight == 4096 })
     }
 
     @Test

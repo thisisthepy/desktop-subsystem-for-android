@@ -788,6 +788,20 @@ struct DisplayRefreshDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DisplayRefreshDefaultTypeInternal _DisplayRefresh_default_instance_;
+PROTOBUF_CONSTEXPR DisplaySize::DisplaySize(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.width_)*/0u
+  , /*decltype(_impl_.height_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DisplaySizeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DisplaySizeDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DisplaySizeDefaultTypeInternal() {}
+  union {
+    DisplaySize _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DisplaySizeDefaultTypeInternal _DisplaySize_default_instance_;
 PROTOBUF_CONSTEXPR GuestMemoryPressure::GuestMemoryPressure(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.mem_total_kb_)*/uint64_t{0u}
@@ -20031,6 +20045,219 @@ void DisplayRefresh::InternalSwap(DisplayRefresh* other) {
 
 std::string DisplayRefresh::GetTypeName() const {
   return "dsa.control.v1.DisplayRefresh";
+}
+
+
+// ===================================================================
+
+class DisplaySize::_Internal {
+ public:
+};
+
+DisplaySize::DisplaySize(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DisplaySize)
+}
+DisplaySize::DisplaySize(const DisplaySize& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DisplaySize* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.width_){}
+    , decltype(_impl_.height_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.width_, &from._impl_.width_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.height_) -
+    reinterpret_cast<char*>(&_impl_.width_)) + sizeof(_impl_.height_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DisplaySize)
+}
+
+inline void DisplaySize::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.width_){0u}
+    , decltype(_impl_.height_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+DisplaySize::~DisplaySize() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DisplaySize)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DisplaySize::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void DisplaySize::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DisplaySize::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DisplaySize)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.width_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.height_) -
+      reinterpret_cast<char*>(&_impl_.width_)) + sizeof(_impl_.height_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DisplaySize::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 width = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.width_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 height = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DisplaySize::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DisplaySize)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 width = 1;
+  if (this->_internal_width() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_width(), target);
+  }
+
+  // uint32 height = 2;
+  if (this->_internal_height() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_height(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DisplaySize)
+  return target;
+}
+
+size_t DisplaySize::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DisplaySize)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint32 width = 1;
+  if (this->_internal_width() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_width());
+  }
+
+  // uint32 height = 2;
+  if (this->_internal_height() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_height());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DisplaySize::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DisplaySize*>(
+      &from));
+}
+
+void DisplaySize::MergeFrom(const DisplaySize& from) {
+  DisplaySize* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DisplaySize)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_width() != 0) {
+    _this->_internal_set_width(from._internal_width());
+  }
+  if (from._internal_height() != 0) {
+    _this->_internal_set_height(from._internal_height());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DisplaySize::CopyFrom(const DisplaySize& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DisplaySize)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DisplaySize::IsInitialized() const {
+  return true;
+}
+
+void DisplaySize::InternalSwap(DisplaySize* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(DisplaySize, _impl_.height_)
+      + sizeof(DisplaySize::_impl_.height_)
+      - PROTOBUF_FIELD_OFFSET(DisplaySize, _impl_.width_)>(
+          reinterpret_cast<char*>(&_impl_.width_),
+          reinterpret_cast<char*>(&other->_impl_.width_));
+}
+
+std::string DisplaySize::GetTypeName() const {
+  return "dsa.control.v1.DisplaySize";
 }
 
 
@@ -73225,6 +73452,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::TasksShown& tasks_shown(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::DisplayRefresh& display_refresh(const Envelope* msg);
+  static const ::dsa::control::v1::DisplaySize& display_size(const Envelope* msg);
   static const ::dsa::control::v1::PowerHint& power_hint(const Envelope* msg);
   static const ::dsa::control::v1::DeveloperMode& developer_mode(const Envelope* msg);
   static const ::dsa::control::v1::ArmTranslationRemove& arm_translation_remove(const Envelope* msg);
@@ -73545,6 +73773,10 @@ Envelope::_Internal::power_state(const Envelope* msg) {
 const ::dsa::control::v1::DisplayRefresh&
 Envelope::_Internal::display_refresh(const Envelope* msg) {
   return *msg->_impl_.body_.display_refresh_;
+}
+const ::dsa::control::v1::DisplaySize&
+Envelope::_Internal::display_size(const Envelope* msg) {
+  return *msg->_impl_.body_.display_size_;
 }
 const ::dsa::control::v1::PowerHint&
 Envelope::_Internal::power_hint(const Envelope* msg) {
@@ -74784,6 +75016,21 @@ void Envelope::set_allocated_display_refresh(::dsa::control::v1::DisplayRefresh*
     _impl_.body_.display_refresh_ = display_refresh;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.display_refresh)
+}
+void Envelope::set_allocated_display_size(::dsa::control::v1::DisplaySize* display_size) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (display_size) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(display_size);
+    if (message_arena != submessage_arena) {
+      display_size = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, display_size, submessage_arena);
+    }
+    set_has_display_size();
+    _impl_.body_.display_size_ = display_size;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.display_size)
 }
 void Envelope::set_allocated_power_hint(::dsa::control::v1::PowerHint* power_hint) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -77552,6 +77799,11 @@ Envelope::Envelope(const Envelope& from)
           from._internal_display_refresh());
       break;
     }
+    case kDisplaySize: {
+      _this->_internal_mutable_display_size()->::dsa::control::v1::DisplaySize::MergeFrom(
+          from._internal_display_size());
+      break;
+    }
     case kPowerHint: {
       _this->_internal_mutable_power_hint()->::dsa::control::v1::PowerHint::MergeFrom(
           from._internal_power_hint());
@@ -78668,6 +78920,12 @@ void Envelope::clear_body() {
     case kDisplayRefresh: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.display_refresh_;
+      }
+      break;
+    }
+    case kDisplaySize: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.display_size_;
       }
       break;
     }
@@ -81001,6 +81259,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.DisplaySize display_size = 416;
+      case 416:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 2)) {
+          ptr = ctx->ParseMessage(_internal_mutable_display_size(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.GeocodeRequest geocode_request = 470;
       case 470:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 178)) {
@@ -82534,6 +82800,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::addon_image_part(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.DisplaySize display_size = 416;
+  if (_internal_has_display_size()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(416, _Internal::display_size(this),
+        _Internal::display_size(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.GeocodeRequest geocode_request = 470;
   if (_internal_has_geocode_request()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -83144,6 +83417,13 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.display_refresh_);
+      break;
+    }
+    // .dsa.control.v1.DisplaySize display_size = 416;
+    case kDisplaySize: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.display_size_);
       break;
     }
     // .dsa.control.v1.PowerHint power_hint = 110;
@@ -84554,6 +84834,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_display_refresh());
       break;
     }
+    case kDisplaySize: {
+      _this->_internal_mutable_display_size()->::dsa::control::v1::DisplaySize::MergeFrom(
+          from._internal_display_size());
+      break;
+    }
     case kPowerHint: {
       _this->_internal_mutable_power_hint()->::dsa::control::v1::PowerHint::MergeFrom(
           from._internal_power_hint());
@@ -85639,6 +85924,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::DisplayRefresh*
 Arena::CreateMaybeMessage< ::dsa::control::v1::DisplayRefresh >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::DisplayRefresh >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DisplaySize*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DisplaySize >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DisplaySize >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestMemoryPressure*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestMemoryPressure >(Arena* arena) {

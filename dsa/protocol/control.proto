@@ -918,6 +918,18 @@ message DisplayRefresh {
   uint32 hz = 1;
 }
 
+// Host to guest, to the hwcomposer: the size in pixels the guest's display grows to, without
+// restarting Android. The host sends it when a task's window opens and the monitors connected
+// then need a larger display than the one the guest reports with its tasks. The hwcomposer
+// only ever grows the display, each side to at most 16384, and keeps its density; a size not
+// larger than the display's on either side changes nothing on that side. SurfaceFlinger takes
+// the new size as a reconnection of the same display, and the agent reports every task again
+// with the new size as its largest. A hwcomposer that subscribes later is told the last size.
+message DisplaySize {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
 // Guest to host, from the control daemon: how much memory the guest has and how hard it
 // works to find more. The host grows the VM's memory by hot-adding it when the guest runs
 // short, and gives it back when the guest no longer needs it. Sent every few seconds while
@@ -3554,6 +3566,7 @@ message Envelope {
     TasksShown tasks_shown = 46;
     PowerState power_state = 41;
     DisplayRefresh display_refresh = 407;
+    DisplaySize display_size = 416;
     PowerHint power_hint = 110;
     DeveloperMode developer_mode = 140;
     ArmTranslationRemove arm_translation_remove = 152;

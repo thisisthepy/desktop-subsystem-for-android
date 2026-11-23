@@ -227,6 +227,9 @@ public final class VectorsTest {
         cases.put("request_task_frame", Envelope.newBuilder()
                 .setRequestTaskFrame(RequestTaskFrame.newBuilder().setTaskId(42))
                 .build());
+        cases.put("display_size", Envelope.newBuilder()
+                .setDisplaySize(DisplaySize.newBuilder().setWidth(4096).setHeight(4096))
+                .build());
         cases.put("launch_app", Envelope.newBuilder()
                 .setLaunchApp(LaunchApp.newBuilder().setPackageName("com.example.notes"))
                 .build());

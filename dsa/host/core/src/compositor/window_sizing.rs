@@ -705,6 +705,9 @@ pub struct WindowSizing {
     /// the sizes it reports until the drag ends are the desktop's rescaling of it, not sizes
     /// for the task ([`view_resized`](Self::view_resized)).
     rescaled_in_drag: bool,
+    /// Whether the guest's display grew while the window was larger than the task could be,
+    /// so the task is to be asked for more of the window ([`limit_grown`](Self::limit_grown)).
+    limit_grew: bool,
 }
 
 /// The most task pixels, in either direction, by which the size a desktop gives a window for
@@ -763,6 +766,7 @@ impl WindowSizing {
             ignored: None,
             late_echo: None,
             rescaled_in_drag: false,
+            limit_grew: false,
         }
     }
 
@@ -1062,6 +1066,32 @@ impl WindowSizing {
         })
     }
 
+    /// Returns the request that gives the task more of its window once the guest's display
+    /// has grown while the window was larger than the task could be, as a window maximised on
+    /// a monitor the display was too small for is: the window's client size at its scale,
+    /// within the new limit, given live as a maximise gives it, and reconfigured once taken
+    /// ([`reconfigure`](Self::reconfigure)). `None` when the display did not grow under such a
+    /// window, and while the user drags it, whose end asks for its size anyway.
+    pub fn limit_grown(&mut self, now: Instant) -> Option<TaskRequest> {
+        if !self.limit_grew || self.dragging {
+            return None;
+        }
+        self.limit_grew = false;
+        let size = clamp_size(to_task_size(self.view, self.asking_scale()), self.max);
+        let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
+        if size == current {
+            return None;
+        }
+        self.asked = Some((size, now));
+        self.reconfigure = true;
+        Some(TaskRequest::Resize {
+            task_id: self.task_id,
+            width: size.0,
+            height: size.1,
+            live: true,
+        })
+    }
+
     /// The user started (`true`) or finished dragging the window. While they drag, the
     /// window never resizes itself under them. The guest has [`SETTLE`] from the end of the
     /// drag to take the last size.
@@ -1174,6 +1204,18 @@ impl WindowSizing {
             self.kept_density = task.density_dpi;
         }
         if let Some(max) = task.max_size() {
+            let grew = self
+                .max
+                .is_some_and(|before| max.0 > before.0 || max.1 > before.1);
+            if grew && self.view.0 > 0 && self.view.1 > 0 {
+                // The guest's display grew. A window that is larger than its task could be
+                // (maximised on a monitor the display was too small for) asks for more of
+                // itself now.
+                let wanted = to_task_size(self.view, self.asking_scale());
+                if clamp_size(wanted, self.max) != clamp_size(wanted, Some(max)) {
+                    self.limit_grew = true;
+                }
+            }
             self.max = Some(max);
         }
         if let Some(min) = task.min_size() {
@@ -2773,6 +2815,70 @@ mod tests {
         assert_eq!(sizing.view_resized((800, 857), now), None);
         let size = to_task_size((800, 857), sizing.scale());
         assert_eq!(sizing.dragging(false, now), resize(size.0, size.1));
+    }
+
+    #[test]
+    fn fr4_the_window_limit_follows_the_display_when_it_grows() {
+        // A task kept at the main monitor's 262 dpi (System scaling), maximised on a 125%
+        // monitor: its 2560x1380 client area needs about 4090 guest pixels across, more than
+        // a display of 3840 has.
+        let mut sizing = WindowSizing::with_mode(&big(1186, 1711, 262), ScalingMode::System);
+        let now = Instant::now();
+        sizing.dpi_reported(120);
+        let view = (2560, 1380);
+        let wanted = to_task_size(view, sizing.scale());
+        assert!(wanted.0 > 3840 && wanted.0 <= 4096, "{wanted:?}");
+        assert_eq!(sizing.view_resized(view, now), live_resize(3840, wanted.1));
+        assert_eq!(
+            sizing.max_client_size(),
+            Some(to_window_size((3840, 3840), sizing.scale()))
+        );
+        // The guest gives the task what its display holds; the window shows that frame with
+        // the strips beside it filled.
+        let taken = big(3840, wanted.1 as i32, 262);
+        assert_eq!(sizing.guest_updated(&taken), None);
+        assert_eq!(sizing.limit_grown(now), None);
+        // The display grew to 4096, as the next window to open asked: the limit is the
+        // display's new size, and the task is asked for the whole window.
+        let grown = Task {
+            max_width: 4096,
+            max_height: 4096,
+            ..taken.clone()
+        };
+        assert_eq!(sizing.guest_updated(&grown), None);
+        assert_eq!(
+            sizing.max_client_size(),
+            Some(to_window_size((4096, 4096), sizing.scale()))
+        );
+        assert!(sizing.max_client_size().unwrap().0 >= view.0);
+        assert_eq!(sizing.limit_grown(now), live_resize(wanted.0, wanted.1));
+        // Once, and reconfigured when it has taken the size.
+        assert_eq!(sizing.limit_grown(now), None);
+        let full = Task {
+            max_width: 4096,
+            max_height: 4096,
+            ..big(wanted.0 as i32, wanted.1 as i32, 262)
+        };
+        assert_eq!(sizing.guest_updated(&full), None);
+        assert_eq!(sizing.reconfigure(now + SETTLE), resize(wanted.0, wanted.1));
+    }
+
+    #[test]
+    fn fr4_a_window_the_display_held_nothing_back_from_asks_nothing_when_it_grows() {
+        // A window of its task's own size on the main monitor: the display growing gives it
+        // nothing to ask for, so its size stays exactly as it was.
+        let mut sizing = WindowSizing::new(&big(1186, 1711, 262));
+        let now = Instant::now();
+        sizing.dpi_reported(192);
+        assert_eq!(sizing.view_resized((1186, 1711), now), None);
+        let grown = Task {
+            max_width: 4096,
+            max_height: 4096,
+            ..big(1186, 1711, 262)
+        };
+        assert_eq!(sizing.guest_updated(&grown), None);
+        assert_eq!(sizing.limit_grown(now), None);
+        assert_eq!(sizing.reconfigure(now + SETTLE), None);
     }
 
     #[test]

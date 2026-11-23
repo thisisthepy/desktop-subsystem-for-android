@@ -91,6 +91,34 @@ void ComposerClient::requestRefresh() {
     }
 }
 
+DisplayConfig ComposerClient::displayConfig() {
+    std::lock_guard<std::mutex> lock(mMutex);
+    return mDisplay.config();
+}
+
+void ComposerClient::growDisplay(int64_t width, int64_t height) {
+    int32_t before[2];
+    DisplayConfig now;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        before[0] = mDisplay.config().width;
+        before[1] = mDisplay.config().height;
+        if (!mDisplay.grow(width, height)) {
+            return;
+        }
+        now = mDisplay.config();
+    }
+    HWC_LOGI("the display grows to %dx%d (was %dx%d, asked %lldx%lld) at %d dpi", now.width,
+             now.height, before[0], before[1], static_cast<long long>(width),
+             static_cast<long long>(height), now.dpi);
+    // The same display, connected again: SurfaceFlinger reads its configurations anew and
+    // makes its display device again at the new size, and the display manager and the window
+    // manager follow. Every layer stays; its frames are composed on the larger display.
+    if (auto cb = callback()) {
+        cb->onHotplug(kDisplayId, /*connected=*/true);
+    }
+}
+
 ndk::ScopedAStatus ComposerClient::registerCallback(
     const std::shared_ptr<composer3::IComposerCallback>& cb) {
     bool first;
@@ -250,7 +278,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayAttribute(int64_t display, int32_t 
     if (!isRefreshConfig(config)) {
         return error(composer3::IComposerClient::EX_BAD_CONFIG);
     }
-    const DisplayConfig& c = mDisplay.config();
+    const DisplayConfig c = displayConfig();
     switch (attribute) {
         case composer3::DisplayAttribute::WIDTH:
             *value = c.width;
@@ -294,7 +322,7 @@ ndk::ScopedAStatus ComposerClient::getDisplayConfigs(int64_t display, std::vecto
 ndk::ScopedAStatus ComposerClient::getDisplayConfigurations(
     int64_t display, int32_t, std::vector<composer3::DisplayConfiguration>* configs) {
     CHECK_DISPLAY(display);
-    const DisplayConfig& c = mDisplay.config();
+    const DisplayConfig c = displayConfig();
     configs->clear();
     for (int32_t id = 0; id < kRefreshConfigCount; ++id) {
         composer3::DisplayConfiguration config;

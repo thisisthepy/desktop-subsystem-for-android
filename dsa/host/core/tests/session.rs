@@ -2419,6 +2419,64 @@ fn fr10_battery_saver_caps_the_guest_refresh_rate_at_once_and_lifts_it_when_off(
     assert_eq!(next_body(&mut agent), display_refresh(120));
 }
 
+/// A task the agent reports on a display of `side` by `side` guest pixels.
+fn task_on_display(task_id: i32, side: u32) -> Body {
+    match task_updated(task_id, "Clock") {
+        Body::TaskUpdated(update) => Body::TaskUpdated(dsa_protocol::control::TaskUpdated {
+            max_width: side,
+            max_height: side,
+            ..update
+        }),
+        _ => unreachable!(),
+    }
+}
+
+/// The display sizes the guest is asked for until the session has said nothing for a while.
+fn display_sizes_asked(agent: &mut Box<dyn Connection>) -> Vec<(u32, u32)> {
+    let mut sizes = Vec::new();
+    while let Ok(frame) = agent.recv(Some(Duration::from_millis(400))) {
+        if let Some(Body::DisplaySize(size)) = dsa_protocol::decode(&frame).unwrap().body {
+            sizes.push((size.width, size.height));
+        }
+    }
+    sizes
+}
+
+#[test]
+fn fr4_a_window_that_opens_grows_the_guest_display_for_the_monitors_connected_then() {
+    use dsa_host_core::guest_display::Monitor;
+    let (session, mut agent, _launcher) = active_session();
+    let monitors = Arc::new(Mutex::new(vec![Monitor::at_dpi(2880, 1800, 192).as_main()]));
+    let read = Arc::clone(&monitors);
+    session.set_monitor_source(Arc::new(move || Some(read.lock().unwrap().clone())));
+    // Android started with the main monitor alone: its 2880 display holds a window there.
+    send_body(&mut agent, task_on_display(7, 2880));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+    // Two monitors at 125% are plugged in. The next window to open measures them: a task kept
+    // at the main monitor's density needs 4096 guest pixels across one of them.
+    monitors.lock().unwrap().extend([
+        Monitor::at_dpi(2560, 1440, 120),
+        Monitor::at_dpi(2560, 1440, 120),
+    ]);
+    send_body(&mut agent, task_on_display(8, 2880));
+    assert_eq!(display_sizes_asked(&mut agent), vec![(4096, 4096)]);
+    // Another report of a window that is open already opens nothing.
+    send_body(&mut agent, task_on_display(8, 2880));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+    // Once the guest has grown its display, the next window asks for nothing, and unplugging
+    // the monitors never shrinks it.
+    monitors.lock().unwrap().truncate(1);
+    send_body(&mut agent, task_on_display(9, 4096));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+}
+
+#[test]
+fn fr4_without_a_monitor_source_the_display_keeps_its_size() {
+    let (_session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, task_on_display(7, 1920));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+}
+
 #[test]
 fn fr10_battery_saver_leaves_a_60_hz_monitor_alone() {
     let launcher = FakeLauncher::default();

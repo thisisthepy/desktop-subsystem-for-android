@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use dsa_protocol::control::DisplaySize;
 use dsa_protocol::control::{
     envelope::Body, AccessibilityAction, AccessibilityActionResult, AccessibilityAnnouncement,
     AccessibilityListening, AccessibilityNode, AccessibilityTree, AccessibilityWatch,
@@ -392,6 +393,13 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "request_task_frame",
             wrap(Body::RequestTaskFrame(RequestTaskFrame { task_id: 42 })),
+        ),
+        (
+            "display_size",
+            wrap(Body::DisplaySize(DisplaySize {
+                width: 4096,
+                height: 4096,
+            })),
         ),
         (
             "launch_app",

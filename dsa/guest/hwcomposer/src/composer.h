@@ -23,6 +23,10 @@ class Composer : public composer3::BnComposer {
     ndk::ScopedAStatus createClient(std::shared_ptr<composer3::IComposerClient>* client) override;
     ndk::ScopedAStatus getCapabilities(std::vector<composer3::Capability>* caps) override;
 
+    // The host asked for a larger display (DisplaySize): SurfaceFlinger's client grows it
+    // now, and a client made later, for a SurfaceFlinger that restarted, starts at that size.
+    void growDisplay(int64_t width, int64_t height);
+
    private:
     std::shared_ptr<TaskComposer> mTasks;
     DisplayConfig mConfig;

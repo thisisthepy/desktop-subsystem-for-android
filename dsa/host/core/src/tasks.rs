@@ -977,6 +977,11 @@ impl TaskTable {
         self.tasks.contains_key(&task_id) || self.frames.contains_key(&task_id)
     }
 
+    /// Whether the guest has reported the task (or overlay) `task_id` and not ended it.
+    pub fn has_task(&self, task_id: i32) -> bool {
+        self.tasks.contains_key(&task_id)
+    }
+
     /// How many tasks the table has heard of.
     pub fn len(&self) -> usize {
         self.tasks.len()

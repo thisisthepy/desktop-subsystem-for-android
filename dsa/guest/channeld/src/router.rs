@@ -1,7 +1,9 @@
 //! Who gets which frame: the daemon's routing between the host and the guest's own users of
 //! the channel.
 //!
-//! - A frame from the host goes to every live listener.
+//! - A frame from the host goes to every live listener. The host's last `DisplaySize` is also
+//!   told to a listener that subscribes later, such as a restarted hwcomposer, which starts
+//!   at the size Android booted with.
 //! - A frame a guest client sends goes to the host. A task's bounds or its end
 //!   (`TaskUpdated`, `TaskRemoved`) also go to every listener in the other guest processes,
 //!   because the hwcomposer groups layers by the task bounds the agent reports.
@@ -190,6 +192,9 @@ struct State {
     /// The host's last `CaptionCompat`, for a client that subscribes after it: the host sends
     /// it as soon as it connects, which is before the agent has started.
     caption_compat_frame: Option<Vec<u8>>,
+    /// The host's last `DisplaySize`, for a hwcomposer that restarts: it starts at the size
+    /// Android booted with, and grows to this one again.
+    display_size_frame: Option<Vec<u8>>,
     /// The host said it is short of memory.
     host_memory_low: bool,
     next_id: u64,
@@ -606,6 +611,12 @@ impl Router {
                 return id;
             }
         }
+        // Before the tasks, so a restarted hwcomposer lays them out on the display they are on.
+        if let Some(frame) = &state.display_size_frame {
+            if listener.deliver(frame) == Delivery::Gone {
+                return id;
+            }
+        }
         for task in state.tasks.values() {
             if let Some((sender, frame)) = &task.updated {
                 if *sender != peer && listener.deliver(frame) == Delivery::Gone {
@@ -790,6 +801,8 @@ impl Router {
             // The agent settles a task's insets when the task starts, and it starts after the
             // host has said this: a client that subscribes later is told the last word.
             Some(Body::CaptionCompat(_)) => state.caption_compat_frame = Some(frame.to_vec()),
+            // The display only grows, so the last size is the largest.
+            Some(Body::DisplaySize(_)) => state.display_size_frame = Some(frame.to_vec()),
             Some(Body::ScreenState(screen)) => state.screen_off = !screen.on,
             Some(Body::HostMemory(memory)) => state.host_memory_low = memory.low,
             Some(Body::PowerState(_)) => state.power_state = Some(frame.to_vec()),

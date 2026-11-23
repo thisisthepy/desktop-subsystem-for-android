@@ -855,4 +855,23 @@ TEST(fr3_a_frame_request_sends_nothing_old_when_there_is_no_frame) {
     EXPECT_EQ(lastPostedTarget(true, true, none, 0), static_cast<uint32_t>(0));
 }
 
+TEST(fr4_the_display_grows_to_what_the_host_asks) {
+    // Booted at 3840 for monitors that need 4096: the host asks, and both sides grow.
+    EXPECT_TRUE(grownDisplaySize(BufferSize{3840, 3840}, 4096, 4096) == (BufferSize{4096, 4096}));
+}
+
+TEST(fr4_the_display_never_shrinks) {
+    // A smaller size, or one longer on one side only, keeps every side at least as long.
+    EXPECT_TRUE(grownDisplaySize(BufferSize{4096, 4096}, 2880, 2880) == (BufferSize{4096, 4096}));
+    EXPECT_TRUE(grownDisplaySize(BufferSize{5000, 2000}, 4096, 4096) == (BufferSize{5000, 4096}));
+    // Nothing asked on a side leaves it.
+    EXPECT_TRUE(grownDisplaySize(BufferSize{2880, 2880}, 0, -1) == (BufferSize{2880, 2880}));
+}
+
+TEST(fr4_the_display_grows_no_further_than_16384) {
+    EXPECT_TRUE(grownDisplaySize(BufferSize{3840, 3840}, 23040, 20000) ==
+                (BufferSize{kMaxDisplaySide, kMaxDisplaySide}));
+    EXPECT_EQ(kMaxDisplaySide, 16384);
+}
+
 int main() { return ::dsa::test::runAll(); }

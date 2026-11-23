@@ -1506,6 +1506,8 @@ impl TaskWindows {
             // A move outside a drag has ended: the task takes its monitor's density at the
             // window's size, after the window has taken the size the desktop gave it.
             requests.extend(sizing.settle(now));
+            // The guest's display grew under a window it was too small for.
+            requests.extend(sizing.limit_grown(now));
             requests.extend(sizing.reconfigure(now));
         }
         requests

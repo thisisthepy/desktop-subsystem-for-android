@@ -415,6 +415,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.DisplayRefresh getDisplayRefresh();
 
   /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   * @return Whether the displaySize field is set.
+   */
+  boolean hasDisplaySize();
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   * @return The displaySize.
+   */
+  io.github.thisisthepy.dsa.control.v1.DisplaySize getDisplaySize();
+
+  /**
    * <code>.dsa.control.v1.PowerHint power_hint = 110;</code>
    * @return Whether the powerHint field is set.
    */

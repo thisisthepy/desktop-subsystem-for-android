@@ -27,6 +27,8 @@ ChannelEvent decodeChannelFrame(const uint8_t* data, size_t size) {
             return TaskEnd{envelope.task_removed().task_id()};
         case v1::Envelope::kRequestTaskFrame:
             return FrameRequest{envelope.request_task_frame().task_id()};
+        case v1::Envelope::kDisplaySize:
+            return DisplayGrowth{envelope.display_size().width(), envelope.display_size().height()};
         default:
             return std::monostate{};
     }

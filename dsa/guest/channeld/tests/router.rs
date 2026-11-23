@@ -10,8 +10,8 @@ use dsa_guest_channeld::router::{
 };
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
-    AgentConnected, AppInfo, AuthProof, CaptionCompat, CloseTask, Envelope, GuestBoot, Hello,
-    LaunchApp, LocationRequest, PowerHint, PowerHintKind, PowerState, Rect, TaskFrames,
+    AgentConnected, AppInfo, AuthProof, CaptionCompat, CloseTask, DisplaySize, Envelope, GuestBoot,
+    Hello, LaunchApp, LocationRequest, PowerHint, PowerHintKind, PowerState, Rect, TaskFrames,
     TaskRemoved, TaskUpdated, TasksShown,
 };
 
@@ -137,6 +137,28 @@ fn fr22_an_agent_that_starts_after_the_host_spoke_hears_which_apps_start_below_t
     let again = Arc::new(Recorder::default());
     router.subscribe(AGENT, again.clone());
     assert_eq!(again.frames(), vec![second]);
+}
+
+#[test]
+fn fr4_a_hwcomposer_that_restarts_hears_the_display_size_the_host_last_asked_for() {
+    let (router, _host) = router();
+    let size = |side: u32| {
+        frame(Body::DisplaySize(DisplaySize {
+            width: side,
+            height: side,
+        }))
+    };
+    let composer = Arc::new(Recorder::default());
+    router.subscribe(COMPOSER, composer.clone());
+    // The host asks for a larger display as a window opens: the hwcomposer hears it at once.
+    router.from_host(&size(4096));
+    assert_eq!(composer.frames(), vec![size(4096)]);
+    // A hwcomposer that restarts begins at the boot size, and is told the last size first.
+    router.from_guest(AGENT, task_updated(7)).unwrap();
+    composer.die();
+    let again = Arc::new(Recorder::default());
+    router.subscribe(COMPOSER, again.clone());
+    assert_eq!(again.frames(), vec![size(4096), task_updated(7)]);
 }
 
 #[test]

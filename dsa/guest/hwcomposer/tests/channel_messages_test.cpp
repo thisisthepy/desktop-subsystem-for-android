@@ -105,6 +105,17 @@ TEST(fr3_request_task_frame_asks_for_the_tasks_frame) {
     }
 }
 
+TEST(fr4_display_size_asks_for_the_display_to_grow) {
+    const std::vector<uint8_t> bytes = vector("display_size");
+    const ChannelEvent event = decodeChannelFrame(bytes.data(), bytes.size());
+    const DisplayGrowth* growth = std::get_if<DisplayGrowth>(&event);
+    EXPECT_TRUE(growth != nullptr);
+    if (growth) {
+        EXPECT_EQ(growth->width, 4096);
+        EXPECT_EQ(growth->height, 4096);
+    }
+}
+
 TEST(fr3_other_messages_mean_nothing_to_the_hwcomposer) {
     for (const char* name : {"close_task", "launch_app", "task_frames", "hello_guest",
                              "pointer_event_mouse_secondary_down", "resize_task",

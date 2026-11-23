@@ -1,9 +1,11 @@
-//! The user's monitors, for choosing the guest display's size when their Android starts.
+//! The user's monitors, for choosing the guest display's size when their Android starts and
+//! for growing it when a window opens on monitors that need more of it.
 //!
 //! The service runs in session 0, whose desktop is not the user's: monitor calls made there
 //! describe session 0's. So the processes in the user's session record the monitors in a small
 //! file in the user's local application data, before they ask for Android and whenever the
-//! monitors change, and the service reads it when it starts the VM. Each monitor is recorded
+//! monitors change, and the service reads it when it starts the VM and each time a task's
+//! window opens ([`recorded_monitors`]). Each monitor is recorded
 //! with its size in physical pixels, its DPI and whether it is the main one, so the display is
 //! sized in guest pixels: a task drawn at the main monitor's density on a monitor of a lower
 //! scale needs more of them than the monitor has pixels. The record outlives them
@@ -55,10 +57,17 @@ pub fn record_path(local_app_data: &Path) -> PathBuf {
 /// The guest display for the monitors recorded below `local_app_data`, when there is a record
 /// with a usable monitor in it.
 pub fn recorded_display(local_app_data: &Path) -> Option<(u32, u32)> {
+    display_for(&recorded_monitors(local_app_data)?)
+}
+
+/// The monitors recorded below `local_app_data`, when there is a record. The service reads
+/// them when it starts the VM and each time a task's window opens, when the guest's display
+/// grows if they need more of it.
+pub fn recorded_monitors(local_app_data: &Path) -> Option<Vec<Monitor>> {
     let file = open_record(local_app_data, &record_path(local_app_data))?;
     let mut text = String::new();
     file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
-    display_for(&parse_record(&text))
+    Some(parse_record(&text))
 }
 
 /// Writes the record whole, so the service never reads half of one.

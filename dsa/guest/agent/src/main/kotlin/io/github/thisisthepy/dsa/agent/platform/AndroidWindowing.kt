@@ -3,6 +3,8 @@ package io.github.thisisthepy.dsa.agent.platform
 import android.content.Context
 import android.graphics.Point
 import android.hardware.display.DisplayManager
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Display
 import io.github.thisisthepy.dsa.agent.windowing.Size
@@ -44,6 +46,24 @@ class AndroidWindowing(private val context: Context) : WindowingControl {
         @Suppress("DEPRECATION")
         display.getRealSize(size)
         return Size(size.x, size.y)
+    }
+
+    /**
+     * The display manager calls on the main thread when the default display changes: its
+     * size grows when the hwcomposer reports it connected again at a larger size.
+     */
+    override fun listenToDisplay(onChange: () -> Unit) {
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) {}
+
+            override fun onDisplayRemoved(displayId: Int) {}
+
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId == Display.DEFAULT_DISPLAY) onChange()
+            }
+        }
+        context.getSystemService(DisplayManager::class.java)
+            .registerDisplayListener(listener, Handler(Looper.getMainLooper()))
     }
 
     // The methods are looked up on the interface: the proxy class that implements it is private.

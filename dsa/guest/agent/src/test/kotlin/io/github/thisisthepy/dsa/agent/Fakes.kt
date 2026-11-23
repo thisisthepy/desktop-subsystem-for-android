@@ -372,6 +372,18 @@ class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
     }
 
     override fun displaySize() = size ?: throw IllegalStateException("the display is not up")
+
+    private var displayListener: (() -> Unit)? = null
+
+    override fun listenToDisplay(onChange: () -> Unit) {
+        displayListener = onChange
+    }
+
+    /** The display takes [to], as when the hwcomposer grows it, and the framework says so. */
+    fun resize(to: Size) {
+        size = to
+        displayListener?.invoke()
+    }
 }
 
 /** The framework's input: records what was injected, on a clock the test moves. */

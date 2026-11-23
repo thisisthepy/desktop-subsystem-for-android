@@ -467,6 +467,13 @@ BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskW
     return fitting;
 }
 
+BufferSize grownDisplaySize(BufferSize current, int64_t width, int64_t height) {
+    const auto grown = [](int64_t now, int64_t asked) {
+        return std::max(now, std::min(asked, kMaxDisplaySide));
+    };
+    return BufferSize{grown(current.width, width), grown(current.height, height)};
+}
+
 std::optional<uint32_t> TaskDisplays::release(int32_t task) {
     auto it = mByTask.find(task);
     if (it == mByTask.end()) {

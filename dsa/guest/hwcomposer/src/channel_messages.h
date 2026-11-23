@@ -34,9 +34,16 @@ struct FrameRequest {
     int32_t id = 0;
 };
 
+// The host asked for the display to grow to `width` by `height` (DisplaySize), as a window
+// opened on monitors that need more of it. The display only grows (grownDisplaySize).
+struct DisplayGrowth {
+    int64_t width = 0;
+    int64_t height = 0;
+};
+
 // What a frame from the channel means to the hwcomposer. std::monostate for frames it has
 // no use for (the host's other messages, its own TaskFrames) and frames it cannot decode.
-using ChannelEvent = std::variant<std::monostate, TaskUpdate, TaskEnd, FrameRequest>;
+using ChannelEvent = std::variant<std::monostate, TaskUpdate, TaskEnd, FrameRequest, DisplayGrowth>;
 
 ChannelEvent decodeChannelFrame(const uint8_t* data, size_t size);
 

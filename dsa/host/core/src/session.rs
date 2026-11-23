@@ -857,6 +857,9 @@ struct Shared {
     android_files_token: Mutex<Option<String>>,
     /// Says the device name the guest's agent is given each time it connects.
     device_name: Mutex<Option<DeviceNameSource>>,
+    /// Reads the monitors connected now, each time a task's window opens, so the guest's
+    /// display grows when they need more of it.
+    display_monitors: Mutex<Option<crate::guest_display::MonitorSource>>,
     /// The user's root elevation settings, and whether the running boot started with the
     /// feature on.
     root_config: Mutex<RootElevationNow>,
@@ -1167,6 +1170,15 @@ impl Shared {
     }
 
     /// Records a task message and hands it to the watchers, unless it changes nothing.
+    /// Whether the guest has reported the task `task_id` and not ended it.
+    fn has_task(&self, task_id: i32) -> bool {
+        self.tasks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .table
+            .has_task(task_id)
+    }
+
     fn publish_task(&self, event: TaskEvent) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
         if !hub.table.apply(&event) {
@@ -1626,6 +1638,7 @@ impl Session {
             share_server: Mutex::new(None),
             android_files_token: Mutex::new(None),
             device_name: Mutex::new(None),
+            display_monitors: Mutex::new(None),
             root_config: Mutex::new(RootElevationNow::default()),
             root_approval: Mutex::new(None),
             prompt_language: Mutex::new(String::new()),
@@ -1657,6 +1670,7 @@ impl Session {
             battery_saver: false,
             refresh_sent: None,
             refresh_pending: false,
+            display_asked: None,
             host_memory_low: false,
             host_memory_pending: false,
             tasks_shown: None,
@@ -2761,6 +2775,18 @@ impl Session {
         *self
             .shared
             .device_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source);
+    }
+
+    /// Reads the monitors connected with `source` each time a task's window opens. When they
+    /// need a larger guest display than the guest has ([`crate::guest_display::grown_for_window`]),
+    /// the guest is told to grow it, without restarting Android. Without a source the display
+    /// keeps the size it started with.
+    pub fn set_monitor_source(&self, source: crate::guest_display::MonitorSource) {
+        *self
+            .shared
+            .display_monitors
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
@@ -4643,6 +4669,8 @@ struct Worker {
     refresh_sent: Option<u32>,
     /// Set when the rate changed while the guest was frozen, so it is told after the thaw.
     refresh_pending: bool,
+    /// The display size the guest was last asked to grow to, for the log.
+    display_asked: Option<(u32, u32)>,
     /// Whether the host is short of memory, as last recorded.
     host_memory_low: bool,
     /// Set when that changed while the guest was frozen, so it is told after the thaw.
@@ -6039,6 +6067,38 @@ impl Worker {
         }
     }
 
+    /// A task's window opens while the guest's display is `display` (as the agent reported it
+    /// with the task; 0 by 0 when unknown). The monitors connected now are read, and when they
+    /// need a larger display ([`crate::guest_display::grown_for_window`]) the guest is told to
+    /// grow it at once. Its hwcomposer only ever grows the display, and the agent reports every
+    /// task again at the new size, which is the windows' new limit.
+    fn window_opens(&mut self, display: (u32, u32)) {
+        let source = self
+            .shared
+            .display_monitors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(monitors) = source.and_then(|read| read()) else {
+            return;
+        };
+        let current = (display.0 > 0 && display.1 > 0).then_some(display);
+        let Some((width, height)) = crate::guest_display::grown_for_window(current, &monitors)
+        else {
+            return;
+        };
+        if self.display_asked != Some((width, height)) {
+            eprintln!(
+                "display: a window opens and the {} monitor(s) connected need a {width}x{height} \
+                 display; the guest's is {}: it grows without a restart",
+                monitors.len(),
+                current.map_or("of unknown size".to_string(), |(w, h)| format!("{w}x{h}")),
+            );
+        }
+        self.display_asked = Some((width, height));
+        self.send_body(Body::DisplaySize(control::DisplaySize { width, height }));
+    }
+
     /// Tells the guest its display refresh rate, if it changed since it was last told and the
     /// monitors are known. Until they are, the guest keeps the rate it booted with.
     fn update_refresh(&mut self) {
@@ -7020,6 +7080,11 @@ impl Worker {
                 );
             }
             Some(Body::TaskUpdated(update)) => {
+                // A task the host has not heard of gets a window now; an overlay has no window
+                // the user sizes.
+                if update.overlay.is_none() && !self.shared.has_task(update.task_id) {
+                    self.window_opens((update.max_width, update.max_height));
+                }
                 let bounds = update.bounds.unwrap_or_default();
                 let orientation = match update.orientation() {
                     control::TaskOrientation::Portrait => TaskOrientation::Portrait,
@@ -7435,6 +7500,7 @@ impl Worker {
             | Some(Body::TasksShown(_))
             | Some(Body::PowerState(_))
             | Some(Body::DisplayRefresh(_))
+            | Some(Body::DisplaySize(_))
             | Some(Body::HostMemory(_))
             | Some(Body::HostSleep(_))
             | Some(Body::CloseTask(_))

@@ -892,6 +892,20 @@ pub struct DisplayRefresh {
     #[prost(uint32, tag = "1")]
     pub hz: u32,
 }
+/// Host to guest, to the hwcomposer: the size in pixels the guest's display grows to, without
+/// restarting Android. The host sends it when a task's window opens and the monitors connected
+/// then need a larger display than the one the guest reports with its tasks. The hwcomposer
+/// only ever grows the display, each side to at most 16384, and keeps its density; a size not
+/// larger than the display's on either side changes nothing on that side. SurfaceFlinger takes
+/// the new size as a reconnection of the same display, and the agent reports every task again
+/// with the new size as its largest. A hwcomposer that subscribes later is told the last size.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DisplaySize {
+    #[prost(uint32, tag = "1")]
+    pub width: u32,
+    #[prost(uint32, tag = "2")]
+    pub height: u32,
+}
 /// Guest to host, from the control daemon: how much memory the guest has and how hard it
 /// works to find more. The host grows the VM's memory by hot-adding it when the guest runs
 /// short, and gives it back when the guest no longer needs it. Sent every few seconds while
@@ -3773,7 +3787,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 416, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3855,6 +3869,8 @@ pub mod envelope {
         PowerState(super::PowerState),
         #[prost(message, tag = "407")]
         DisplayRefresh(super::DisplayRefresh),
+        #[prost(message, tag = "416")]
+        DisplaySize(super::DisplaySize),
         #[prost(message, tag = "110")]
         PowerHint(super::PowerHint),
         #[prost(message, tag = "140")]

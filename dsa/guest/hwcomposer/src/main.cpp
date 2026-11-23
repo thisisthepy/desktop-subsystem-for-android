@@ -30,9 +30,11 @@ int main() {
     // The thread that sends frames to the host runs at the display's priority, as
     // SurfaceFlinger's next present waits for it.
     auto tasks = std::make_shared<TaskComposer>([] { raiseToDisplayPriority("present"); });
+    // Made before the channel, whose frames can grow its display.
+    auto composer = ndk::SharedRefBase::make<Composer>(tasks, config);
 
     ChannelClient channel(
-        [tasks](const std::vector<uint8_t>& frame) {
+        [tasks, composer](const std::vector<uint8_t>& frame) {
             const ChannelEvent event = decodeChannelFrame(frame.data(), frame.size());
             if (const auto* update = std::get_if<TaskUpdate>(&event)) {
                 tasks->taskUpdated(*update);
@@ -40,6 +42,8 @@ int main() {
                 tasks->taskEnded(end->id);
             } else if (const auto* request = std::get_if<FrameRequest>(&event)) {
                 tasks->frameRequested(request->id);
+            } else if (const auto* growth = std::get_if<DisplayGrowth>(&event)) {
+                composer->growDisplay(growth->width, growth->height);
             }
         },
         [tasks] { tasks->channelConnected(); });
@@ -48,7 +52,6 @@ int main() {
     ABinderProcess_setThreadPoolMaxThreadCount(4);
     ABinderProcess_startThreadPool();
 
-    auto composer = ndk::SharedRefBase::make<Composer>(tasks, config);
     makeBinderRealtime(composer->asBinder().get());
     const std::string instance = std::string(Composer::descriptor) + "/default";
     const binder_status_t status =

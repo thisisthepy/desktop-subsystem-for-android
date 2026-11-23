@@ -182,7 +182,7 @@ The guest Vulkan driver does the same in the other processes that sample such a 
 
 The display's size and density come from the kernel command line. `make-image.py` writes
 these defaults into `image.json`, and the host replaces the width and height with a square as
-long as the user's longest monitor when it starts the VM, and the density with the density of
+long as the user's longest monitor, in guest pixels, when it starts the VM, and the density with the density of
 a window on the user's main monitor (196 at a scale of 150%). SurfaceFlinger, and so every
 app, starts at that same density (`androidboot.lcd_density`, which the host sets beside it):
 
@@ -200,6 +200,15 @@ chooses the rate while Android runs: the user's fastest monitor, at most 60 Hz w
 host's battery saver is on or while the user drags a window to a new size. It sends that rate to the agent (`DisplayRefresh`), which holds
 the framework's refresh rate range at it, and SurfaceFlinger then sets the matching
 configuration, whose period the vsync clock takes from its next tick.
+
+The display can grow while Android runs. When a task's window opens and the monitors
+connected then need a larger display, the host sends the size (`DisplaySize`). The hwcomposer
+grows each side to it, never shrinks one, and takes no side past 16384 (`grownDisplaySize`).
+It keeps the density and then reports the display connected again (`onHotplug`), which
+SurfaceFlinger takes as a reconnection of the same display: it reads the configurations again
+and remakes its display device at the new size, and the display manager and the window
+manager follow. A hwcomposer that restarts starts at the boot size and is told the last size
+again when it subscribes to the control daemon.
 
 A window cannot be larger than this display. A task's ColorBuffers follow the task's own
 size in steps (`taskBufferSize`), so a large display costs nothing per window. Only the client

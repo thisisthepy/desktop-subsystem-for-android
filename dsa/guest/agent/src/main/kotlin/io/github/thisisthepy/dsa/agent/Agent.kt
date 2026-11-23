@@ -175,7 +175,7 @@ class Agent(
     private val tasks: TaskSource,
     private val actions: TaskActions,
     locator: ChannelLocator,
-    windowing: WindowingControl,
+    private val windowing: WindowingControl,
     injector: InputInjector,
     private val scheduler: Scheduler,
     private val log: Log,
@@ -631,8 +631,28 @@ class Agent(
             listenToExclusion()
             listenToUnhandledKeys()
             listenToOverlays()
+            listenToDisplay()
             channel.start()
             requestRefresh()
+        }
+    }
+
+    /**
+     * Follows the default display, which the host grows while Android runs when a window opens
+     * on monitors that need more of it. Every task and overlay is then reported again with
+     * the display's new size as its largest, which is the host windows' new limit.
+     */
+    private fun listenToDisplay() {
+        try {
+            windowing.listenToDisplay {
+                scheduler.post {
+                    requestRefresh()
+                    // After the refresh, which reads the display's new size.
+                    scheduler.post(::reportOverlays)
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("could not follow the display; a display the host grows reaches the windows with the next change to a task", e)
         }
     }
 

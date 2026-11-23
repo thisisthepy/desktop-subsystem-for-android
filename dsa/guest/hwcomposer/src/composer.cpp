@@ -31,6 +31,20 @@ ndk::ScopedAStatus Composer::createClient(std::shared_ptr<composer3::IComposerCl
     return ndk::ScopedAStatus::ok();
 }
 
+void Composer::growDisplay(int64_t width, int64_t height) {
+    std::shared_ptr<ComposerClient> client;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        const BufferSize grown = grownDisplaySize(BufferSize{mConfig.width, mConfig.height}, width, height);
+        mConfig.width = static_cast<int32_t>(grown.width);
+        mConfig.height = static_cast<int32_t>(grown.height);
+        client = mClient.lock();
+    }
+    if (client) {
+        client->growDisplay(width, height);
+    }
+}
+
 ndk::ScopedAStatus Composer::getCapabilities(std::vector<composer3::Capability>* caps) {
     // No present fences are handed back: frames are finished when presentDisplay returns.
     *caps = {composer3::Capability::PRESENT_FENCE_IS_NOT_RELIABLE};
