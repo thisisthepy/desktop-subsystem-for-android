@@ -28,6 +28,7 @@ uv run dsa/graphics/test_stream_buffers_patch.py
 uv run dsa/graphics/test_spare_pages_patch.py
 uv run dsa/graphics/test_color_buffer_refs_patch.py
 uv run dsa/graphics/test_fixed_width_types_patch.py
+uv run dsa/graphics/test_null_command_buffer_patch.py
 uv run dsa/graphics/test_build.py
 uv run dsa/graphics/test_check_guest_driver.py
 uv run dsa/graphics/host/test_host_build.py

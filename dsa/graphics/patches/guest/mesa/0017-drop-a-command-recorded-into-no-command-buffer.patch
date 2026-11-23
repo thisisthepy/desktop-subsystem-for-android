@@ -1,0 +1,1399 @@
+diff --git a/src/gfxstream/guest/vulkan_enc/gfxstream_vk_private.h b/src/gfxstream/guest/vulkan_enc/gfxstream_vk_private.h
+--- a/src/gfxstream/guest/vulkan_enc/gfxstream_vk_private.h
++++ b/src/gfxstream/guest/vulkan_enc/gfxstream_vk_private.h
+@@ -38,6 +38,7 @@
+ #include <vulkan/vk_icd.h>
+ #include <vulkan/vulkan.h>
+ 
++#include <atomic>
+ #include <vector>
+ 
+ #include "gfxstream_vk_entrypoints.h"
+@@ -128,6 +129,28 @@ VK_DEFINE_NONDISP_HANDLE_CASTS(gfxstream_vk_fence, vk.base, VkFence, VK_OBJECT_T
+ VK_DEFINE_NONDISP_HANDLE_CASTS(gfxstream_vk_semaphore, vk.base, VkSemaphore,
+                                VK_OBJECT_TYPE_SEMAPHORE)
+ 
++// Whether a command recorded into `commandBuffer` is dropped because there is no command
++// buffer (VK_NULL_HANDLE): said once in the log, then the command returns. A command buffer
++// handle of 0 is not valid usage, but the app's GL driver can make it: ANGLE records the
++// release of an image it shares (an AHardwareBuffer) into a primary command buffer it has
++// not allocated when nothing else was recorded since its last submit, which a large upload
++// (64 MiB of copies to images) brings about. Followed, the handle is a read of address 0
++// plus the field's offset, and the app ends on a SIGSEGV in its upload thread. Dropped, the
++// image only misses its queue family release, which the host's single queue does not need.
++static inline bool gfxstream_vk_drop_without_command_buffer(
++    const struct gfxstream_vk_command_buffer* commandBuffer, const char* command) {
++    if (commandBuffer) {
++        return false;
++    }
++    static std::atomic<bool> said{false};
++    if (!said.exchange(true)) {
++        mesa_logw("%s was recorded into no command buffer (VK_NULL_HANDLE) and is dropped; "
++                  "later commands without one are dropped as well",
++                  command);
++    }
++    return true;
++}
++
+ VkResult gfxstream_vk_wsi_init(struct gfxstream_vk_physical_device* physical_device);
+ 
+ void gfxstream_vk_wsi_finish(struct gfxstream_vk_physical_device* physical_device);
+diff --git a/src/gfxstream/guest/vulkan/gfxstream_vk_cmd.cpp b/src/gfxstream/guest/vulkan/gfxstream_vk_cmd.cpp
+--- a/src/gfxstream/guest/vulkan/gfxstream_vk_cmd.cpp
++++ b/src/gfxstream/guest/vulkan/gfxstream_vk_cmd.cpp
+@@ -123,12 +123,14 @@ VkResult gfxstream_vk_AllocateCommandBuffers(VkDevice device,
+     }
+     std::vector<gfxstream_vk_command_buffer*> gfxstream_commandBuffers(
+         pAllocateInfo->commandBufferCount);
++    uint32_t created = 0;
+     for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; i++) {
+         result =
+             vk_command_buffer_createOp(&gfxstream_commandPool->vk, VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                                        (vk_command_buffer**)&gfxstream_commandBuffers[i]);
+         if (VK_SUCCESS == result) {
+             gfxstream_commandBuffers[i]->vk.level = pAllocateInfo->level;
++            created++;
+         } else {
+             break;
+         }
+@@ -156,6 +158,17 @@ VkResult gfxstream_vk_AllocateCommandBuffers(VkDevice device,
+             }
+         }
+     }
++    if (VK_SUCCESS != result) {
++        // Neither the guest's objects nor any handle outlive a failure: the caller gets
++        // VK_NULL_HANDLE in every element and the error (out of host or device memory), and
++        // records nothing into a command buffer that does not exist.
++        for (uint32_t i = 0; i < created; i++) {
++            vk_command_buffer_destroyOp(&gfxstream_commandBuffers[i]->vk);
++        }
++        for (uint32_t i = 0; i < pAllocateInfo->commandBufferCount; i++) {
++            pCommandBuffers[i] = VK_NULL_HANDLE;
++        }
++    }
+     return result;
+ }
+ 
+@@ -197,6 +210,9 @@ void gfxstream_vk_CmdBeginTransformFeedbackEXT(VkCommandBuffer commandBuffer,
+                                                const VkDeviceSize* pCounterBufferOffsets) {
+     MESA_TRACE_SCOPE("vkCmdBeginTransformFeedbackEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginTransformFeedbackEXT")) {
++        return;
++    }
+     auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+         gfxstream_commandBuffer->internal_object);
+     std::vector<VkBuffer> internal_pCounterBuffers(counterBufferCount);
+diff --git a/src/gfxstream/guest/vulkan_enc/func_table.cpp b/src/gfxstream/guest/vulkan_enc/func_table.cpp
+--- a/src/gfxstream/guest/vulkan_enc/func_table.cpp
++++ b/src/gfxstream/guest/vulkan_enc/func_table.cpp
+@@ -1159,6 +1159,9 @@ void gfxstream_vk_CmdBindPipeline(VkCommandBuffer commandBuffer,
+                                   VkPipelineBindPoint pipelineBindPoint, VkPipeline pipeline) {
+     MESA_TRACE_SCOPE("vkCmdBindPipeline");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindPipeline")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1170,6 +1173,9 @@ void gfxstream_vk_CmdSetViewport(VkCommandBuffer commandBuffer, uint32_t firstVi
+                                  uint32_t viewportCount, const VkViewport* pViewports) {
+     MESA_TRACE_SCOPE("vkCmdSetViewport");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetViewport")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1181,6 +1187,9 @@ void gfxstream_vk_CmdSetScissor(VkCommandBuffer commandBuffer, uint32_t firstSci
+                                 uint32_t scissorCount, const VkRect2D* pScissors) {
+     MESA_TRACE_SCOPE("vkCmdSetScissor");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetScissor")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1191,6 +1200,9 @@ void gfxstream_vk_CmdSetScissor(VkCommandBuffer commandBuffer, uint32_t firstSci
+ void gfxstream_vk_CmdSetLineWidth(VkCommandBuffer commandBuffer, float lineWidth) {
+     MESA_TRACE_SCOPE("vkCmdSetLineWidth");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetLineWidth")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1202,6 +1214,9 @@ void gfxstream_vk_CmdSetDepthBias(VkCommandBuffer commandBuffer, float depthBias
+                                   float depthBiasClamp, float depthBiasSlopeFactor) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthBias");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthBias")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1213,6 +1228,9 @@ void gfxstream_vk_CmdSetBlendConstants(VkCommandBuffer commandBuffer,
+                                        const float blendConstants[4]) {
+     MESA_TRACE_SCOPE("vkCmdSetBlendConstants");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetBlendConstants")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1224,6 +1242,9 @@ void gfxstream_vk_CmdSetDepthBounds(VkCommandBuffer commandBuffer, float minDept
+                                     float maxDepthBounds) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthBounds");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthBounds")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1235,6 +1256,9 @@ void gfxstream_vk_CmdSetStencilCompareMask(VkCommandBuffer commandBuffer,
+                                            VkStencilFaceFlags faceMask, uint32_t compareMask) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilCompareMask");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilCompareMask")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1246,6 +1270,9 @@ void gfxstream_vk_CmdSetStencilWriteMask(VkCommandBuffer commandBuffer, VkStenci
+                                          uint32_t writeMask) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilWriteMask");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilWriteMask")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1257,6 +1284,9 @@ void gfxstream_vk_CmdSetStencilReference(VkCommandBuffer commandBuffer, VkStenci
+                                          uint32_t reference) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilReference");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilReference")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1270,6 +1300,9 @@ void gfxstream_vk_CmdBindDescriptorSets(
+     uint32_t dynamicOffsetCount, const uint32_t* pDynamicOffsets) {
+     MESA_TRACE_SCOPE("vkCmdBindDescriptorSets");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindDescriptorSets")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1283,6 +1316,9 @@ void gfxstream_vk_CmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buf
+                                      VkDeviceSize offset, VkIndexType indexType) {
+     MESA_TRACE_SCOPE("vkCmdBindIndexBuffer");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindIndexBuffer")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1298,6 +1334,9 @@ void gfxstream_vk_CmdBindVertexBuffers(VkCommandBuffer commandBuffer, uint32_t f
+                                        const VkDeviceSize* pOffsets) {
+     MESA_TRACE_SCOPE("vkCmdBindVertexBuffers");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindVertexBuffers")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1317,6 +1356,9 @@ void gfxstream_vk_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount,
+                           uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) {
+     MESA_TRACE_SCOPE("vkCmdDraw");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDraw")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1329,6 +1371,9 @@ void gfxstream_vk_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCo
+                                  uint32_t firstInstance) {
+     MESA_TRACE_SCOPE("vkCmdDrawIndexed");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDrawIndexed")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1340,6 +1385,9 @@ void gfxstream_vk_CmdDrawIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer
+                                   VkDeviceSize offset, uint32_t drawCount, uint32_t stride) {
+     MESA_TRACE_SCOPE("vkCmdDrawIndirect");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDrawIndirect")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1353,6 +1401,9 @@ void gfxstream_vk_CmdDrawIndexedIndirect(VkCommandBuffer commandBuffer, VkBuffer
+                                          VkDeviceSize offset, uint32_t drawCount, uint32_t stride) {
+     MESA_TRACE_SCOPE("vkCmdDrawIndexedIndirect");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDrawIndexedIndirect")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1366,6 +1417,9 @@ void gfxstream_vk_CmdDispatch(VkCommandBuffer commandBuffer, uint32_t groupCount
+                               uint32_t groupCountY, uint32_t groupCountZ) {
+     MESA_TRACE_SCOPE("vkCmdDispatch");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDispatch")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1377,6 +1431,9 @@ void gfxstream_vk_CmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer bu
+                                       VkDeviceSize offset) {
+     MESA_TRACE_SCOPE("vkCmdDispatchIndirect");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDispatchIndirect")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1390,6 +1447,9 @@ void gfxstream_vk_CmdCopyBuffer(VkCommandBuffer commandBuffer, VkBuffer srcBuffe
+                                 const VkBufferCopy* pRegions) {
+     MESA_TRACE_SCOPE("vkCmdCopyBuffer");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyBuffer")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_srcBuffer, srcBuffer);
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_dstBuffer, dstBuffer);
+     {
+@@ -1406,6 +1466,9 @@ void gfxstream_vk_CmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage,
+                                const VkImageCopy* pRegions) {
+     MESA_TRACE_SCOPE("vkCmdCopyImage");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyImage")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1419,6 +1482,9 @@ void gfxstream_vk_CmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage,
+                                const VkImageBlit* pRegions, VkFilter filter) {
+     MESA_TRACE_SCOPE("vkCmdBlitImage");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBlitImage")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1432,6 +1498,9 @@ void gfxstream_vk_CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer s
+                                        uint32_t regionCount, const VkBufferImageCopy* pRegions) {
+     MESA_TRACE_SCOPE("vkCmdCopyBufferToImage");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyBufferToImage")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_srcBuffer, srcBuffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1446,6 +1515,9 @@ void gfxstream_vk_CmdCopyImageToBuffer(VkCommandBuffer commandBuffer, VkImage sr
+                                        uint32_t regionCount, const VkBufferImageCopy* pRegions) {
+     MESA_TRACE_SCOPE("vkCmdCopyImageToBuffer");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyImageToBuffer")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_dstBuffer, dstBuffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1460,6 +1532,9 @@ void gfxstream_vk_CmdUpdateBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuf
+                                   const void* pData) {
+     MESA_TRACE_SCOPE("vkCmdUpdateBuffer");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdUpdateBuffer")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_dstBuffer, dstBuffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1473,6 +1548,9 @@ void gfxstream_vk_CmdFillBuffer(VkCommandBuffer commandBuffer, VkBuffer dstBuffe
+                                 VkDeviceSize dstOffset, VkDeviceSize size, uint32_t data) {
+     MESA_TRACE_SCOPE("vkCmdFillBuffer");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdFillBuffer")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_dstBuffer, dstBuffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1487,6 +1565,9 @@ void gfxstream_vk_CmdClearColorImage(VkCommandBuffer commandBuffer, VkImage imag
+                                      uint32_t rangeCount, const VkImageSubresourceRange* pRanges) {
+     MESA_TRACE_SCOPE("vkCmdClearColorImage");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdClearColorImage")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1501,6 +1582,9 @@ void gfxstream_vk_CmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkIma
+                                             const VkImageSubresourceRange* pRanges) {
+     MESA_TRACE_SCOPE("vkCmdClearDepthStencilImage");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdClearDepthStencilImage")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1514,6 +1598,9 @@ void gfxstream_vk_CmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t at
+                                       const VkClearRect* pRects) {
+     MESA_TRACE_SCOPE("vkCmdClearAttachments");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdClearAttachments")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1527,6 +1614,9 @@ void gfxstream_vk_CmdResolveImage(VkCommandBuffer commandBuffer, VkImage srcImag
+                                   const VkImageResolve* pRegions) {
+     MESA_TRACE_SCOPE("vkCmdResolveImage");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResolveImage")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1539,6 +1629,9 @@ void gfxstream_vk_CmdSetEvent(VkCommandBuffer commandBuffer, VkEvent event,
+                               VkPipelineStageFlags stageMask) {
+     MESA_TRACE_SCOPE("vkCmdSetEvent");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetEvent")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1550,6 +1643,9 @@ void gfxstream_vk_CmdResetEvent(VkCommandBuffer commandBuffer, VkEvent event,
+                                 VkPipelineStageFlags stageMask) {
+     MESA_TRACE_SCOPE("vkCmdResetEvent");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResetEvent")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1567,6 +1663,9 @@ void gfxstream_vk_CmdWaitEvents(VkCommandBuffer commandBuffer, uint32_t eventCou
+                                 const VkImageMemoryBarrier* pImageMemoryBarriers) {
+     MESA_TRACE_SCOPE("vkCmdWaitEvents");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdWaitEvents")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1592,6 +1691,9 @@ void gfxstream_vk_CmdPipelineBarrier(
+     uint32_t imageMemoryBarrierCount, const VkImageMemoryBarrier* pImageMemoryBarriers) {
+     MESA_TRACE_SCOPE("vkCmdPipelineBarrier");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPipelineBarrier")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1614,6 +1716,9 @@ void gfxstream_vk_CmdBeginQuery(VkCommandBuffer commandBuffer, VkQueryPool query
+                                 uint32_t query, VkQueryControlFlags flags) {
+     MESA_TRACE_SCOPE("vkCmdBeginQuery");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginQuery")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1625,6 +1730,9 @@ void gfxstream_vk_CmdEndQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPo
+                               uint32_t query) {
+     MESA_TRACE_SCOPE("vkCmdEndQuery");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndQuery")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1636,6 +1744,9 @@ void gfxstream_vk_CmdResetQueryPool(VkCommandBuffer commandBuffer, VkQueryPool q
+                                     uint32_t firstQuery, uint32_t queryCount) {
+     MESA_TRACE_SCOPE("vkCmdResetQueryPool");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResetQueryPool")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1648,6 +1759,9 @@ void gfxstream_vk_CmdWriteTimestamp(VkCommandBuffer commandBuffer,
+                                     uint32_t query) {
+     MESA_TRACE_SCOPE("vkCmdWriteTimestamp");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdWriteTimestamp")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1661,6 +1775,9 @@ void gfxstream_vk_CmdCopyQueryPoolResults(VkCommandBuffer commandBuffer, VkQuery
+                                           VkDeviceSize stride, VkQueryResultFlags flags) {
+     MESA_TRACE_SCOPE("vkCmdCopyQueryPoolResults");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyQueryPoolResults")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_dstBuffer, dstBuffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -1675,6 +1792,9 @@ void gfxstream_vk_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayo
+                                    const void* pValues) {
+     MESA_TRACE_SCOPE("vkCmdPushConstants");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPushConstants")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1687,6 +1807,9 @@ void gfxstream_vk_CmdBeginRenderPass(VkCommandBuffer commandBuffer,
+                                      VkSubpassContents contents) {
+     MESA_TRACE_SCOPE("vkCmdBeginRenderPass");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginRenderPass")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1697,6 +1820,9 @@ void gfxstream_vk_CmdBeginRenderPass(VkCommandBuffer commandBuffer,
+ void gfxstream_vk_CmdNextSubpass(VkCommandBuffer commandBuffer, VkSubpassContents contents) {
+     MESA_TRACE_SCOPE("vkCmdNextSubpass");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdNextSubpass")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1707,6 +1833,9 @@ void gfxstream_vk_CmdNextSubpass(VkCommandBuffer commandBuffer, VkSubpassContent
+ void gfxstream_vk_CmdEndRenderPass(VkCommandBuffer commandBuffer) {
+     MESA_TRACE_SCOPE("vkCmdEndRenderPass");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndRenderPass")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1717,6 +1846,9 @@ void gfxstream_vk_CmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t com
+                                      const VkCommandBuffer* pCommandBuffers) {
+     MESA_TRACE_SCOPE("vkCmdExecuteCommands");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdExecuteCommands")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1783,6 +1915,9 @@ void gfxstream_vk_GetDeviceGroupPeerMemoryFeatures(VkDevice device, uint32_t hea
+ void gfxstream_vk_CmdSetDeviceMask(VkCommandBuffer commandBuffer, uint32_t deviceMask) {
+     MESA_TRACE_SCOPE("vkCmdSetDeviceMask");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDeviceMask")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -1795,6 +1930,9 @@ void gfxstream_vk_CmdDispatchBase(VkCommandBuffer commandBuffer, uint32_t baseGr
+                                   uint32_t groupCountY, uint32_t groupCountZ) {
+     MESA_TRACE_SCOPE("vkCmdDispatchBase");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDispatchBase")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2060,6 +2198,9 @@ void gfxstream_vk_CmdDrawIndirectCount(VkCommandBuffer commandBuffer, VkBuffer b
+                                        uint32_t stride) {
+     MESA_TRACE_SCOPE("vkCmdDrawIndirectCount");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDrawIndirectCount")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_countBuffer, countBuffer);
+     {
+@@ -2077,6 +2218,9 @@ void gfxstream_vk_CmdDrawIndexedIndirectCount(VkCommandBuffer commandBuffer, VkB
+                                               uint32_t stride) {
+     MESA_TRACE_SCOPE("vkCmdDrawIndexedIndirectCount");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDrawIndexedIndirectCount")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_countBuffer, countBuffer);
+     {
+@@ -2107,6 +2251,9 @@ void gfxstream_vk_CmdBeginRenderPass2(VkCommandBuffer commandBuffer,
+                                       const VkSubpassBeginInfo* pSubpassBeginInfo) {
+     MESA_TRACE_SCOPE("vkCmdBeginRenderPass2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginRenderPass2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2119,6 +2266,9 @@ void gfxstream_vk_CmdNextSubpass2(VkCommandBuffer commandBuffer,
+                                   const VkSubpassEndInfo* pSubpassEndInfo) {
+     MESA_TRACE_SCOPE("vkCmdNextSubpass2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdNextSubpass2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2130,6 +2280,9 @@ void gfxstream_vk_CmdEndRenderPass2(VkCommandBuffer commandBuffer,
+                                     const VkSubpassEndInfo* pSubpassEndInfo) {
+     MESA_TRACE_SCOPE("vkCmdEndRenderPass2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndRenderPass2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2338,6 +2491,9 @@ void gfxstream_vk_CmdSetEvent2(VkCommandBuffer commandBuffer, VkEvent event,
+                                const VkDependencyInfo* pDependencyInfo) {
+     MESA_TRACE_SCOPE("vkCmdSetEvent2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetEvent2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2371,6 +2527,9 @@ void gfxstream_vk_CmdResetEvent2(VkCommandBuffer commandBuffer, VkEvent event,
+                                  VkPipelineStageFlags2 stageMask) {
+     MESA_TRACE_SCOPE("vkCmdResetEvent2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResetEvent2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2382,6 +2541,9 @@ void gfxstream_vk_CmdWaitEvents2(VkCommandBuffer commandBuffer, uint32_t eventCo
+                                  const VkEvent* pEvents, const VkDependencyInfo* pDependencyInfos) {
+     MESA_TRACE_SCOPE("vkCmdWaitEvents2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdWaitEvents2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2415,6 +2577,9 @@ void gfxstream_vk_CmdPipelineBarrier2(VkCommandBuffer commandBuffer,
+                                       const VkDependencyInfo* pDependencyInfo) {
+     MESA_TRACE_SCOPE("vkCmdPipelineBarrier2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPipelineBarrier2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2448,6 +2613,9 @@ void gfxstream_vk_CmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipelineSt
+                                      VkQueryPool queryPool, uint32_t query) {
+     MESA_TRACE_SCOPE("vkCmdWriteTimestamp2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdWriteTimestamp2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2521,6 +2689,9 @@ void gfxstream_vk_CmdCopyBuffer2(VkCommandBuffer commandBuffer,
+                                  const VkCopyBufferInfo2* pCopyBufferInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyBuffer2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyBuffer2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2544,6 +2715,9 @@ void gfxstream_vk_CmdCopyImage2(VkCommandBuffer commandBuffer,
+                                 const VkCopyImageInfo2* pCopyImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyImage2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyImage2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2555,6 +2729,9 @@ void gfxstream_vk_CmdCopyBufferToImage2(VkCommandBuffer commandBuffer,
+                                         const VkCopyBufferToImageInfo2* pCopyBufferToImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyBufferToImage2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyBufferToImage2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2574,6 +2751,9 @@ void gfxstream_vk_CmdCopyImageToBuffer2(VkCommandBuffer commandBuffer,
+                                         const VkCopyImageToBufferInfo2* pCopyImageToBufferInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyImageToBuffer2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyImageToBuffer2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2593,6 +2773,9 @@ void gfxstream_vk_CmdBlitImage2(VkCommandBuffer commandBuffer,
+                                 const VkBlitImageInfo2* pBlitImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdBlitImage2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBlitImage2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2604,6 +2787,9 @@ void gfxstream_vk_CmdResolveImage2(VkCommandBuffer commandBuffer,
+                                    const VkResolveImageInfo2* pResolveImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdResolveImage2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResolveImage2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2615,6 +2801,9 @@ void gfxstream_vk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+                                     const VkRenderingInfo* pRenderingInfo) {
+     MESA_TRACE_SCOPE("vkCmdBeginRendering");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginRendering")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2625,6 +2814,9 @@ void gfxstream_vk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+ void gfxstream_vk_CmdEndRendering(VkCommandBuffer commandBuffer) {
+     MESA_TRACE_SCOPE("vkCmdEndRendering");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndRendering")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2634,6 +2826,9 @@ void gfxstream_vk_CmdEndRendering(VkCommandBuffer commandBuffer) {
+ void gfxstream_vk_CmdSetCullMode(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode) {
+     MESA_TRACE_SCOPE("vkCmdSetCullMode");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetCullMode")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2644,6 +2839,9 @@ void gfxstream_vk_CmdSetCullMode(VkCommandBuffer commandBuffer, VkCullModeFlags
+ void gfxstream_vk_CmdSetFrontFace(VkCommandBuffer commandBuffer, VkFrontFace frontFace) {
+     MESA_TRACE_SCOPE("vkCmdSetFrontFace");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetFrontFace")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2655,6 +2853,9 @@ void gfxstream_vk_CmdSetPrimitiveTopology(VkCommandBuffer commandBuffer,
+                                           VkPrimitiveTopology primitiveTopology) {
+     MESA_TRACE_SCOPE("vkCmdSetPrimitiveTopology");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetPrimitiveTopology")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2666,6 +2867,9 @@ void gfxstream_vk_CmdSetViewportWithCount(VkCommandBuffer commandBuffer, uint32_
+                                           const VkViewport* pViewports) {
+     MESA_TRACE_SCOPE("vkCmdSetViewportWithCount");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetViewportWithCount")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2677,6 +2881,9 @@ void gfxstream_vk_CmdSetScissorWithCount(VkCommandBuffer commandBuffer, uint32_t
+                                          const VkRect2D* pScissors) {
+     MESA_TRACE_SCOPE("vkCmdSetScissorWithCount");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetScissorWithCount")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2690,6 +2897,9 @@ void gfxstream_vk_CmdBindVertexBuffers2(VkCommandBuffer commandBuffer, uint32_t
+                                         const VkDeviceSize* pStrides) {
+     MESA_TRACE_SCOPE("vkCmdBindVertexBuffers2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindVertexBuffers2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2708,6 +2918,9 @@ void gfxstream_vk_CmdBindVertexBuffers2(VkCommandBuffer commandBuffer, uint32_t
+ void gfxstream_vk_CmdSetDepthTestEnable(VkCommandBuffer commandBuffer, VkBool32 depthTestEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthTestEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthTestEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2718,6 +2931,9 @@ void gfxstream_vk_CmdSetDepthTestEnable(VkCommandBuffer commandBuffer, VkBool32
+ void gfxstream_vk_CmdSetDepthWriteEnable(VkCommandBuffer commandBuffer, VkBool32 depthWriteEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthWriteEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthWriteEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2728,6 +2944,9 @@ void gfxstream_vk_CmdSetDepthWriteEnable(VkCommandBuffer commandBuffer, VkBool32
+ void gfxstream_vk_CmdSetDepthCompareOp(VkCommandBuffer commandBuffer, VkCompareOp depthCompareOp) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthCompareOp");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthCompareOp")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2739,6 +2958,9 @@ void gfxstream_vk_CmdSetDepthBoundsTestEnable(VkCommandBuffer commandBuffer,
+                                               VkBool32 depthBoundsTestEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthBoundsTestEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthBoundsTestEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2750,6 +2972,9 @@ void gfxstream_vk_CmdSetStencilTestEnable(VkCommandBuffer commandBuffer,
+                                           VkBool32 stencilTestEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilTestEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilTestEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2762,6 +2987,9 @@ void gfxstream_vk_CmdSetStencilOp(VkCommandBuffer commandBuffer, VkStencilFaceFl
+                                   VkCompareOp compareOp) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilOp");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilOp")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2773,6 +3001,9 @@ void gfxstream_vk_CmdSetRasterizerDiscardEnable(VkCommandBuffer commandBuffer,
+                                                 VkBool32 rasterizerDiscardEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetRasterizerDiscardEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetRasterizerDiscardEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2783,6 +3014,9 @@ void gfxstream_vk_CmdSetRasterizerDiscardEnable(VkCommandBuffer commandBuffer,
+ void gfxstream_vk_CmdSetDepthBiasEnable(VkCommandBuffer commandBuffer, VkBool32 depthBiasEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthBiasEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthBiasEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2794,6 +3028,9 @@ void gfxstream_vk_CmdSetPrimitiveRestartEnable(VkCommandBuffer commandBuffer,
+                                                VkBool32 primitiveRestartEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetPrimitiveRestartEnable");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetPrimitiveRestartEnable")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2842,6 +3079,9 @@ void gfxstream_vk_CmdSetLineStipple(VkCommandBuffer commandBuffer, uint32_t line
+                                     uint16_t lineStipplePattern) {
+     MESA_TRACE_SCOPE("vkCmdSetLineStipple");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetLineStipple")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2877,6 +3117,9 @@ void gfxstream_vk_CmdBindIndexBuffer2(VkCommandBuffer commandBuffer, VkBuffer bu
+                                       VkIndexType indexType) {
+     MESA_TRACE_SCOPE("vkCmdBindIndexBuffer2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindIndexBuffer2")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -2927,6 +3170,9 @@ void gfxstream_vk_CmdPushDescriptorSet(VkCommandBuffer commandBuffer,
+                                        const VkWriteDescriptorSet* pDescriptorWrites) {
+     MESA_TRACE_SCOPE("vkCmdPushDescriptorSet");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPushDescriptorSet")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2965,6 +3211,9 @@ void gfxstream_vk_CmdPushDescriptorSetWithTemplate(
+     VkPipelineLayout layout, uint32_t set, const void* pData) {
+     MESA_TRACE_SCOPE("vkCmdPushDescriptorSetWithTemplate");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPushDescriptorSetWithTemplate")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2977,6 +3226,9 @@ void gfxstream_vk_CmdSetRenderingAttachmentLocations(
+     VkCommandBuffer commandBuffer, const VkRenderingAttachmentLocationInfo* pLocationInfo) {
+     MESA_TRACE_SCOPE("vkCmdSetRenderingAttachmentLocations");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetRenderingAttachmentLocations")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -2989,6 +3241,9 @@ void gfxstream_vk_CmdSetRenderingInputAttachmentIndices(
+     const VkRenderingInputAttachmentIndexInfo* pInputAttachmentIndexInfo) {
+     MESA_TRACE_SCOPE("vkCmdSetRenderingInputAttachmentIndices");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetRenderingInputAttachmentIndices")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3001,6 +3256,9 @@ void gfxstream_vk_CmdBindDescriptorSets2(VkCommandBuffer commandBuffer,
+                                          const VkBindDescriptorSetsInfo* pBindDescriptorSetsInfo) {
+     MESA_TRACE_SCOPE("vkCmdBindDescriptorSets2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindDescriptorSets2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3012,6 +3270,9 @@ void gfxstream_vk_CmdPushConstants2(VkCommandBuffer commandBuffer,
+                                     const VkPushConstantsInfo* pPushConstantsInfo) {
+     MESA_TRACE_SCOPE("vkCmdPushConstants2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPushConstants2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3023,6 +3284,9 @@ void gfxstream_vk_CmdPushDescriptorSet2(VkCommandBuffer commandBuffer,
+                                         const VkPushDescriptorSetInfo* pPushDescriptorSetInfo) {
+     MESA_TRACE_SCOPE("vkCmdPushDescriptorSet2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPushDescriptorSet2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3075,6 +3339,9 @@ void gfxstream_vk_CmdPushDescriptorSetWithTemplate2(
+     const VkPushDescriptorSetWithTemplateInfo* pPushDescriptorSetWithTemplateInfo) {
+     MESA_TRACE_SCOPE("vkCmdPushDescriptorSetWithTemplate2");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPushDescriptorSetWithTemplate2")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3154,6 +3421,9 @@ void gfxstream_vk_CmdBeginRenderingKHR(VkCommandBuffer commandBuffer,
+                                        const VkRenderingInfo* pRenderingInfo) {
+     MESA_TRACE_SCOPE("vkCmdBeginRenderingKHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginRenderingKHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3164,6 +3434,9 @@ void gfxstream_vk_CmdBeginRenderingKHR(VkCommandBuffer commandBuffer,
+ void gfxstream_vk_CmdEndRenderingKHR(VkCommandBuffer commandBuffer) {
+     MESA_TRACE_SCOPE("vkCmdEndRenderingKHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndRenderingKHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3442,6 +3715,9 @@ void gfxstream_vk_CmdBeginRenderPass2KHR(VkCommandBuffer commandBuffer,
+                                          const VkSubpassBeginInfo* pSubpassBeginInfo) {
+     MESA_TRACE_SCOPE("vkCmdBeginRenderPass2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginRenderPass2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3454,6 +3730,9 @@ void gfxstream_vk_CmdNextSubpass2KHR(VkCommandBuffer commandBuffer,
+                                      const VkSubpassEndInfo* pSubpassEndInfo) {
+     MESA_TRACE_SCOPE("vkCmdNextSubpass2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdNextSubpass2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3465,6 +3744,9 @@ void gfxstream_vk_CmdEndRenderPass2KHR(VkCommandBuffer commandBuffer,
+                                        const VkSubpassEndInfo* pSubpassEndInfo) {
+     MESA_TRACE_SCOPE("vkCmdEndRenderPass2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndRenderPass2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3767,6 +4049,9 @@ void gfxstream_vk_CmdSetEvent2KHR(VkCommandBuffer commandBuffer, VkEvent event,
+                                   const VkDependencyInfo* pDependencyInfo) {
+     MESA_TRACE_SCOPE("vkCmdSetEvent2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetEvent2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3800,6 +4085,9 @@ void gfxstream_vk_CmdResetEvent2KHR(VkCommandBuffer commandBuffer, VkEvent event
+                                     VkPipelineStageFlags2 stageMask) {
+     MESA_TRACE_SCOPE("vkCmdResetEvent2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResetEvent2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3812,6 +4100,9 @@ void gfxstream_vk_CmdWaitEvents2KHR(VkCommandBuffer commandBuffer, uint32_t even
+                                     const VkDependencyInfo* pDependencyInfos) {
+     MESA_TRACE_SCOPE("vkCmdWaitEvents2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdWaitEvents2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3845,6 +4136,9 @@ void gfxstream_vk_CmdPipelineBarrier2KHR(VkCommandBuffer commandBuffer,
+                                          const VkDependencyInfo* pDependencyInfo) {
+     MESA_TRACE_SCOPE("vkCmdPipelineBarrier2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdPipelineBarrier2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3878,6 +4172,9 @@ void gfxstream_vk_CmdWriteTimestamp2KHR(VkCommandBuffer commandBuffer, VkPipelin
+                                         VkQueryPool queryPool, uint32_t query) {
+     MESA_TRACE_SCOPE("vkCmdWriteTimestamp2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdWriteTimestamp2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3952,6 +4249,9 @@ void gfxstream_vk_CmdCopyBuffer2KHR(VkCommandBuffer commandBuffer,
+                                     const VkCopyBufferInfo2* pCopyBufferInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyBuffer2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyBuffer2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3975,6 +4275,9 @@ void gfxstream_vk_CmdCopyImage2KHR(VkCommandBuffer commandBuffer,
+                                    const VkCopyImageInfo2* pCopyImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyImage2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyImage2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -3986,6 +4289,9 @@ void gfxstream_vk_CmdCopyBufferToImage2KHR(VkCommandBuffer commandBuffer,
+                                            const VkCopyBufferToImageInfo2* pCopyBufferToImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyBufferToImage2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyBufferToImage2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4006,6 +4312,9 @@ void gfxstream_vk_CmdCopyImageToBuffer2KHR(VkCommandBuffer commandBuffer,
+                                            const VkCopyImageToBufferInfo2* pCopyImageToBufferInfo) {
+     MESA_TRACE_SCOPE("vkCmdCopyImageToBuffer2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdCopyImageToBuffer2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4026,6 +4335,9 @@ void gfxstream_vk_CmdBlitImage2KHR(VkCommandBuffer commandBuffer,
+                                    const VkBlitImageInfo2* pBlitImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdBlitImage2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBlitImage2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4037,6 +4349,9 @@ void gfxstream_vk_CmdResolveImage2KHR(VkCommandBuffer commandBuffer,
+                                       const VkResolveImageInfo2* pResolveImageInfo) {
+     MESA_TRACE_SCOPE("vkCmdResolveImage2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdResolveImage2KHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4088,6 +4403,9 @@ void gfxstream_vk_CmdBindIndexBuffer2KHR(VkCommandBuffer commandBuffer, VkBuffer
+                                          VkIndexType indexType) {
+     MESA_TRACE_SCOPE("vkCmdBindIndexBuffer2KHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindIndexBuffer2KHR")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_buffer, buffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -4138,6 +4456,9 @@ void gfxstream_vk_CmdSetLineStippleKHR(VkCommandBuffer commandBuffer, uint32_t l
+                                        uint16_t lineStipplePattern) {
+     MESA_TRACE_SCOPE("vkCmdSetLineStippleKHR");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetLineStippleKHR")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4224,6 +4545,9 @@ void gfxstream_vk_CmdBindTransformFeedbackBuffersEXT(VkCommandBuffer commandBuff
+                                                      const VkDeviceSize* pSizes) {
+     MESA_TRACE_SCOPE("vkCmdBindTransformFeedbackBuffersEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindTransformFeedbackBuffersEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4244,6 +4568,9 @@ void gfxstream_vk_CmdEndTransformFeedbackEXT(VkCommandBuffer commandBuffer,
+                                              const VkDeviceSize* pCounterBufferOffsets) {
+     MESA_TRACE_SCOPE("vkCmdEndTransformFeedbackEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndTransformFeedbackEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4264,6 +4591,9 @@ void gfxstream_vk_CmdBeginQueryIndexedEXT(VkCommandBuffer commandBuffer, VkQuery
+                                           uint32_t index) {
+     MESA_TRACE_SCOPE("vkCmdBeginQueryIndexedEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBeginQueryIndexedEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4275,6 +4605,9 @@ void gfxstream_vk_CmdEndQueryIndexedEXT(VkCommandBuffer commandBuffer, VkQueryPo
+                                         uint32_t query, uint32_t index) {
+     MESA_TRACE_SCOPE("vkCmdEndQueryIndexedEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdEndQueryIndexedEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4288,6 +4621,9 @@ void gfxstream_vk_CmdDrawIndirectByteCountEXT(VkCommandBuffer commandBuffer, uin
+                                               uint32_t counterOffset, uint32_t vertexStride) {
+     MESA_TRACE_SCOPE("vkCmdDrawIndirectByteCountEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdDrawIndirectByteCountEXT")) {
++        return;
++    }
+     VK_FROM_HANDLE(gfxstream_vk_buffer, gfxstream_counterBuffer, counterBuffer);
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+@@ -4368,6 +4704,9 @@ void gfxstream_vk_CmdSetLineStippleEXT(VkCommandBuffer commandBuffer, uint32_t l
+                                        uint16_t lineStipplePattern) {
+     MESA_TRACE_SCOPE("vkCmdSetLineStippleEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetLineStippleEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4380,6 +4719,9 @@ void gfxstream_vk_CmdSetLineStippleEXT(VkCommandBuffer commandBuffer, uint32_t l
+ void gfxstream_vk_CmdSetCullModeEXT(VkCommandBuffer commandBuffer, VkCullModeFlags cullMode) {
+     MESA_TRACE_SCOPE("vkCmdSetCullModeEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetCullModeEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4390,6 +4732,9 @@ void gfxstream_vk_CmdSetCullModeEXT(VkCommandBuffer commandBuffer, VkCullModeFla
+ void gfxstream_vk_CmdSetFrontFaceEXT(VkCommandBuffer commandBuffer, VkFrontFace frontFace) {
+     MESA_TRACE_SCOPE("vkCmdSetFrontFaceEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetFrontFaceEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4401,6 +4746,9 @@ void gfxstream_vk_CmdSetPrimitiveTopologyEXT(VkCommandBuffer commandBuffer,
+                                              VkPrimitiveTopology primitiveTopology) {
+     MESA_TRACE_SCOPE("vkCmdSetPrimitiveTopologyEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetPrimitiveTopologyEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4412,6 +4760,9 @@ void gfxstream_vk_CmdSetViewportWithCountEXT(VkCommandBuffer commandBuffer, uint
+                                              const VkViewport* pViewports) {
+     MESA_TRACE_SCOPE("vkCmdSetViewportWithCountEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetViewportWithCountEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4423,6 +4774,9 @@ void gfxstream_vk_CmdSetScissorWithCountEXT(VkCommandBuffer commandBuffer, uint3
+                                             const VkRect2D* pScissors) {
+     MESA_TRACE_SCOPE("vkCmdSetScissorWithCountEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetScissorWithCountEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4436,6 +4790,9 @@ void gfxstream_vk_CmdBindVertexBuffers2EXT(VkCommandBuffer commandBuffer, uint32
+                                            const VkDeviceSize* pStrides) {
+     MESA_TRACE_SCOPE("vkCmdBindVertexBuffers2EXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdBindVertexBuffers2EXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4455,6 +4812,9 @@ void gfxstream_vk_CmdSetDepthTestEnableEXT(VkCommandBuffer commandBuffer,
+                                            VkBool32 depthTestEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthTestEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthTestEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4466,6 +4826,9 @@ void gfxstream_vk_CmdSetDepthWriteEnableEXT(VkCommandBuffer commandBuffer,
+                                             VkBool32 depthWriteEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthWriteEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthWriteEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4477,6 +4840,9 @@ void gfxstream_vk_CmdSetDepthCompareOpEXT(VkCommandBuffer commandBuffer,
+                                           VkCompareOp depthCompareOp) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthCompareOpEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthCompareOpEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4488,6 +4854,9 @@ void gfxstream_vk_CmdSetDepthBoundsTestEnableEXT(VkCommandBuffer commandBuffer,
+                                                  VkBool32 depthBoundsTestEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthBoundsTestEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthBoundsTestEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4499,6 +4868,9 @@ void gfxstream_vk_CmdSetStencilTestEnableEXT(VkCommandBuffer commandBuffer,
+                                              VkBool32 stencilTestEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilTestEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilTestEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4511,6 +4883,9 @@ void gfxstream_vk_CmdSetStencilOpEXT(VkCommandBuffer commandBuffer, VkStencilFac
+                                      VkStencilOp depthFailOp, VkCompareOp compareOp) {
+     MESA_TRACE_SCOPE("vkCmdSetStencilOpEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetStencilOpEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4637,6 +5012,9 @@ void gfxstream_vk_CmdSetPatchControlPointsEXT(VkCommandBuffer commandBuffer,
+                                               uint32_t patchControlPoints) {
+     MESA_TRACE_SCOPE("vkCmdSetPatchControlPointsEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetPatchControlPointsEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4648,6 +5026,9 @@ void gfxstream_vk_CmdSetRasterizerDiscardEnableEXT(VkCommandBuffer commandBuffer
+                                                    VkBool32 rasterizerDiscardEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetRasterizerDiscardEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetRasterizerDiscardEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4659,6 +5040,9 @@ void gfxstream_vk_CmdSetDepthBiasEnableEXT(VkCommandBuffer commandBuffer,
+                                            VkBool32 depthBiasEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetDepthBiasEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetDepthBiasEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4669,6 +5053,9 @@ void gfxstream_vk_CmdSetDepthBiasEnableEXT(VkCommandBuffer commandBuffer,
+ void gfxstream_vk_CmdSetLogicOpEXT(VkCommandBuffer commandBuffer, VkLogicOp logicOp) {
+     MESA_TRACE_SCOPE("vkCmdSetLogicOpEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetLogicOpEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4680,6 +5067,9 @@ void gfxstream_vk_CmdSetPrimitiveRestartEnableEXT(VkCommandBuffer commandBuffer,
+                                                   VkBool32 primitiveRestartEnable) {
+     MESA_TRACE_SCOPE("vkCmdSetPrimitiveRestartEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetPrimitiveRestartEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);
+@@ -4693,6 +5083,9 @@ void gfxstream_vk_CmdSetColorWriteEnableEXT(VkCommandBuffer commandBuffer, uint3
+                                             const VkBool32* pColorWriteEnables) {
+     MESA_TRACE_SCOPE("vkCmdSetColorWriteEnableEXT");
+     VK_FROM_HANDLE(gfxstream_vk_command_buffer, gfxstream_commandBuffer, commandBuffer);
++    if (gfxstream_vk_drop_without_command_buffer(gfxstream_commandBuffer, "vkCmdSetColorWriteEnableEXT")) {
++        return;
++    }
+     {
+         auto vkEnc = gfxstream::vk::ResourceTracker::getCommandBufferEncoder(
+             gfxstream_commandBuffer->internal_object);

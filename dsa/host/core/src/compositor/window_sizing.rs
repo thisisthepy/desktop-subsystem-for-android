@@ -2535,6 +2535,38 @@ mod tests {
         );
     }
 
+    /// YouTube on build 1.0.1-dev.23, kept at 262 dpi (the 200% main monitor's) in the system
+    /// way, maximised on a 2560x1440 secondary monitor at 125% (164 dpi) whose taskbar leaves
+    /// a 2560x1380 work area. Its task asked for 4090x2205: the size a task drawn at 164 dpi
+    /// in that window would be, at 262 dpi, so the app looks as large there as an app drawn
+    /// at the monitor's own density. That is what the system way promises, not a task larger
+    /// than its window needs; on the main monitor the same maximise is 1:1.
+    #[test]
+    fn fr4_a_system_mode_task_maximised_on_a_lower_scale_monitor_draws_at_its_own_density() {
+        let mut settings = task(1229, 903, 262);
+        settings.max_width = 4096;
+        settings.max_height = 4096;
+        let now = Instant::now();
+
+        let mut secondary = WindowSizing::with_mode(&settings, ScalingMode::System);
+        assert_eq!(secondary.dpi_reported(120), (Some((769, 565)), None));
+        assert_eq!(secondary.scale(), (82, 131));
+        // The 4096 pixel guest display is 2564 window pixels wide here, so the work area fits.
+        assert_eq!(secondary.max_client_size(), Some((2564, 2564)));
+        assert_eq!(
+            secondary.view_resized((2560, 1380), now),
+            live_resize(4090, 2205)
+        );
+
+        let mut main = WindowSizing::with_mode(&settings, ScalingMode::System);
+        main.dpi_reported(192);
+        assert_eq!(main.scale(), (1, 1));
+        assert_eq!(
+            main.view_resized((2880, 1704), now),
+            live_resize(2880, 1704)
+        );
+    }
+
     #[test]
     fn fr4_density_follows_the_monitor_scale() {
         assert_eq!(density_for_dpi(96), 130);
