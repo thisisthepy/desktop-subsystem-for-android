@@ -1,7 +1,6 @@
 # Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery,
 # libandroid_runtime, which gives Google Play the computer's memory, and DSA's KeyMint, whose root key of key blobs comes from the DSA host, and
-# services.jar, whose window manager gives a dialog no caption bar inset, with framework.jar,
-# whose views a task set to forced system scaling rebuilds at a new density (the patches in
+# services.jar, whose window manager gives a dialog no caption bar inset (the patches in
 # dsa/guest/framework/patches), for each Android version in dsa/guest/framework/framework-lock.json
 # and each guest architecture, and keeps them as the artifacts the image release lays over the
 # published build (make-image.py --framework).
@@ -26,7 +25,7 @@
 #   2. native (per Android version and architecture) and services (per Android version) start
 #      together as soon as it passes. The native build keeps its files as the intermediate
 #      artifact framework-native-<android>-<arch>-<version>; the services build keeps
-#      services.jar and framework.jar as framework-services-<android>-<version>.
+#      services.jar as framework-services-<android>-<version>.
 #   3. framework (per Android version and architecture) waits for both, adds services.jar to
 #      the native files when the services build made it, and keeps the result as
 #      framework-<android>-<arch>-<version>, the artifact the image release takes. It is the

@@ -27,9 +27,9 @@ a project fetched in part) and fetched by .github/scripts/translator/fetch-sourc
     framework_lock.py outputs                      where the build installs the files the image
                                                    takes (the framework's, then the KeyMint's),
                                                    one per line
-    framework_lock.py java-outputs                 services.jar's and framework.jar's
-                                                   target_files names and where the services
-                                                   build installs them, one pair per line
+    framework_lock.py java-outputs                 services.jar's target_files name and where
+                                                   the services build installs it, one pair per
+                                                   line
     framework_lock.py services-lock <android> <manifest.xml> <out.json>
                                                    writes the lock of the services build's tree:
                                                    every project the manifest syncs by default
@@ -43,9 +43,7 @@ a project fetched in part) and fetched by .github/scripts/translator/fetch-sourc
 services.jar, with DSA's window manager, package manager, WebView service, display manager
 (which shows Google Play a phone's density, so that Play delivers xxhdpi splits) and activity
 manager (which gives Google Play the computer's installed memory as advertisedMem), is built in a
-tree of its own (SERVICES_JAR): the Java framework needs most of the platform. framework.jar, whose
-views a task set to forced system scaling rebuilds at a new density, is built beside it
-(FRAMEWORK_JAR).
+tree of its own (SERVICES_JAR): the Java framework needs most of the platform.
 """
 
 import hashlib
@@ -114,30 +112,17 @@ KEYMINT_FILES = list(KEYMINT_OUTPUTS) + list(KEYMINT_SOURCES)
 # for every architecture, so one services.jar, built with the x86_64 target, serves the images of
 # both. The native build applies no patch that changes Java sources only (java_only), as it
 # builds none.
-#
-# framework.jar, the app side of the framework, with DSA's change that rebuilds the views of a task
-# set to forced system scaling at its new density (the patches to frameworks/base/core/java and
-# graphics/java), is built in the same tree and taken with services.jar: the window manager in one
-# calls the other's new code, so the image takes both from one build or neither. framework.jar is
-# on the boot class path, so the image compiles the boot image again for it, and everything
-# compiled against the boot image (make-image.py, BOOT_IMAGE_JARS).
 SERVICES_JAR = "SYSTEM/framework/services.jar"
-FRAMEWORK_JAR = "SYSTEM/framework/framework.jar"
-JAVA_OUTPUTS = {
-    SERVICES_JAR: "system/framework/services.jar",
-    FRAMEWORK_JAR: "system/framework/framework.jar",
-}
+JAVA_OUTPUTS = {SERVICES_JAR: "system/framework/services.jar"}
 # The folders of frameworks/base that each file the image takes from the build is built from. A
 # patch changes frameworks/base only there, as the image keeps the published build's copy of
-# everything else. libandroid_runtime and framework.jar come from one Framework build, but from
-# two of its jobs, so a native method libandroid_runtime registers for a Java method only the
-# patched framework.jar declares would make zygote abort on an image whose services build failed:
-# core/jni changes only what the published framework.jar declares.
+# everything else. framework.jar in particular stays the published one (it is on the boot class
+# path, with a precompiled boot image), so a native method libandroid_runtime registered for a
+# Java method framework.jar does not declare would make zygote abort at start.
 FRAMEWORKS_BASE_SOURCES = {
     "SYSTEM/lib64/libhwui.so": ["libs/hwui"],
     "SYSTEM/lib64/libandroid_runtime.so": ["core/jni"],
     SERVICES_JAR: ["services"],
-    FRAMEWORK_JAR: ["core/java", "graphics/java"],
 }
 # The projects the services tree takes in part, as the native tree takes them: each holds every
 # toolchain version the platform ever used, and the build reads only the ones the lock names.

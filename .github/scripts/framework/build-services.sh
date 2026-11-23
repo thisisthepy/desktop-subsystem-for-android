@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # Builds services.jar with DSA's patches (the window manager, package manager and WebView
-# service changes in dsa/guest/framework/patches/frameworks/base), and framework.jar with the
-# change that rebuilds the views of a task set to forced system scaling at its new density, in a
-# tree fetch-source.py made from the services lock (framework_lock.py services-lock): every
-# project the published build's manifest syncs by default, each at the manifest's commit.
-# framework.jar is built as the build installs a boot jar, with the hidden API flags encoded in
-# its dex; make-image.py compiles the boot images again for it.
+# service changes in dsa/guest/framework/patches/frameworks/base), in a tree fetch-source.py made
+# from the services lock (framework_lock.py services-lock): every project the published build's
+# manifest syncs by default, each at the manifest's commit.
 #
 #   build-services.sh <tree> <android16|android17> <out folder> [<apps folder>]
 #

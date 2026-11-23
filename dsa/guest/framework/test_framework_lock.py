@@ -753,16 +753,6 @@ def removed_lines(patch):
             if line.startswith("-") and not line.startswith("---")]
 
 
-def write_java_outputs(folder):
-    """Leaves in `folder` every jar the services build makes (framework_lock.JAVA_OUTPUTS), each a
-    jar with a dex file of its own, under its target_files name."""
-    for i, name in enumerate(framework_lock.JAVA_OUTPUTS):
-        jar = Path(folder) / name
-        jar.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
-            z.writestr("classes.dex", b"dex\n035\0" + bytes([i]) * 100)
-
-
 class ServicesTests(unittest.TestCase):
     """services.jar, built from the published build's source with DSA's patches to the window
     manager (a dialog gets no caption bar inset), the package manager, the WebView service, the
@@ -822,7 +812,7 @@ class ServicesTests(unittest.TestCase):
     def test_fr22_the_native_build_leaves_the_java_patches_to_the_services_build(self):
         for android in ("android16", "android17"):
             java = [p for _, p in framework_lock.patch_files(android) if framework_lock.java_only(p)]
-            self.assertEqual(len(java), 7, android)
+            self.assertEqual(len(java), 5, android)
             native = [p for _, p in framework_lock.patch_files(android) if not framework_lock.java_only(p)]
             self.assertTrue(native, android)
         with tempfile.TemporaryDirectory() as tmp:
@@ -917,8 +907,7 @@ class ServicesTests(unittest.TestCase):
         self.assertNotIn("--native", script)
         self.assertIn("--native", (REPO / ".github/scripts/framework/build.sh").read_text())
         self.assertEqual(framework_lock.JAVA_OUTPUTS,
-                         {"SYSTEM/framework/services.jar": "system/framework/services.jar",
-                          "SYSTEM/framework/framework.jar": "system/framework/framework.jar"})
+                         {"SYSTEM/framework/services.jar": "system/framework/services.jar"})
 
     def test_fr22_the_services_tree_leaves_out_what_only_native_builds_read(self):
         # Run 43616908714 ran out of disk: the whole tree was 80 GB of the runner's 145.
@@ -1251,15 +1240,17 @@ class ServicesTests(unittest.TestCase):
             root = Path(tmp)
             collect_tests = CollectTests()
             services = root / "services"
-            write_java_outputs(services)
+            jar = services / framework_lock.SERVICES_JAR
+            jar.parent.mkdir(parents=True)
+            with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("classes.dex", b"dex\n035\0" + bytes(100))
             product, top = collect_tests._product(root, 62), collect_tests._tree(root)
             sources, patches = {"projects": 1}, {"patches": 2}
             collect.collect(version, "x86_64", product, root / "once", sources, patches, top, services)
             collect.collect(version, "x86_64", product, root / "later", sources, patches, top)
             description = collect.add_services(root / "later", services)
-            for name in framework_lock.JAVA_OUTPUTS:
-                self.assertIn(name, description["files"])
-            for name in [collect.MANIFEST, *framework_lock.OUTPUTS, *framework_lock.JAVA_OUTPUTS]:
+            self.assertIn(framework_lock.SERVICES_JAR, description["files"])
+            for name in [collect.MANIFEST, *framework_lock.OUTPUTS, framework_lock.SERVICES_JAR]:
                 self.assertEqual((root / "later" / name).read_bytes(), (root / "once" / name).read_bytes(), name)
             with self.assertRaisesRegex(SystemExit, "already holds"):
                 collect.add_services(root / "later", services)
@@ -1272,35 +1263,21 @@ class ServicesTests(unittest.TestCase):
             root = Path(tmp)
             collect_tests = CollectTests()
             services = root / "services"
-            write_java_outputs(services)
             jar = services / framework_lock.SERVICES_JAR
+            jar.parent.mkdir(parents=True)
+            with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("classes.dex", b"dex\n035\0" + bytes(100))
             description = collect.collect(version, "x86_64", collect_tests._product(root, 62), root / "out",
                                           top=collect_tests._tree(root), services=services)
-            for name in framework_lock.JAVA_OUTPUTS:
-                self.assertIn(name, description["files"])
-                self.assertEqual((root / "out" / name).read_bytes(), (services / name).read_bytes(), name)
+            self.assertIn(framework_lock.SERVICES_JAR, description["files"])
+            self.assertEqual((root / "out" / framework_lock.SERVICES_JAR).read_bytes(), jar.read_bytes())
             # Without the services build's folder there is no services.jar, as before.
             description = collect.collect(version, "x86_64", root / "product", root / "out2", top=root / "tree")
             self.assertNotIn(framework_lock.SERVICES_JAR, description["files"])
-            self.assertNotIn(framework_lock.FRAMEWORK_JAR, description["files"])
             jar.write_bytes(b"not a jar")
             with self.assertRaisesRegex(SystemExit, "not a jar with dex code"):
                 collect.collect(version, "x86_64", root / "product", root / "out3", top=root / "tree",
                                 services=services)
-
-    def test_fr4_framework_jar_comes_with_services_jar_or_not_at_all(self):
-        # The window manager in services.jar calls framework.jar's new code, so a services build
-        # that left one without the other is refused rather than packed.
-        version = framework_lock.version_entry(framework_lock.load(), "android17")
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            collect_tests = CollectTests()
-            services = root / "services"
-            write_java_outputs(services)
-            (services / framework_lock.FRAMEWORK_JAR).unlink()
-            with self.assertRaisesRegex(SystemExit, "the services build left no SYSTEM/framework/framework.jar"):
-                collect.collect(version, "x86_64", collect_tests._product(root, 62), root / "out",
-                                top=collect_tests._tree(root), services=services)
 
 
 GOOGLESOURCE_CLANG = "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"

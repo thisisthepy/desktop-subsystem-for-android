@@ -8308,17 +8308,13 @@ class ServicesJarImageTests(unittest.TestCase):
             jar.writestr(info, dex)
         return data.getvalue()
 
-    def _framework(self, root, build_id="16373615", arch="x86_64", machine=62, jar=None, framework_jar=None,
-                   names=None):
+    def _framework(self, root, build_id="16373615", arch="x86_64", machine=62, jar=None):
         folder = FrameworkImageTests()._framework(root, build_id, arch, machine)
         description = json.loads((folder / "framework.json").read_text())
-        payloads = {make_image.SERVICES_JAR: self._jar() if jar is None else jar,
-                    make_image.FRAMEWORK_JAR: self._jar(hidden_api_dex()) if framework_jar is None else framework_jar}
-        for name in make_image.FRAMEWORK_JAVA_FILES if names is None else names:
-            data = payloads[name]
-            (folder / name).parent.mkdir(parents=True, exist_ok=True)
-            (folder / name).write_bytes(data)
-            description["files"][name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        data = self._jar() if jar is None else jar
+        (folder / make_image.SERVICES_JAR).parent.mkdir(parents=True, exist_ok=True)
+        (folder / make_image.SERVICES_JAR).write_bytes(data)
+        description["files"][make_image.SERVICES_JAR] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         (folder / "framework.json").write_text(json.dumps(description))
         return folder
 
@@ -8326,7 +8322,6 @@ class ServicesJarImageTests(unittest.TestCase):
         source = FrameworkImageTests()._source(root, names)
         with zipfile.ZipFile(source, "a") as archive:
             archive.writestr(make_image.SERVICES_JAR, self._jar(b"dex\n035\0published"))
-            archive.writestr(make_image.FRAMEWORK_JAR, self._jar(hidden_api_dex(b"published")))
         return source
 
     def test_fr22_a_dialog_gets_no_caption_inset_from_the_framework_services_jar(self):
@@ -8374,231 +8369,7 @@ class ServicesJarImageTests(unittest.TestCase):
 
     def test_fr22_the_framework_services_jar_is_compiled_like_an_edited_one(self):
         self.assertIn(make_image.SERVICES_JAR, make_image.EDITED_JARS)
-        self.assertEqual(make_image.FRAMEWORK_JAVA_FILES, [make_image.SERVICES_JAR, make_image.FRAMEWORK_JAR])
-
-    def test_fr4_the_image_takes_framework_jar_with_services_jar(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            payloads, description = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
-            jar = payloads[make_image.FRAMEWORK_JAR]
-            # Stored and aligned, as the published build stores a boot jar's dex.
-            with zipfile.ZipFile(io.BytesIO(jar)) as z:
-                self.assertEqual(z.getinfo("classes.dex").compress_type, zipfile.ZIP_STORED)
-            self.assertEqual(make_image.zip_misaligned(jar), [])
-            modified = root / "modified.zip"
-            make_image.modify(self._source(root), modified, framework=payloads)
-            with zipfile.ZipFile(modified) as archive:
-                self.assertEqual(archive.read(make_image.FRAMEWORK_JAR), jar)
-                manifest = {"arch": "x86_64", "source": {"build_id": "16373615"},
-                            "framework": make_image.framework_entry(description, payloads)}
-                self.assertEqual(manifest["framework"]["files"][make_image.FRAMEWORK_JAR],
-                                 hashlib.sha256(jar).hexdigest())
-                self.assertEqual(make_image.check_framework(manifest, archive.namelist(), archive.read), [])
-            with zipfile.ZipFile(self._source(root)) as archive:
-                problems = make_image.check_framework(manifest, archive.namelist(), archive.read)
-            self.assertTrue(any("framework.jar is not the framework build's file" in p
-                                and "forced system scaling" in p for p in problems), problems)
-
-    def test_fr4_services_jar_without_framework_jar_is_refused(self):
-        # services.jar's window manager calls framework.jar's new code: one without the other
-        # would stop system_server.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            with self.assertRaisesRegex(SystemExit, "the framework has"):
-                make_image.checked_framework(self._framework(root, names=[make_image.SERVICES_JAR]),
-                                             "16373615", 17, "x86_64")
-
-    def test_fr4_a_framework_jar_without_hidden_api_flags_is_refused(self):
-        # A boot jar's dex carries the hidden API flags the build encodes; without them apps could
-        # reach every hidden API.
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            with self.assertRaisesRegex(SystemExit, "framework.jar carries no hidden API flags"):
-                make_image.checked_framework(self._framework(root, framework_jar=self._jar()),
-                                             "16373615", 17, "x86_64")
-        self.assertTrue(make_image.jar_has_hidden_api_flags(self._jar(hidden_api_dex())))
-        self.assertFalse(make_image.jar_has_hidden_api_flags(self._jar()))
-        self.assertFalse(make_image.jar_has_hidden_api_flags(b"not a jar"))
-
-
-def hidden_api_dex(body=b""):
-    """A dex file whose map list, right after its header, names a hidden API class data section."""
-    header = bytearray(b"dex\n035\0" + bytes(0x70 - 8))
-    struct.pack_into("<I", header, 0x34, 0x70)
-    items = [(0x0000, 1, 0), (make_image.DEX_HIDDEN_API_CLASS_DATA, 1, 0x70)]
-    map_list = struct.pack("<I", len(items)) + b"".join(struct.pack("<HHII", kind, 0, size, offset)
-                                                        for kind, size, offset in items)
-    return bytes(header) + map_list + body
-
-
-def fake_art(components, begin, checksum, boot_begin=0, boot_components=0, boot_checksum=0):
-    """A boot image (.art) header with the fields art_header reads."""
-    fields = [0, components, begin, 0x1000, checksum, 0, 0, 0, 0, 0, boot_begin, 0, boot_components, boot_checksum]
-    return b"art\n118\0" + struct.pack("<14I", *fields) + bytes(64)
-
-
-class BootImageTests(unittest.TestCase):
-    """framework.jar from the Framework build is on the boot class path: the image compiles the
-    boot images again for it, and every odex compiled against them."""
-
-    ISA = "x86_64"
-    BCP = ("/apex/com.android.art/javalib/core-oj.jar:/system/framework/framework.jar:"
-           "/system/framework/ext.jar:/apex/com.android.adservices/javalib/framework-adservices.jar:"
-           "/apex/com.android.wifi/javalib/framework-wifi.jar")
-
-    def _files(self, framework_dex=b"dex\n035\0framework"):
-        folder = f"SYSTEM/framework/{self.ISA}"
-        framework_jar = fake_apk(framework_dex)
-        published = fake_apk(b"dex\n035\0framework")
-        return {
-            # The primary image: core-oj, framework and ext, as a multi-image.
-            f"{folder}/boot.art": fake_art(3, 0x70000000, 0x1613B7A8),
-            f"{folder}/boot-framework.art": fake_art(0, 0, 0),
-            f"{folder}/boot-ext.art": fake_art(0, 0, 0),
-            f"{folder}/boot.oat": fake_odex(**{"compiler-filter": "speed-profile"}),
-            # The mainline extension: one image file for its jar.
-            f"{folder}/boot-framework-adservices.art": fake_art(1, 0x72460000, 0xC4F09353, 0x70000000, 3, 0x1613B7A8),
-            f"{folder}/boot-framework-adservices.oat": fake_odex(**{"compiler-filter": "verify"}),
-            "SYSTEM/framework/boot-framework.vdex": fake_vdex(make_image.apk_dex_checksums(published)),
-            "SYSTEM/framework/boot-ext.vdex": fake_vdex(make_image.apk_dex_checksums(fake_apk(b"dex\n035\0ext"))),
-            "SYSTEM/framework/framework.jar": framework_jar,
-            "SYSTEM/framework/ext.jar": fake_apk(b"dex\n035\0ext"),
-            make_image.FRAMEWORK_ODEX: fake_odex(**{
-                "bootclasspath": self.BCP, "bootclasspath-checksums": "i;3/1613b7a8:i;1/c4f09353:d/1234"}),
-        }
-
-    def _read(self, files):
-        return lambda name: files[name]
-
-    def test_fr4_a_changed_framework_jar_makes_the_boot_image_stale(self):
-        files = self._files()
-        self.assertEqual(make_image.stale_boot_jars(set(files), self._read(files), self.BCP), [])
-        files = self._files(framework_dex=b"dex\n035\0rebuilt")
-        self.assertEqual(make_image.stale_boot_jars(set(files), self._read(files), self.BCP),
-                         ["/system/framework/framework.jar"])
-        # An image without a boot image has nothing to compile again.
-        self.assertEqual(make_image.stale_boot_jars(set(), self._read({}), self.BCP), [])
-
-    def test_fr4_the_boot_images_are_the_primary_then_each_extension(self):
-        files = self._files()
-        chunks = make_image.boot_image_chunks(set(files), self._read(files))
-        self.assertEqual([member for member, _ in chunks],
-                         [f"SYSTEM/framework/{self.ISA}/boot.art",
-                          f"SYSTEM/framework/{self.ISA}/boot-framework-adservices.art"])
-        self.assertEqual(make_image.boot_image_checksums(set(files), self._read(files)),
-                         "i;3/1613b7a8:i;1/c4f09353")
-        self.assertEqual(make_image.boot_image_vdex(0, "/apex/com.android.art/javalib/core-oj.jar"),
-                         "SYSTEM/framework/boot.vdex")
-        self.assertEqual(make_image.boot_image_vdex(1, "/system/framework/framework.jar"),
-                         "SYSTEM/framework/boot-framework.vdex")
-
-    def test_fr4_the_boot_image_is_compiled_as_the_build_compiles_it(self):
-        root = Path("/r")
-        primary = make_image.boot_image_command(
-            "dex2oat", root, Path("/o/boot"), "boot",
-            ["/apex/com.android.art/javalib/core-oj.jar", "/system/framework/framework.jar"], 0x70000000,
-            "speed-profile", profiles=[Path("/p/boot-image.prof")], dirty=Path("/p/dirty"),
-            preloaded=Path("/p/preloaded"), extra=["--runtime-arg", "-Xgc:CMC"])
-        for flag in ("--base=0x70000000", "--compiler-filter=speed-profile", "--profile-file=/p/boot-image.prof",
-                     "--dirty-image-objects=/p/dirty", "--preloaded-classes=/p/preloaded",
-                     "--dex-file=/r/system/framework/framework.jar", "--dex-location=/system/framework/framework.jar",
-                     "--oat-location=/system/framework/x86_64/boot.oat", "--image=/o/boot/boot.art",
-                     "--image-format=lz4hc", "--abort-on-hard-verifier-error", "--force-determinism", "--strip",
-                     "--instruction-set=x86_64", "-Xgc:CMC"):
-            self.assertIn(flag, [str(part) for part in primary], flag)
-        self.assertNotIn("--single-image", primary)
-        self.assertFalse(any(str(part).startswith("--boot-image=") for part in primary))
-        # The build's boot image heap: -Xmx1024m made the debug dex2oat reserve a 2 GiB
-        # mark-compact from-space in the low 4 GiB, which the CI runner did not have.
-        heap = [str(part) for part in primary[1:6]]
-        self.assertEqual(heap, ["--avoid-storing-invocation", "--runtime-arg", "-Xms64m",
-                                "--runtime-arg", "-Xmx64m"])
-        self.assertEqual([part for part in map(str, primary) if part.startswith("-Xmx")], ["-Xmx64m"])
-        extension = make_image.boot_image_command(
-            "dex2oat", root, Path("/o/ext"), "boot-framework-adservices",
-            ["/apex/com.android.adservices/javalib/framework-adservices.jar"], 0x72460000, "verify",
-            base_images=["/system/framework/boot.art"],
-            deps=["/apex/com.android.art/javalib/core-oj.jar",
-                  "/apex/com.android.adservices/javalib/framework-adservices.jar"],
-            single_image=True)
-        parts = [str(part) for part in extension]
-        self.assertIn("--boot-image=/r/system/framework/boot.art", parts)
-        self.assertIn("-Xbootclasspath-locations:/apex/com.android.art/javalib/core-oj.jar:"
-                      "/apex/com.android.adservices/javalib/framework-adservices.jar", parts)
-        self.assertIn("--single-image", parts)
-        self.assertIn("--compiler-filter=verify", parts)
-        self.assertFalse(any(part.startswith("--base=") for part in parts))
-        # The vdex goes beside the images' folder, which links to it.
-        self.assertEqual(make_image.boot_image_member(Path("/o/boot/boot-framework.vdex")),
-                         "SYSTEM/framework/boot-framework.vdex")
-        self.assertEqual(make_image.boot_image_member(Path("/o/boot/boot-framework.oat")),
-                         "SYSTEM/framework/x86_64/boot-framework.oat")
-
-    def test_fr4_every_framework_jar_is_compiled_again_against_the_new_boot_images(self):
-        files = self._files()
-        context = "PCL[/system/framework/services.jar]"
-        files.update({
-            "SYSTEM/framework/oat/x86_64/am.odex": fake_odex(**{"compiler-filter": "speed", "classpath": "PCL[]"}),
-            "SYSTEM/framework/am.jar": fake_apk(b"dex\n035\0am"),
-            "SYSTEM/framework/oat/x86_64/apex@com.android.wifi@javalib@service-wifi.jar@classes.odex":
-                fake_odex(**{"compiler-filter": "speed-profile", "classpath": context}),
-            "SYSTEM/framework/oat/x86_64/apex@com.android.wifi@javalib@service-wifi.jar@classes.art": b"art",
-            "SYSTEM/apex/com.android.wifi.capex": b"capex",
-        })
-        jobs = make_image.boot_image_jar_jobs(set(files), self._read(files))
-        by_location = {job["location"]: job for job in jobs}
-        self.assertEqual(by_location["/system/framework/am.jar"]["jar"], "SYSTEM/framework/am.jar")
-        wifi = by_location["/apex/com.android.wifi/javalib/service-wifi.jar"]
-        self.assertIsNone(wifi["jar"])
-        self.assertEqual(wifi["filter"], "speed-profile")
-        self.assertEqual(wifi["classpath"], context)
-        self.assertTrue(wifi["app_image"])
-        # services.jar is compiled with the apps (PREBUILT_OAT_RECORD), not here.
-        self.assertNotIn("/system/framework/services.jar", by_location)
-        self.assertEqual(make_image.system_server_apexes(set(files)),
-                         {"com.android.wifi": "SYSTEM/apex/com.android.wifi.capex"})
-
-    def test_fr4_every_app_the_published_build_compiled_is_compiled_again(self):
-        apk = "SYSTEM/app/BasicDreams/BasicDreams.apk"
-        data = fake_apk(b"dex\n035\0calendar")
-        files = {
-            apk: data,
-            "SYSTEM/app/BasicDreams/oat/x86_64/BasicDreams.vdex": fake_vdex(make_image.apk_dex_checksums(data)),
-            make_image.PREBUILT_OAT_RECORD: json.dumps({apk: {
-                "files": ["SYSTEM/app/BasicDreams/oat/x86_64/BasicDreams.odex", "SYSTEM/app/BasicDreams/oat/x86_64/BasicDreams.vdex"],
-                "filter": "speed-profile", "classpath": "PCL[]"}}).encode(),
-        }
-        # Its dex did not change, so it is left alone, unless the boot images were compiled again.
-        self.assertEqual(make_image.compile_jobs(set(files), self._read(files)), [])
-        self.assertEqual(make_image.compile_jobs(set(files), self._read(files), boot_image_rebuilt=True),
-                         [(apk, "speed-profile", "PCL[]", False)])
-
-    def test_fr4_an_odex_compiled_against_the_old_boot_images_is_found(self):
-        files = self._files()
-        files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"] = fake_odex(**{
-            "bootclasspath-checksums": "i;3/1613b7a8:i;1/c4f09353:d/1234"})
-        self.assertEqual(make_image.boot_image_problems(zip_of(files)), [])
-        files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"] = fake_odex(**{
-            "bootclasspath-checksums": "i;3/00000001:i;1/c4f09353:d/1234"})
-        problems = make_image.boot_image_problems(zip_of(files))
-        self.assertTrue(any("Calendar.odex was compiled against boot images" in p for p in problems), problems)
-        # A changed framework.jar left with the old boot image, and an extension of another image.
-        files = self._files(framework_dex=b"dex\n035\0rebuilt")
-        files[f"SYSTEM/framework/{self.ISA}/boot-framework-adservices.art"] = fake_art(
-            1, 0x72460000, 0xC4F09353, 0x70000000, 3, 0x0BADBEEF)
-        problems = make_image.boot_image_problems(zip_of(files))
-        self.assertTrue(any("framework.jar is not the dex the boot image was compiled from" in p for p in problems),
-                        problems)
-        self.assertTrue(any("extends another boot image" in p for p in problems), problems)
-
-
-def zip_of(files):
-    """An open zip of `files` (member name to bytes)."""
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as z:
-        for name, data in files.items():
-            z.writestr(name, data)
-    return zipfile.ZipFile(io.BytesIO(buffer.getvalue()))
+        self.assertEqual(make_image.FRAMEWORK_JAVA_FILES, [make_image.SERVICES_JAR])
 
 
 class KeyMintImageTests(unittest.TestCase):
@@ -10463,7 +10234,7 @@ class DefaultAppsTests(unittest.TestCase):
         # The AOSP apps they replace, and Calendar, are not left beside them.
         left = dict(self.files)
         left["PRODUCT/app/DeskClock/DeskClock.apk"] = fake_apk("com.android.deskclock")
-        left["SYSTEM/app/BasicDreams/BasicDreams.apk"] = fake_apk("com.android.calendar")
+        left["SYSTEM/app/Calendar/Calendar.apk"] = fake_apk("com.android.calendar")
         problems = self.problems(left)
         self.assertTrue(any("DeskClock/DeskClock.apk is still in the image" in p for p in problems))
         self.assertTrue(any("Calendar/Calendar.apk is still in the image" in p for p in problems))

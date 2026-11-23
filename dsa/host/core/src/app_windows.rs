@@ -52,13 +52,11 @@ pub enum DpiScaling {
     System,
     /// The app is given the new density without a restart, even though it does not say it
     /// handles one: Android's framework, in DSA's image, is told to treat a change of density
-    /// as handled by the task's activity instead of relaunching it, and the app's process
-    /// converts the pixel sizes its views took at the old density (layout parameters, padding,
-    /// text, drawables) to the new one. Its window then follows its monitor as
-    /// [`DpiScaling::App`] does. A size the app keeps in its own fields stays at the old density
-    /// until the app reads it again, which is why it is a choice per app and never a default. On
-    /// an image whose framework cannot do it ([`DpiScaling::mode_on`]), it works as
-    /// [`DpiScaling::System`] does.
+    /// as handled by the task's activity instead of relaunching it. Its window then follows
+    /// its monitor as [`DpiScaling::App`] does. An app that keeps sizes it read at the old
+    /// density can draw some of them wrong until it reads them again, which is why it is a
+    /// choice per app and never a default. On an image whose framework cannot do it
+    /// ([`DpiScaling::mode_on`]), it works as [`DpiScaling::System`] does.
     SystemForced,
 }
 
