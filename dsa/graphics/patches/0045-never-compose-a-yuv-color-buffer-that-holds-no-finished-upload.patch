@@ -1,0 +1,274 @@
+Subject: Never compose a YUV ColorBuffer that holds no finished upload
+
+A YUV ColorBuffer holds what a guest CPU wrote into a gralloc buffer (a video decoder's
+pictures, a camera's frames), and only an upload writes it: the guest packs the planes, and
+updateColorBufferFromBytesLocked copies them in, one GPU job per plane. The compositor (patch
+0040) sampled such a ColorBuffer whatever its uploads had done. Read as YUV, a luma and chroma
+of 0 is solid green, and on the owner's PC (Intel Arc, 1.0.1-dev.25) YouTube Shorts still
+flickered green while the host decoder (`0 not written by the decoder`) and the hwcomposer's
+upload (`kept from the host` 0) both reported every picture whole.
+
+Three ways the composition could read zeros, none of which the guest's checks see:
+
+- A ColorBuffer no upload has finished in holds its allocation's zeros: a new one, or one made
+  again on a new device after a GPU reset, which the guest still believes holds its last
+  picture.
+- An upload whose later job failed (a submit refused, a fence not signaled in time) left one
+  plane new and the other old or zero. It also left the bookkeeping wrong: the first job takes
+  the image to the transfer layout on the renderer's queue, and only the last gives it back,
+  but currentLayout still said where the image had been (or, when the last job was recorded and
+  not submitted, where it would have gone), so the next composition's barrier started from a
+  layout the image was not in.
+- A guest Vulkan driver in any process but SurfaceFlinger copies up, before each of its
+  submissions, every buffer a CPU writes that it has imported (guest/mesa 0008), whoever owns
+  the buffer then. It can copy a video buffer its decoder has not written yet, and overwrite the
+  picture the hwcomposer uploaded just before the composition with zeros. Only the hwcomposer
+  checks its planes for a picture.
+
+Now each ColorBuffer records what its uploads left: none, part of one, or a whole picture
+(dsa_yuv_pictures.h). An upload counts its submitted and finished jobs; a failed one leaves the
+picture part-written and the layout and queue family where the GPU left the image. A
+composition with a layer of a YUV ColorBuffer that holds no whole picture is refused before it is
+scheduled, so rcComposeWithoutPost answers 0, the hwcomposer posts nothing for that frame, and
+the task's window keeps its last frame with the last picture that did land. An upload of YUV
+planes that hold no picture (a sampled luma row of zeros over chroma zeros, which no encoder
+makes) is refused, and the ColorBuffer keeps the picture it had. Both are counted in a renderer
+warning at most every 5 s:
+
+  video pictures: the task window kept its last frame instead of N composition(s) whose video
+  ColorBuffer held no finished upload (A never written, B left part-written), and M upload(s)
+  whose planes held no picture (zeros) were refused, ...
+
+diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
+--- a/host/FrameBuffer.cpp
++++ b/host/FrameBuffer.cpp
+@@ -20,6 +20,8 @@
+ #include <string.h>
+ #include <time.h>
+ 
++#include <algorithm>
++#include <chrono>
+ #include <iomanip>
+ 
+ #if defined(__linux__)
+@@ -1832,6 +1834,20 @@ bool FrameBuffer::supportsDsaYuvComposition() {
+            m_emulationVk->supportsSamplerYcbcrConversion();
+ }
+ 
++// DSA: the steady clock in nanoseconds, for the video pictures' log line.
++static uint64_t dsaNowNs() {
++    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
++                                     std::chrono::steady_clock::now().time_since_epoch())
++                                     .count());
++}
++
++// DSA: the video pictures kept from the screen (dsa_yuv_pictures.h), counted under the
++// FrameBuffer's m_lock, which both of its callers hold.
++static dsa::YuvPictureTally& dsaYuvPictures() {
++    static dsa::YuvPictureTally tally;
++    return tally;
++}
++
+ bool FrameBuffer::updateColorBufferFromDsaPackedYuv(HandleType p_colorbuffer, const void* bytes,
+                                                     size_t size) {
+     AutoLock mutex(m_lock);
+@@ -1857,6 +1873,20 @@ bool FrameBuffer::updateColorBufferFromDsaPackedYuv(HandleType p_colorbuffer, co
+             width, height, size, static_cast<unsigned long long>(expected));
+         return false;
+     }
++    // DSA: planes that hold no picture (a luma row of zeros over chroma zeros) come from a
++    // guest process that copied the buffer up before its producer wrote it: a guest Vulkan
++    // driver copies up every buffer a CPU writes that it imported before each of its
++    // submissions, whoever owns the buffer then. Written, they would show as solid green; the
++    // ColorBuffer keeps the picture it holds instead (dsa_yuv_pictures.h).
++    if (dsa::yuvUploadHoldsNoPicture(frameworkFormat == FRAMEWORK_FORMAT_YV12, width, height,
++                                     static_cast<const uint8_t*>(bytes), size)) {
++        std::string line;
++        if (dsaYuvPictures().uploadRefused(dsaNowNs(), &line)) {
++            WARN("%s (the last: ColorBuffer %u, %ux%u).", line.c_str(), p_colorbuffer, width,
++                 height);
++        }
++        return false;
++    }
+     return colorBuffer->updateFromBytes(0, 0, static_cast<int>(width), static_cast<int>(height),
+                                         frameworkFormat, GL_RGBA, GL_UNSIGNED_BYTE, bytes);
+ }
+@@ -2383,11 +2413,54 @@ bool FrameBuffer::compose(uint32_t bufferSize, void* buffer, bool needPost) {
+     return true;
+ }
+ 
++bool FrameBuffer::dsaCompositionAwaitsPicture(const ComposeLayer* layers, size_t count,
++                                              uint32_t target) {
++    if (!m_emulationVk) {
++        return false;
++    }
++    for (size_t i = 0; i < count; ++i) {
++        const ComposeLayer& layer = layers[i];
++        if (layer.composeMode == HWC2_COMPOSITION_SOLID_COLOR || layer.cbHandle == 0) {
++            continue;
++        }
++        dsa::YuvPicture picture = dsa::YuvPicture::None;
++        if (!m_emulationVk->colorBufferAwaitsPicture(layer.cbHandle, &picture)) {
++            continue;
++        }
++        std::string line;
++        if (dsaYuvPictures().compositionHeld(picture, dsaNowNs(), &line)) {
++            WARN("%s (the last: ColorBuffer %u, composed into ColorBuffer %u).", line.c_str(),
++                 layer.cbHandle, target);
++        }
++        return true;
++    }
++    return false;
++}
++
+ AsyncResult FrameBuffer::composeWithCallback(uint32_t bufferSize, void* buffer,
+                                              Post::CompletionCallback callback) {
+     ComposeDevice* p = (ComposeDevice*)buffer;
+     AutoLock mutex(m_lock);
+ 
++    // DSA: a composition that would read a YUV ColorBuffer holding no finished upload is
++    // refused before it is scheduled, and the guest posts nothing for that frame: the task's
++    // window keeps its last frame, with the last picture that did land, instead of a solid
++    // green one (dsa_yuv_pictures.h). Only the layers the buffer holds are looked at.
++    if (p->version == 1 && bufferSize >= sizeof(ComposeDevice)) {
++        const size_t count = std::min<size_t>(
++            p->numLayers, (bufferSize - sizeof(ComposeDevice)) / sizeof(ComposeLayer));
++        if (dsaCompositionAwaitsPicture(p->layer, count, p->targetHandle)) {
++            return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
++        }
++    } else if (p->version == 2 && bufferSize >= sizeof(ComposeDevice_v2)) {
++        const ComposeDevice_v2* p2 = (const ComposeDevice_v2*)buffer;
++        const size_t count = std::min<size_t>(
++            p2->numLayers, (bufferSize - sizeof(ComposeDevice_v2)) / sizeof(ComposeLayer));
++        if (dsaCompositionAwaitsPicture(p2->layer, count, p2->targetHandle)) {
++            return AsyncResult::FAIL_AND_CALLBACK_NOT_SCHEDULED;
++        }
++    }
++
+     switch (p->version) {
+         case 1: {
+             Post composeCmd;
+diff --git a/host/FrameBuffer.h b/host/FrameBuffer.h
+--- a/host/FrameBuffer.h
++++ b/host/FrameBuffer.h
+@@ -443,6 +443,9 @@ class FrameBuffer : public android::base::EventNotificationSupport<FrameBufferCh
+     // be called on the PostWorker thread without blocking the current thread.
+     AsyncResult composeWithCallback(uint32_t bufferSize, void* buffer,
+                              Post::CompletionCallback callback);
++    // DSA: whether one of these layers reads a YUV ColorBuffer that holds no finished upload,
++    // which a composition must not show (dsa_yuv_pictures.h). Counts it. Called with m_lock.
++    bool dsaCompositionAwaitsPicture(const ComposeLayer* layers, size_t count, uint32_t target);
+ 
+     ~FrameBuffer();
+ 
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -4499,6 +4499,36 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+     // In bounded jobs, each submitted and waited for on its own: the first takes the image
+     // to the transfer layout, the last gives it back.
+     const auto groups = boundedCopies(bufferImageCopies, dstBufferSize);
++
++    // DSA: how far the jobs got. A YUV ColorBuffer is composed only once an upload has
++    // finished in it (dsa_yuv_pictures.h): until then its image holds zeros, or some planes
++    // of the new picture beside the old, and zeros show as solid green. A job that fails also
++    // leaves the image where the GPU left it, not where the bookkeeping said: the first job
++    // takes it to the transfer layout on this queue, and only the last gives it back.
++    struct UploadEnd {
++        ColorBufferInfo* info;
++        uint32_t family;
++        size_t jobs;
++        VkImageLayout layoutBefore;
++        uint32_t familyBefore;
++        size_t started = 0;
++        size_t finished = 0;
++        ~UploadEnd() {
++            if (started < jobs) {
++                // The last job, which gives the image back, never reached the GPU.
++                if (started == 0) {
++                    info->currentLayout = layoutBefore;
++                    info->currentQueueFamilyIndex = familyBefore;
++                } else {
++                    info->currentLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
++                    info->currentQueueFamilyIndex = family;
++                }
++            }
++            info->picture = dsa::yuvPictureAfterUpload(info->picture, jobs, started, finished);
++        }
++    } uploadEnd{colorBufferInfo, mQueueFamilyIndex, groups.size(),
++                colorBufferInfo->currentLayout, colorBufferInfo->currentQueueFamilyIndex};
++
+     for (size_t group = 0; group < groups.size(); ++group) {
+         const bool first = group == 0;
+         const bool last = group + 1 == groups.size();
+@@ -4595,8 +4625,10 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+             android::base::AutoLock queueLock(*mQueueLock);
+             VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+         }
++        ++uploadEnd.started;
+ 
+         VK_EMU_TRY(waitForFenceBounded(vk, mCommandBufferFence, "Writing a ColorBuffer"), false);
++        ++uploadEnd.finished;
+ 
+         VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+     }
+@@ -5408,6 +5440,27 @@ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
+     VK_EMU_TRY(waitForFenceBounded(vk, fence, "Releasing a ColorBuffer to the guest"), );
+ }
+ 
++bool VkEmulation::colorBufferAwaitsPicture(uint32_t colorBufferHandle,
++                                           dsa::YuvPicture* picture) {
++    // Under the lock every upload holds from its first job to its last, so an upload on
++    // another render thread is either not begun or finished, never half way.
++    std::lock_guard<std::mutex> lock(mMutex);
++    auto colorBufferInfo = android::base::find(mColorBuffers, colorBufferHandle);
++    if (!colorBufferInfo) {
++        return false;
++    }
++    const VkFormat format = colorBufferInfo->imageCreateInfoShallow.format;
++    if (format != VK_FORMAT_G8_B8R8_2PLANE_420_UNORM &&
++        format != VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM) {
++        return false;
++    }
++    if (dsa::yuvPictureComposable(colorBufferInfo->picture)) {
++        return false;
++    }
++    *picture = colorBufferInfo->picture;
++    return true;
++}
++
+ std::unique_ptr<BorrowedImageInfoVk> VkEmulation::borrowColorBufferForComposition(
+     uint32_t colorBufferHandle, bool colorBufferIsTarget) {
+     std::lock_guard<std::mutex> lock(mMutex);
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -38,6 +38,7 @@
+ #include "ExternalObjectManager.h"
+ #include "FrameworkFormats.h"
+ #include "dsa_device_remake.h"
++#include "dsa_yuv_pictures.h"
+ #include "aemu/base/Optional.h"
+ #include "aemu/base/ThreadAnnotations.h"
+ #include "gfxstream/host/BackendCallbacks.h"
+@@ -381,12 +382,20 @@ class VkEmulation {
+         VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+         uint32_t currentQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+ 
++        // DSA: what the uploads have left in the image (dsa_yuv_pictures.h). A ColorBuffer made
++        // again on a new device starts over with none.
++        dsa::YuvPicture picture = dsa::YuvPicture::None;
++
+         bool glExported = false;
+         bool externalMemoryCompatible = false;
+ 
+         VulkanMode vulkanMode = VulkanMode::Default;
+     };
+     std::optional<VkEmulation::ColorBufferInfo> getColorBufferInfo(uint32_t colorBufferHandle);
++    // DSA: a YUV ColorBuffer whose image holds no finished upload (never written, or left
++    // part-written by a failed one), with what it holds in `picture`. A composition must not
++    // read it: its zeros show as solid green. False for any other ColorBuffer.
++    bool colorBufferAwaitsPicture(uint32_t colorBufferHandle, dsa::YuvPicture* picture);
+ 
+     struct BufferInfo {
+         ExternalMemoryInfo memory;

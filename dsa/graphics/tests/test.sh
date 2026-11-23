@@ -57,6 +57,11 @@ mkdir -p "$out"
     "$here/cpu_upload_test.cpp" -o "$out/cpu_upload_test"
 "$out/cpu_upload_test"
 
+# When the host renderer composes a YUV ColorBuffer, and which uploads it refuses (patch 0045).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/yuv_pictures_test.cpp" -o "$out/yuv_pictures_test"
+"$out/yuv_pictures_test"
+
 # How long a process keeps a gralloc buffer's host ColorBuffer open (guest/mesa 0013).
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/color_buffer_refs_test.cpp" -o "$out/color_buffer_refs_test"
