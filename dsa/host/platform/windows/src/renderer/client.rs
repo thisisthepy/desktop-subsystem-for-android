@@ -3,7 +3,9 @@
 //!
 //! [`ProgramLauncher`] starts the renderer beside the window manager with the name of a pipe
 //! only this user may open, waits for it to dial back, and keeps a handle to its process, which
-//! the textures are duplicated into. [`RendererClient`] is what the compositor sees as its
+//! the textures are duplicated into. A renderer that kept running after the window manager
+//! before this one ended (it crashed, or was ended) waits on [`adoption_pipe`]: the launcher
+//! takes that one over instead, so the guest keeps everything it made in it. [`RendererClient`] is what the compositor sees as its
 //! display presenter: it tells the renderer which VM's streams to take, answers each frame's
 //! request with the texture the app window's frame router gives (handing a new texture over
 //! once), passes each finished frame to the router, and asks the renderer for its memory.
@@ -29,18 +31,24 @@ use dsa_protocol::renderer::types::{
 };
 use dsa_transport::local::LocalListener;
 use dsa_transport::TransportError;
-use windows_sys::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
-use windows_sys::Win32::System::Threading::GetCurrentProcess;
+use windows_sys::Win32::Foundation::{
+    CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE, WAIT_OBJECT_0,
+};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, TerminateProcess, WaitForSingleObject,
+    PROCESS_DUP_HANDLE, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+};
 
 use dsa_host_core::graphics_state::GraphicsState;
 
 use super::{
-    describe_frame_path, graphics_state_of, start_with, started_adapter, started_gpu, RENDERER_EXE,
+    adoption_pipe, describe_frame_path, graphics_state_of, start_with, started_adapter,
+    started_gpu, RENDERER_EXE,
 };
 use crate::compositor::adapter::{DisplayPresenter, DisplaySink};
 use crate::compositor::log::{note, renderer_line, CompositorLogger};
 use crate::guid::Guid;
-use crate::pipe::{current_user_only_sddl, NamedPipeListener};
+use crate::pipe::{current_user_only_sddl, NamedPipeListener, SameUserPipeConnector};
 use crate::render_gpu::{describe_outcome, GpuRequest};
 use crate::vm_listener::VmIdSlot;
 use crate::vulkan_driver::VulkanDriverSetting;
@@ -102,6 +110,19 @@ impl ProcessHandle {
             ));
         }
         Ok(ProcessHandle(copy))
+    }
+
+    /// A handle to the running process `pid`, with `access`.
+    pub fn open(pid: u32, access: u32) -> Result<ProcessHandle, String> {
+        // SAFETY: opens a process by its ID; the handle is closed on drop.
+        let handle = unsafe { OpenProcess(access, 0, pid) };
+        if handle.is_null() {
+            return Err(format!(
+                "the renderer's process {pid} cannot be opened: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(ProcessHandle(handle))
     }
 
     /// Duplicates `handle`, a handle of this process, into the process. Returns its value
@@ -175,6 +196,57 @@ impl Drop for ProcessChild {
     }
 }
 
+/// A `dsa-gfx.exe` that the window manager before this one started, and this one took over.
+/// It is no child of this process, so it is watched and ended through a handle to it.
+struct AdoptedChild {
+    pid: u32,
+    process: ProcessHandle,
+}
+
+impl RendererChild for AdoptedChild {
+    fn id(&self) -> u32 {
+        self.pid
+    }
+
+    fn exited(&mut self) -> Option<String> {
+        // SAFETY: a process handle of ours with SYNCHRONIZE, waited on without blocking.
+        if unsafe { WaitForSingleObject(self.process.0, 0) } != WAIT_OBJECT_0 {
+            return None;
+        }
+        let mut code = 0u32;
+        // SAFETY: a process handle of ours with query access, and a local to write to.
+        if unsafe { GetExitCodeProcess(self.process.0, &mut code) } == 0 {
+            return Some("it ended".to_string());
+        }
+        Some(describe_exit_code(i64::from(code as i32)))
+    }
+
+    fn kill(&mut self) {
+        // SAFETY: a process handle of ours with PROCESS_TERMINATE.
+        unsafe { TerminateProcess(self.process.0, 1) };
+    }
+
+    fn adopted(&self) -> bool {
+        true
+    }
+}
+
+impl Drop for AdoptedChild {
+    fn drop(&mut self) {
+        // As with a started one: a renderer this window manager lets go of while it still runs
+        // is ended.
+        if self.exited().is_none() {
+            self.kill();
+            // SAFETY: a process handle of ours with SYNCHRONIZE.
+            unsafe { WaitForSingleObject(self.process.0, 5000) };
+        }
+    }
+}
+
+/// How long the launcher waits for a renderer waiting to be taken over to take the call. One
+/// that waits answers at once; with none, the pipe does not exist and the call fails at once.
+const ADOPTION_CALL: Duration = Duration::from_secs(2);
+
 /// Starts `dsa-gfx.exe` from beside the window manager.
 pub struct ProgramLauncher {
     /// The renderer's program.
@@ -187,6 +259,10 @@ pub struct ProgramLauncher {
     pub args: Option<Vec<String>>,
     /// Where the started renderer's process handle goes.
     pub process: RendererProcess,
+    /// Whether a renderer that kept running after the window manager before this one ended is
+    /// taken over before a new one is started. Only the installed window manager does: a test
+    /// that starts its own renderers must never take over the user's.
+    pub adopt: bool,
 }
 
 /// How many renderer pipes this process has opened. The count is the process's, not one
@@ -202,6 +278,7 @@ impl ProgramLauncher {
             env: Vec::new(),
             args: None,
             process,
+            adopt: false,
         }
     }
 
@@ -211,12 +288,57 @@ impl ProgramLauncher {
             .ok()
             .and_then(|exe| exe.parent().map(|dir| dir.join(RENDERER_EXE)))
             .unwrap_or_else(|| PathBuf::from(RENDERER_EXE));
-        ProgramLauncher::new(program, process)
+        ProgramLauncher {
+            adopt: true,
+            ..ProgramLauncher::new(program, process)
+        }
+    }
+
+    /// Takes over the renderer that waits on [`adoption_pipe`], if one does. `None` when none
+    /// waits, or it cannot be taken over; a new one is then started.
+    fn take_over(&mut self) -> Option<Launched> {
+        let mut connector = SameUserPipeConnector {
+            name: adoption_pipe(),
+        };
+        let (mut connection, pid) = connector.connect_to_server(ADOPTION_CALL).ok()?;
+        let opened = ProcessHandle::open(
+            pid,
+            PROCESS_DUP_HANDLE
+                | PROCESS_QUERY_LIMITED_INFORMATION
+                | PROCESS_SYNCHRONIZE
+                | PROCESS_TERMINATE,
+        )
+        .and_then(|watched| {
+            let textures = ProcessHandle::open(pid, PROCESS_DUP_HANDLE)?;
+            Ok((watched, textures))
+        });
+        let (watched, textures) = match opened {
+            Ok(handles) => handles,
+            Err(_) => {
+                // Without a handle the textures cannot reach it: it ends once its call breaks,
+                // and a fresh one is started.
+                connection.close();
+                return None;
+            }
+        };
+        *self.process.lock().unwrap_or_else(|e| e.into_inner()) = Some(textures);
+        Some(Launched {
+            process: Box::new(AdoptedChild {
+                pid,
+                process: watched,
+            }),
+            connection,
+        })
     }
 }
 
 impl RendererLauncher for ProgramLauncher {
     fn launch(&mut self) -> Result<Launched, String> {
+        if self.adopt {
+            if let Some(adopted) = self.take_over() {
+                return Ok(adopted);
+            }
+        }
         if !self.program.is_file() {
             return Err(format!("{} is not installed", self.program.display()));
         }

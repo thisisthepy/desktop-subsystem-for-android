@@ -561,6 +561,36 @@ pub struct SameUserPipeConnector {
     pub name: String,
 }
 
+impl SameUserPipeConnector {
+    /// [`connect`](Connector::connect), with the ID of the process that serves the pipe.
+    pub fn connect_to_server(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<(Box<dyn Connection>, u32), TransportError> {
+        let handle = open_client(&self.name, timeout)?;
+        let mut pid = 0u32;
+        // SAFETY: a connected pipe.
+        if unsafe { GetNamedPipeServerProcessId(handle.0, &mut pid) } == 0 {
+            return Err(last_error().into());
+        }
+        let server = process_sid(pid)?;
+        let own = current_user_sid()?;
+        if server != own {
+            return Err(TransportError::Io {
+                kind: io::ErrorKind::PermissionDenied,
+                message: format!(
+                    "{} is served by another user ({server}), not this one",
+                    pipe_path(&self.name)
+                ),
+            });
+        }
+        Ok((
+            Box::new(FramedConnection::new(PipeStream::new(handle)?)),
+            pid,
+        ))
+    }
+}
+
 impl Connector for SameUserPipeConnector {
     fn connect(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
         let handle = open_client(&self.name, timeout)?;

@@ -8,6 +8,12 @@
 //! frame, and the window manager starts the renderer again. The guest sees its graphics
 //! streams drop and connects again, and the windows draw again when new frames arrive.
 //!
+//! The other way round, a window manager that ends without stopping its renderer (it crashed,
+//! or was ended from outside) leaves the renderer running for [`ADOPTION_WAIT`], and the next
+//! window manager takes it over instead of starting a fresh one ([`RendererChild::adopted`],
+//! [`WindowManagerLink::attach`]). The guest's streams, and everything Android's apps made in
+//! the renderer, stay as they were.
+//!
 //! This module holds what every host shares:
 //!
 //! - [`supervise`]: the window manager's side. It starts the renderer through a
@@ -493,6 +499,12 @@ impl<T> Pending<T> {
         let _waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
         self.arrived.notify_all();
     }
+
+    /// A new connection took the closed one's place: later waits wait for answers again.
+    pub fn reopen(&self) {
+        let _waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        self.closed.store(false, Ordering::Relaxed);
+    }
 }
 
 /// The window manager's sending half of its connection to the current renderer.
@@ -542,6 +554,11 @@ pub trait RendererChild: Send {
     fn exited(&mut self) -> Option<String>;
     /// Ends it now.
     fn kill(&mut self);
+    /// Whether this window manager took over a renderer that kept running after the window
+    /// manager before it ended, rather than starting one.
+    fn adopted(&self) -> bool {
+        false
+    }
 }
 
 /// A started renderer and the connection it dialled back on.
@@ -660,6 +677,9 @@ fn run_one(
     backoff.started(Instant::now());
     let link = RendererLink::new(connection.try_clone_sender(), launched.process.id());
     handler.connected(&started, &link);
+    if launched.process.adopted() {
+        handler.log(&adopted_line(launched.process.id()));
+    }
     let ending = loop {
         if stop.load(Ordering::Relaxed) {
             link.send(Body::Stop(Stop {}));
@@ -1084,6 +1104,13 @@ impl<H: Copy> HeldTargets<H> {
             .unwrap_or_default()
     }
 
+    /// The displays a texture is held for.
+    pub fn displays(&self) -> Vec<u32> {
+        let mut displays: Vec<u32> = self.held.keys().copied().collect();
+        displays.sort_unstable();
+        displays
+    }
+
     /// Every texture held, to let go of.
     pub fn drain(&mut self) -> Vec<H> {
         self.last.clear();
@@ -1095,10 +1122,17 @@ impl<H: Copy> HeldTargets<H> {
 }
 
 /// The renderer's side of its connection to the window manager.
+///
+/// A window manager that ends without stopping its renderer (it crashed, or was ended) leaves
+/// the link [gone](Self::is_gone) but not [ended](Self::is_ended): the renderer keeps the
+/// guest's streams and everything the guest made in it, and the next window manager takes it
+/// over on the same link ([`attach`](Self::attach)). Everything that holds the link (the frame
+/// sink, the log, the device state) then sends to the new one.
 pub struct WindowManagerLink {
     sender: Mutex<Box<dyn FrameSender>>,
     targets: Pending<Target>,
     gone: AtomicBool,
+    ended: AtomicBool,
 }
 
 impl WindowManagerLink {
@@ -1108,7 +1142,28 @@ impl WindowManagerLink {
             sender: Mutex::new(sender),
             targets: Pending::new(),
             gone: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
         })
+    }
+
+    /// The window manager's connection broke: nothing waits for it, and nothing is sent, until
+    /// another window manager is [attached](Self::attach).
+    pub fn lost(&self) {
+        let _sender = self.sender.lock().unwrap_or_else(|e| e.into_inner());
+        self.gone.store(true, Ordering::Relaxed);
+        self.targets.close();
+    }
+
+    /// Another window manager took the renderer over: everything goes to it on `sender` from
+    /// now on. A link that [ended](Self::close) stays ended.
+    pub fn attach(&self, sender: Box<dyn FrameSender>) {
+        let mut current = self.sender.lock().unwrap_or_else(|e| e.into_inner());
+        if self.ended.load(Ordering::Relaxed) {
+            return;
+        }
+        *current = sender;
+        self.targets.reopen();
+        self.gone.store(false, Ordering::Relaxed);
     }
 
     /// Sends `body`. False when the window manager is gone.
@@ -1179,16 +1234,103 @@ impl WindowManagerLink {
         }
     }
 
-    /// The window manager is gone: nothing waits for it any more.
+    /// The window manager is gone and no other takes its place: nothing waits for it any more.
     pub fn close(&self) {
+        self.ended.store(true, Ordering::Relaxed);
         self.gone.store(true, Ordering::Relaxed);
         self.targets.close();
     }
 
-    /// Whether the window manager is gone.
+    /// Whether no window manager is connected now.
     pub fn is_gone(&self) -> bool {
         self.gone.load(Ordering::Relaxed)
     }
+
+    /// Whether the link was [closed](Self::close) for good: the renderer is ending.
+    pub fn is_ended(&self) -> bool {
+        self.ended.load(Ordering::Relaxed)
+    }
+}
+
+/// How long a renderer whose window manager ended without stopping it waits for the next
+/// window manager to take it over, before it ends too. The service starts a new window manager
+/// within seconds of the old one ending.
+///
+/// The renderer holds every color buffer, texture and Vulkan object the guest's processes made
+/// (an app's hardware bitmaps and icons, its glyph caches, SurfaceFlinger's buffers). A fresh
+/// renderer has none of them, and Android's apps do not make them again: on the owner's PC,
+/// after the window manager alone was ended and started again, every app drew only its solid
+/// shapes, with no text, no images and black icons, until DSA was stopped and started. A
+/// renderer that is taken over keeps all of it, and the apps never notice.
+pub const ADOPTION_WAIT: Duration = Duration::from_secs(60);
+
+/// How a renderer's window manager left it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowManagerLeft {
+    /// It said Stop: it is stopping, or Android stopped.
+    Stopped,
+    /// It said the VM the renderer served is gone.
+    VmGone,
+    /// Its connection broke without a word: it crashed, or was ended from outside.
+    Lost,
+}
+
+/// How long a renderer whose window manager left as `left` waits for the next one to take it
+/// over; `None` when it ends at once. Only a window manager that was lost leaves work for the
+/// next one: one that stopped the renderer, or whose VM is gone, wants no renderer kept.
+pub fn adoption_wait(left: WindowManagerLeft) -> Option<Duration> {
+    match left {
+        WindowManagerLeft::Lost => Some(ADOPTION_WAIT),
+        WindowManagerLeft::Stopped | WindowManagerLeft::VmGone => None,
+    }
+}
+
+/// Why a renderer started with `first` cannot serve a window manager whose start is `asked`;
+/// `None` when it can. A window manager that asks for another GPU, another Vulkan driver or
+/// other ports (the user changed a setting before it started again) gets a fresh renderer.
+pub fn adoption_refusal(first: &Start, asked: &Start) -> Option<String> {
+    if (first.gpu_rule, &first.gpu_luid, &first.gpu_name)
+        != (asked.gpu_rule, &asked.gpu_luid, &asked.gpu_name)
+    {
+        return Some("the new window manager asks for another render GPU".into());
+    }
+    if first.vulkan_driver != asked.vulkan_driver {
+        return Some("the new window manager asks for another Vulkan driver".into());
+    }
+    if (first.command_port, first.process_pipe_port)
+        != (asked.command_port, asked.process_pipe_port)
+        || (&first.command_socket, &first.process_pipe_socket)
+            != (&asked.command_socket, &asked.process_pipe_socket)
+    {
+        return Some("the new window manager takes the guest's streams elsewhere".into());
+    }
+    if first.frames_on_gpu != asked.frames_on_gpu {
+        return Some("the new window manager takes the frames another way".into());
+    }
+    None
+}
+
+/// What a renderer that is taken over tells its new window manager: what it said when it
+/// started (its GPU, its Vulkan driver, how frames reach the windows), with one note in place
+/// of its start's notes, which the first window manager logged already.
+pub fn adopted_started(first: &Started) -> Started {
+    Started {
+        notes: vec![
+            "kept running while the window manager restarted; the guest's graphics and \
+             everything its apps drew stay as they were"
+                .into(),
+        ],
+        ..first.clone()
+    }
+}
+
+/// The window manager's line for a renderer it took over.
+pub fn adopted_line(process_id: u32) -> String {
+    format!(
+        "the graphics renderer ({RENDERER_PROGRAM}, pid {process_id}) kept running while the \
+         window manager restarted, and this window manager took it over: Android's apps keep \
+         their text, images and icons"
+    )
 }
 
 /// How often the renderer process looks whether its Vulkan device was lost or made again.
@@ -1207,6 +1349,8 @@ pub const DEVICE_STATE_POLL: Duration = Duration::from_millis(50);
 #[derive(Debug, Default)]
 pub struct ServedVm {
     served: Option<String>,
+    /// A new window manager took the renderer over and has not said which VM it sees yet.
+    adopted: bool,
 }
 
 impl ServedVm {
@@ -1214,10 +1358,30 @@ impl ServedVm {
         ServedVm::default()
     }
 
+    /// A new window manager took the renderer over. It does not know the VM for its first
+    /// moments, so until it names one, "no VM" is not taken as the VM being gone: the renderer
+    /// would end, and the guest lose everything it made in it, for a window manager that only
+    /// had not looked yet. A VM it names is taken as from the first one.
+    pub fn adopted(&mut self) {
+        self.adopted = true;
+    }
+
+    /// Whether a window manager took the renderer over and has not named a VM yet: until it
+    /// does, the renderer keeps serving the VM it served.
+    pub fn awaits_vm(&self) -> bool {
+        self.adopted
+    }
+
     /// The window manager says the guest VM is now `vm` (`None`: there is none). True when
     /// the VM this renderer served is gone, so it should end. A renderer that has not served
     /// a VM yet takes this one.
     pub fn told(&mut self, vm: Option<&str>) -> bool {
+        if self.adopted {
+            if vm.is_none() {
+                return false;
+            }
+            self.adopted = false;
+        }
         match (&self.served, vm) {
             (None, Some(id)) => {
                 self.served = Some(id.to_string());
@@ -1227,6 +1391,19 @@ impl ServedVm {
             (Some(served), Some(id)) => served != id,
             (Some(_), None) => true,
         }
+    }
+}
+
+/// The guest VM a window manager tells its renderer of after it asked the service: `known` is
+/// the one it told last, and `read` what the service said (`None`: the service could not be
+/// asked, or did not answer in time). A service that does not answer says nothing about the
+/// VM, so the VM stays: on the owner's PC the service timed out once, the window manager took
+/// that as no VM, and the renderer, told its VM was gone, ended under a VM that still ran, and
+/// with it everything Android's apps had drawn.
+pub fn vm_after_asking<T>(known: Option<T>, read: Option<Option<T>>) -> Option<T> {
+    match read {
+        Some(vm) => vm,
+        None => known,
     }
 }
 
@@ -1303,7 +1480,8 @@ pub fn device_resets(state: &DeviceState) -> u64 {
 }
 
 /// Tells the window manager on `link` of the renderer's device, as `read` gives its counts
-/// (losses, then generation), every [`DEVICE_STATE_POLL`] until the window manager is gone.
+/// (losses, then generation), every [`DEVICE_STATE_POLL`] until the link ends. A change while
+/// no window manager is connected is told to the one that takes the renderer over.
 pub fn follow_device_state(
     link: Arc<WindowManagerLink>,
     read: Box<dyn Fn() -> (u64, u64) + Send>,
@@ -1312,10 +1490,15 @@ pub fn follow_device_state(
         .name("dsa-gfx-device-state".into())
         .spawn(move || {
             let mut watch = DeviceWatch::new();
-            while !link.is_gone() {
-                let (losses, generation) = read();
-                if let Some(state) = watch.look(losses, generation) {
-                    link.send(Body::DeviceState(state));
+            while !link.is_ended() {
+                if !link.is_gone() {
+                    let (losses, generation) = read();
+                    if let Some(state) = watch.look(losses, generation) {
+                        if !link.send(Body::DeviceState(state)) {
+                            // Not heard: told again once a window manager is back.
+                            watch = DeviceWatch::new();
+                        }
+                    }
                 }
                 thread::sleep(DEVICE_STATE_POLL);
             }

@@ -14,7 +14,7 @@ use super::frame_requests::FrameRequests;
 use super::resize_queue::DrawnFrames;
 use super::window_mode::WindowMode;
 use super::window_sizing::{
-    density_for_dpi, scale_between, to_task_length, to_window_rect, to_window_size, Scale,
+    density_for_dpi, rescale, scale_between, to_task_length, to_window_rect, to_window_size, Scale,
     ScalingMode, WindowSizing, BASE_DENSITY, DENSITY_AT_BASE_DPI, SETTLE,
 };
 use crate::app_windows::{
@@ -315,7 +315,11 @@ fn caption_changes(previous: Option<&Task>, task: &Task, scale: Scale) -> Vec<Wi
 }
 
 fn open(task: &Task) -> WindowChange {
-    let (width, height) = window_size(&task.bounds);
+    open_at(task, window_size(&task.bounds))
+}
+
+/// The change that opens `task`'s window with a client area of `(width, height)`.
+fn open_at(task: &Task, (width, height): (u32, u32)) -> WindowChange {
     WindowChange::Open {
         task_id: task.task_id,
         package_name: task.package_name.clone(),
@@ -368,10 +372,15 @@ pub fn start_size(task: &Task, app: Option<&AppWindowSettings>) -> Option<(u32, 
     (wanted != current).then_some(wanted)
 }
 
-/// A task whose window waits for the guest to give it its start size.
+/// A task whose window waits for the guest to give it its start size, and the density of the
+/// monitor the window opens on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingOpen {
     size: (u32, u32),
+    /// The density the task is to draw at when its window opens: that of the monitor the
+    /// window opens on, for a task that follows its monitor and draws at another. `None`
+    /// when the task keeps the density it has.
+    density: Option<u32>,
     /// When the guest was asked for it; `None` until it is.
     asked: Option<Instant>,
 }
@@ -403,6 +412,13 @@ pub struct TaskWindows {
     told_full_screen: BTreeMap<i32, bool>,
     /// Tasks whose window opens once the guest has given them their start size.
     pending: BTreeMap<i32, PendingOpen>,
+    /// The DPI of the monitor each app's next window opens on, by package, as the platform
+    /// found it before the window opened ([`TaskWindows::set_opening_dpi`]). An app missing
+    /// here opens at its task's size, and takes its monitor's once its window says which.
+    opening_dpi: BTreeMap<String, u32>,
+    /// Requests made while a window opened, which go with the next
+    /// [`TaskWindows::reconfigures`].
+    queued: Vec<TaskRequest>,
     /// The mode and resizability each window was last told.
     told_modes: BTreeMap<i32, (WindowMode, bool)>,
     /// Where the guest last said the cursor of each task's focused editor is, in the task's
@@ -717,17 +733,86 @@ impl TaskWindows {
         })
     }
 
+    /// The DPI of the monitor `package`'s next window opens on, as the platform found it from
+    /// where the app's last window closed ([`super::window_monitor::opening_monitor`]); `None`
+    /// when it is not known, and the window then takes its monitor's size and density once it
+    /// has opened and said which monitor it is on.
+    ///
+    /// Known before the window opens, the task is given that monitor's density and its size
+    /// there first, and the window opens at that size: its first frame is the app's at the
+    /// size it keeps. Taken only after the window opened, the window showed the app at the
+    /// main monitor's density and size first, then shrank on a monitor of a lower scale while
+    /// the app redrew (FLO's splash screen on a 125% monitor beside a 200% main one).
+    pub fn set_opening_dpi(&mut self, package: &str, dpi: Option<u32>) {
+        match dpi.filter(|dpi| *dpi > 0) {
+            Some(dpi) => {
+                self.opening_dpi.insert(package.to_string(), dpi);
+            }
+            None => {
+                self.opening_dpi.remove(package);
+            }
+        }
+    }
+
+    /// The density `task` is to draw at when its window opens, when that differs from the one
+    /// it has: the density of the monitor the window opens on, for a task that follows its
+    /// monitor. A task that keeps its density is shown scaled instead, and asked for nothing.
+    fn opening_density(&self, task: &Task) -> Option<u32> {
+        let dpi = *self.opening_dpi.get(&task.package_name)?;
+        if task.density_dpi == 0 || self.scaling_of(task) != ScalingMode::App {
+            return None;
+        }
+        let wanted = density_for_dpi(dpi);
+        (wanted != task.density_dpi).then_some(wanted)
+    }
+
+    /// What a new task's window waits for before it opens: its start size
+    /// ([`start_size`]), and the density of the monitor it opens on with the size there, the
+    /// same size to the eye. `None` when it opens at once, at the size the task has.
+    fn opening_for(&self, task: &Task) -> Option<PendingOpen> {
+        let start = start_size(task, self.app_windows.get(&task.package_name));
+        let density = self.opening_density(task);
+        if start.is_none() && density.is_none() {
+            return None;
+        }
+        let mut size = start.unwrap_or_else(|| window_size(&task.bounds));
+        if let Some(density) = density {
+            size = rescale(size, task.density_dpi, density);
+            if let Some(max) = task.max_size() {
+                size = fit_within(size, max);
+            }
+        }
+        Some(PendingOpen {
+            size,
+            density,
+            asked: None,
+        })
+    }
+
     /// What a window that opens for `task` must do: open, take its caption tone, its mode and
     /// its task's size and limits.
+    ///
+    /// A window whose monitor is known before it opens ([`Self::set_opening_dpi`]) is placed
+    /// there at once: it opens at the size the task has on that monitor, and a task that keeps
+    /// its density is shown at that monitor's scale from its first frame. A density the task
+    /// still has to take there is asked for with the next [`Self::reconfigures`].
     fn open_window(&mut self, task_id: i32) -> Vec<WindowChange> {
         let Some(task) = self.tasks.get(&task_id).cloned() else {
             return Vec::new();
         };
-        let sizing = self.sizing_for(&task);
+        let mut sizing = self.sizing_for(&task);
+        let mut size = window_size(&task.bounds);
+        if let Some(dpi) = self.opening_dpi.get(&task.package_name).copied() {
+            let (opened, request) = sizing.dpi_reported(dpi);
+            if let Some(opened) = opened {
+                size = opened;
+            }
+            self.queued.extend(request);
+        }
         self.sizes.insert(task_id, sizing);
         self.told_sizes.remove(&task_id);
         let mut changes = vec![
-            open(&task),
+            open_at(&task, size),
             WindowChange::CaptionTone {
                 task_id,
                 tone: tone_of(&task),
@@ -845,8 +930,12 @@ impl TaskWindows {
                 if self.closing.contains(&task.task_id) {
                     return Vec::new();
                 }
-                let wanted = self.pending[&task.task_id].size;
-                if window_size(&task.bounds) != wanted {
+                let wanted = self.pending[&task.task_id];
+                if window_size(&task.bounds) != wanted.size
+                    || wanted
+                        .density
+                        .is_some_and(|density| task.density_dpi != density)
+                {
                     return Vec::new();
                 }
                 // The guest gave the task its start size: the window opens at it, with the
@@ -873,10 +962,9 @@ impl TaskWindows {
                     self.sizes.insert(task.task_id, sizing);
                     return Vec::new();
                 }
-                match start_size(task, self.app_windows.get(&task.package_name)) {
-                    Some(size) => {
-                        self.pending
-                            .insert(task.task_id, PendingOpen { size, asked: None });
+                match self.opening_for(task) {
+                    Some(pending) => {
+                        self.pending.insert(task.task_id, pending);
                         Vec::new()
                     }
                     None => self.open_window(task.task_id),
@@ -1407,6 +1495,7 @@ impl TaskWindows {
                 .filter_map(|task_id| self.recaption(task_id)),
         );
         requests.extend(self.full_screen_requests());
+        requests.append(&mut self.queued);
         requests.extend(self.size_reconfigures(now));
         requests.extend(self.frame_asks(now));
         requests
@@ -1488,9 +1577,22 @@ impl TaskWindows {
 
     fn size_reconfigures(&mut self, now: Instant) -> Vec<TaskRequest> {
         let mut requests = Vec::new();
+        let forced: BTreeMap<i32, bool> = self
+            .pending
+            .keys()
+            .filter_map(|task_id| Some((*task_id, self.forced_of(self.tasks.get(task_id)?))))
+            .collect();
         for (task_id, pending) in &mut self.pending {
             if pending.asked.is_none() && !self.closing.contains(task_id) {
                 pending.asked = Some(now);
+                // The density first: the size is the one the task has at it.
+                if let Some(density) = pending.density {
+                    requests.push(TaskRequest::SetDensity {
+                        task_id: *task_id,
+                        density_dpi: density,
+                        forced: forced.get(task_id).copied().unwrap_or(false),
+                    });
+                }
                 requests.push(TaskRequest::Resize {
                     task_id: *task_id,
                     width: pending.size.0,
@@ -1526,6 +1628,7 @@ impl TaskWindows {
         self.sizes.clear();
         self.told_sizes.clear();
         self.pending.clear();
+        self.queued.clear();
         self.told_modes.clear();
         self.cursors.clear();
         self.bands.clear();
@@ -3843,5 +3946,112 @@ mod tests {
         assert!(!resizes(
             &windows.tick(now + super::super::window_sizing::SETTLE * 2)
         ));
+    }
+
+    /// FLO on a 125% monitor (120 DPI, density 164) beside a 200% main one (density 262): the
+    /// task it starts with, 1000 by 1600 pixels at the main monitor's density.
+    fn flo(handles_density_change: bool) -> Task {
+        let mut flo = task(1, "FLO", 1000, 1600);
+        flo.density_dpi = 262;
+        flo.handles_density_change = handles_density_change;
+        flo
+    }
+
+    fn opened_size(changes: &[WindowChange]) -> Option<(u32, u32)> {
+        changes.iter().find_map(|change| match change {
+            WindowChange::Open { width, height, .. } => Some((*width, *height)),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn fr4_a_window_opening_on_a_secondary_monitor_keeps_its_first_size() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        // The window waits: the task takes that monitor's density and its size there first.
+        assert_eq!(windows.apply(&TaskEvent::Updated(flo(true))), vec![]);
+        let requests = windows.reconfigures(Instant::now());
+        let density_at = requests.iter().position(|request| {
+            *request
+                == TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 164,
+                    forced: false,
+                }
+        });
+        let size_at = requests.iter().position(|request| {
+            *request
+                == TaskRequest::Resize {
+                    task_id: 1,
+                    width: 626,
+                    height: 1002,
+                    live: false,
+                }
+        });
+        assert!(
+            matches!((density_at, size_at), (Some(d), Some(s)) if d < s),
+            "{requests:?}"
+        );
+        // The size alone is not enough: the app would still draw at the main monitor's density.
+        let mut resized = flo(true);
+        resized.bounds.right = resized.bounds.left + 626;
+        resized.bounds.bottom = resized.bounds.top + 1002;
+        assert_eq!(windows.apply(&TaskEvent::Updated(resized.clone())), vec![]);
+        // Both taken: the window opens at that size, the one it keeps.
+        resized.density_dpi = 164;
+        let changes = windows.apply(&TaskEvent::Updated(resized));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        // On that monitor the window is told no other size, and the task no other density.
+        assert_eq!(windows.window_dpi(1, 120), (vec![], vec![]));
+        let now = Instant::now();
+        assert_eq!(windows.window_resized(1, (626, 1002), now), vec![]);
+        assert!(!asks_for_density(&windows.reconfigures(now)));
+        assert!(!windows
+            .tick(now + SETTLE * 2)
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+    }
+
+    #[test]
+    fn fr4_a_system_scaled_window_opening_on_a_secondary_monitor_opens_at_its_scale() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        // A task that keeps its density opens at once, shown at that monitor's scale: the same
+        // size to the eye as on the main monitor, and no density asked.
+        let changes = windows.apply(&TaskEvent::Updated(flo(false)));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        assert!(changes.iter().any(|change| matches!(
+            change,
+            WindowChange::TaskSize { width: 1000, height: 1600, scale, .. } if *scale != (1, 1)
+        )));
+        assert!(!asks_for_density(&windows.reconfigures(Instant::now())));
+        assert_eq!(windows.window_dpi(1, 120), (vec![], vec![]));
+    }
+
+    #[test]
+    fn fr4_a_window_opening_on_the_main_monitor_opens_at_once_as_before() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(192));
+        let changes = windows.apply(&TaskEvent::Updated(flo(true)));
+        assert_eq!(opened_size(&changes), Some((1000, 1600)));
+        assert!(!asks_for_density(&windows.reconfigures(Instant::now())));
+        assert_eq!(windows.window_dpi(1, 192), (vec![], vec![]));
+        // An app whose monitor is not known opens at its task's size, as in 1.0.
+        let mut windows = TaskWindows::new();
+        let changes = windows.apply(&TaskEvent::Updated(flo(true)));
+        assert_eq!(opened_size(&changes), Some((1000, 1600)));
+    }
+
+    #[test]
+    fn fr4_a_guest_that_does_not_take_the_opening_density_still_gets_a_window() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        windows.apply(&TaskEvent::Updated(flo(true)));
+        let now = Instant::now();
+        windows.reconfigures(now);
+        // Nothing came within the wait: the window opens at the size the task has there.
+        let changes = windows.tick(now + SETTLE);
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        assert!(asks_for_density(&windows.reconfigures(now + SETTLE)));
     }
 }

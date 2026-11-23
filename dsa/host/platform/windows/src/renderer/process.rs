@@ -7,22 +7,28 @@
 //! NT handle duplicated into this process), and the window manager is told once the copy is
 //! done.
 //!
-//! The renderer lives only as long as its window manager: when the window manager's
-//! connection ends, so does this process, at once, so a renderer can never be left holding
-//! the VM's graphics ports for a window manager that is gone.
+//! A window manager that stops the renderer, or says the VM it served is gone, ends it at once.
+//! One that ends without a word (it crashed, or was ended from outside) leaves it waiting on
+//! [`adoption_pipe`](super::adoption_pipe) for the next window manager, for
+//! [`ADOPTION_WAIT`](dsa_host_core::renderer::ADOPTION_WAIT): the guest's streams and everything
+//! its processes made here stay, so Android's apps keep drawing their text, images and icons
+//! after the window manager restarts. When no window manager takes it over in that time, it
+//! ends, so a renderer is never left holding the VM's graphics ports for nobody.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::renderer::{
-    address_from, follow_device_state, open_renderer, HeldTargets, RendererProcessMemory, ServedVm,
+    address_from, adopted_started, adoption_refusal, adoption_wait, follow_device_state,
+    open_renderer, HeldTargets, RendererProcessMemory, ServedVm, WindowManagerLeft,
     WindowManagerLink, WINDOW_MANAGER_ARGUMENT,
 };
-use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Started};
+use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Note, Start, Started};
 use dsa_protocol::renderer::{decode_body, send};
-use dsa_transport::{Connector, Listener, TransportError};
+use dsa_transport::local::LocalListener;
+use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::ProcessStatus::{
     K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
@@ -30,11 +36,11 @@ use windows_sys::Win32::System::ProcessStatus::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 
-use super::{report_gpu, report_vulkan_driver, request_of, vulkan_driver_of};
+use super::{adoption_pipe, report_gpu, report_vulkan_driver, request_of, vulkan_driver_of};
 use crate::compositor::adapter::{DisplayPresenter, DisplaySink, GfxstreamAdapter};
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
-use crate::pipe::SameUserPipeConnector;
+use crate::pipe::{current_user_only_sddl, NamedPipeListener, SameUserPipeConnector};
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
 use crate::vulkan_driver::{self, DriverOutcome};
 
@@ -74,6 +80,22 @@ impl RemoteSink {
             // window outgrows it (`RemoteWindow::texture`), so the one it replaced is closed
             // here as soon as the new one is open rather than kept with nothing to use it.
             held: Mutex::new(HeldTargets::keeping(1)),
+        }
+    }
+
+    /// The window manager that gave the textures is gone: every display lets go of its texture,
+    /// in `presenter` first and then here. The next window manager numbers its textures from 1
+    /// again and makes new ones, and a texture kept under an old number, or an old handle value
+    /// a new handle took, would have the frames written where nothing shows them.
+    pub fn release_all(&self, presenter: &dyn DisplayPresenter) {
+        let displays = self
+            .held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .displays();
+        for display_id in displays {
+            presenter.forget_display(display_id);
+            self.forget(display_id);
         }
     }
 
@@ -375,6 +397,8 @@ pub fn run(args: &[String]) -> ! {
     started.adapter_luid = DisplayPresenter::adapter_luid(&*adapter)
         .map(|luid| luid.to_vec())
         .unwrap_or_default();
+    // What a window manager that takes this renderer over is told it runs on.
+    let first_started = started.clone();
     if send(&mut *connection, Body::Started(started)).is_err() {
         end_now(6);
     }
@@ -406,15 +430,103 @@ pub fn run(args: &[String]) -> ! {
         );
     }
 
+    // Only the installed renderer, which its window manager names on the command line, waits
+    // to be taken over: one a test runs inside its own program ends with the test's window
+    // manager, as before.
+    let adoptable = args.iter().any(|arg| arg == WINDOW_MANAGER_ARGUMENT);
+    loop {
+        let left = serve_window_manager(&mut *connection, &link, &adapter, &sink, &vm, &mut served);
+        let Some(wait) = adoption_wait(left).filter(|_| adoptable) else {
+            break;
+        };
+        // The window manager crashed or was ended. The guest's streams, and everything its
+        // processes made here, stay; the next window manager takes this renderer over.
+        link.lost();
+        sink.release_all(&*adapter);
+        connection.close();
+        match wait_to_be_taken_over(wait, &start, &first_started) {
+            Some(next) => {
+                let Some(sender) = next.try_clone_sender() else {
+                    break;
+                };
+                connection = next;
+                link.attach(sender);
+                served.adopted();
+            }
+            None => break,
+        }
+    }
+    link.close();
+    end_now(0)
+}
+
+/// Waits up to `wait` for the next window manager in this session to take this renderer over,
+/// on [`adoption_pipe`]: its handshake, and its `Start`, which must ask for what `first` did.
+/// Returns its connection once it was told what the renderer runs on (`first_started`), or
+/// `None` when none came, or one asks for something else; the renderer then ends, and that
+/// window manager starts a fresh one.
+fn wait_to_be_taken_over(
+    wait: Duration,
+    first: &Start,
+    first_started: &Started,
+) -> Option<Box<dyn Connection>> {
+    let sddl = current_user_only_sddl().ok()?;
+    let mut listener = NamedPipeListener::bind(&adoption_pipe(), &sddl).ok()?;
+    let deadline = Instant::now() + wait;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        let mut connection = match listener.accept(left.min(Duration::from_millis(500))) {
+            Ok((connection, _)) => connection,
+            Err(TransportError::Timeout) => continue,
+            Err(_) => return None,
+        };
+        let Ok(asked) = open_renderer(&mut *connection, &build()) else {
+            continue;
+        };
+        if let Some(why) = adoption_refusal(first, &asked) {
+            let _ = send(
+                &mut *connection,
+                Body::Note(Note {
+                    text: format!(
+                        "the renderer that kept running after the last window manager ended \
+                         ends instead of serving this one ({why}); a fresh one starts"
+                    ),
+                }),
+            );
+            return None;
+        }
+        if send(
+            &mut *connection,
+            Body::Started(adopted_started(first_started)),
+        )
+        .is_ok()
+        {
+            return Some(connection);
+        }
+    }
+}
+
+/// Serves one window manager's messages on `connection` until it leaves, and says how.
+fn serve_window_manager(
+    connection: &mut dyn Connection,
+    link: &Arc<WindowManagerLink>,
+    adapter: &Arc<GfxstreamAdapter>,
+    sink: &Arc<RemoteSink>,
+    vm: &VmIdSlot,
+    served: &mut ServedVm,
+) -> WindowManagerLeft {
     loop {
         let frame = match connection.recv(None) {
             Ok(frame) => frame,
             Err(TransportError::Timeout) => continue,
-            Err(_) => break,
+            Err(_) => return WindowManagerLeft::Lost,
         };
         let Ok(body) = decode_body(&frame) else {
             link.note("the window manager sent something that is not a message; ending");
-            break;
+            return WindowManagerLeft::Stopped;
         };
         let Some(body) = link.take(body) else {
             continue;
@@ -424,6 +536,11 @@ pub fn run(args: &[String]) -> ! {
                 // The VM this renderer served is gone: a fresh renderer, which the window
                 // manager starts at once, serves the next one without what this one kept.
                 let told = (!guest.vm_id.is_empty()).then_some(guest.vm_id.as_str());
+                if told.is_none() && served.awaits_vm() {
+                    // A window manager that took this renderer over and has not looked at
+                    // the VM yet: the guest's sockets stay bound to the VM served.
+                    continue;
+                }
                 if served.told(told) {
                     let (_, private_kb) = own_memory_kb();
                     link.note(&format!(
@@ -432,7 +549,7 @@ pub fn run(args: &[String]) -> ! {
                          private memory this one holds",
                         private_kb.map_or("?".to_string(), |kb| (kb / 1024).to_string())
                     ));
-                    break;
+                    return WindowManagerLeft::VmGone;
                 }
                 let id = if guest.vm_id.is_empty() {
                     None
@@ -448,7 +565,7 @@ pub fn run(args: &[String]) -> ! {
                 *vm.lock().unwrap_or_else(|e| e.into_inner()) = id;
             }
             Body::ForgetDisplay(forget) => {
-                DisplayPresenter::forget_display(&*adapter, forget.display_id);
+                DisplayPresenter::forget_display(&**adapter, forget.display_id);
                 sink.forget(forget.display_id);
             }
             Body::MemoryRequest(asked) => {
@@ -461,21 +578,19 @@ pub fn run(args: &[String]) -> ! {
                     // five minutes), and a video's uploads left their buffers' worth there.
                     crate::compositor::committed::compact_heaps();
                 }
-                let report = memory(&adapter).to_report(asked.request);
+                let report = memory(adapter).to_report(asked.request);
                 link.send(Body::MemoryReport(report));
                 // Whose the GPU memory is, for the window manager's log beside the report.
                 if let Some(owners) = adapter.counted_owners() {
                     link.note(&dsa_host_core::renderer::renderer_owners_line(&owners));
                 }
                 // Every color buffer, for the memory snapshot and the diagnostics archive.
-                if let Err(why) = save_color_buffers(&adapter) {
+                if let Err(why) = save_color_buffers(adapter) {
                     link.note(&format!("could not save the color buffer list: {why}"));
                 }
             }
-            Body::Stop(_) => break,
+            Body::Stop(_) => return WindowManagerLeft::Stopped,
             _ => {}
         }
     }
-    link.close();
-    end_now(0)
 }

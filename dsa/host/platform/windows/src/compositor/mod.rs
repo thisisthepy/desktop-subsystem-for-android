@@ -589,7 +589,7 @@ impl Compositor {
                                     client_opt.as_mut().expect("client set")
                                 }
                                 Err(_) => {
-                                    *monitor_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                                    // The service cannot be asked: the VM stays as it was.
                                     observe(None);
                                     thread::sleep(poll_interval);
                                     continue;
@@ -622,6 +622,8 @@ impl Compositor {
                             };
 
                             let mut slot = monitor_slot.lock().unwrap_or_else(|e| e.into_inner());
+                            let new_id =
+                                dsa_host_core::renderer::vm_after_asking(*slot, Some(new_id));
                             if *slot != new_id {
                                 if let Some(logger) = &monitor_logger {
                                     logger.log(&format!(
@@ -634,7 +636,10 @@ impl Compositor {
                         }
                         Err(_) => {
                             client_opt = None;
-                            *monitor_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                            // No answer is no word about the VM: it stays as it was.
+                            let mut slot = monitor_slot.lock().unwrap_or_else(|e| e.into_inner());
+                            *slot = dsa_host_core::renderer::vm_after_asking(*slot, None);
+                            drop(slot);
                             observe(None);
                         }
                     }
