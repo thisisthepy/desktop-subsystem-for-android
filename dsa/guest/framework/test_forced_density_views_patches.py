@@ -232,6 +232,45 @@ class ForcedDensityViewsPatchTests(unittest.TestCase):
             rescale = added(patch(android), RESCALE)
             self.assertIn("if (root.mThread != Thread.currentThread()) {", rescale, android)
 
+    def test_fr4_the_app_lays_out_again_at_its_new_bounds_after_its_views_are_converted(self):
+        # Forced YouTube drew narrower and narrower frames in a window of the same height, and
+        # FLO kept a gap between its player bar and its app bar: converted views alone left the
+        # app laid out as at the old density. Each window now takes its frame again, its insets
+        # go through its tree again, and every view in it lays out again.
+        for android in VERSIONS:
+            joined = added(patch(android), RESCALE)
+            body = method(joined, "public static void rescaleWindowsOf(IBinder token) {")
+            steps = ["rescaleTree(view);",
+                     "relayoutTree(view);",
+                     "root.mForceNextWindowRelayout = true;",
+                     "view.requestApplyInsets();",
+                     "view.requestLayout();",
+                     "view.invalidate();"]
+            at = [body.index(step) for step in steps]
+            # Converted first, so the insets and the layout see the converted sizes.
+            self.assertEqual(at, sorted(at), (android, body))
+            # Still only for this thread's windows.
+            self.assertLess(body.index("if (root.mThread != Thread.currentThread()) {"), at[0], android)
+            relayout = method(joined, "static void relayoutTree(View view) {")
+            # Every view, converted or not: a CoordinatorLayout and its behaviours are the app's.
+            self.assertIn("        view.forceLayout();\n", relayout, android)
+            self.assertIn("relayoutTree(child);", relayout, android)
+            self.assertNotIn("dsaRescale", relayout, android)
+
+    def test_fr4_the_new_rescaling_class_hunk_counts_its_lines(self):
+        for android in VERSIONS:
+            lines = patch(android).splitlines()
+            start = lines.index("+++ b/" + RESCALE)
+            header = re.fullmatch(r"@@ -0,0 \+1,(\d+) @@", lines[start + 1])
+            self.assertTrue(header, (android, lines[start + 1]))
+            body = []
+            for line in lines[start + 2:]:
+                if line.startswith("diff --git"):
+                    break
+                body.append(line)
+            self.assertEqual(int(header.group(1)), len(body), android)
+            self.assertTrue(all(line.startswith("+") for line in body), android)
+
     def test_fr4_layout_parameters_padding_text_and_images_are_converted(self):
         for android in VERSIONS:
             group = added(patch(android), f"{CORE}/view/ViewGroup.java")

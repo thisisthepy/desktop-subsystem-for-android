@@ -43,7 +43,9 @@ use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, to_wire, FromHost, HostAction, HostId,
     MediaButtons, MenuWork, ToHost, WindowHosts,
 };
-use dsa_host_core::compositor::window_monitor::{opening_monitor, remembered_monitor};
+use dsa_host_core::compositor::window_monitor::{
+    opening_monitor, remember_closed_size, remembered_closed_size, remembered_monitor,
+};
 use dsa_host_core::memory::IdleTrim;
 use dsa_host_core::tasks::{AppInfo, TaskEvent, TaskRequest};
 use dsa_protocol::window_host::types::{envelope::Body, Frame, SurfaceAnswer, SurfaceCall};
@@ -1035,6 +1037,28 @@ impl Manager {
                 .and_then(|dir| remembered_monitor(dir, &task.package_name));
             let dpi = opening_monitor(last.as_deref(), monitors).map(|monitor| monitor.dpi);
             self.windows.set_opening_dpi(&task.package_name, dpi);
+            // And the size it closed at there, which it opens at again.
+            let closed = apps
+                .as_deref()
+                .and_then(|dir| remembered_closed_size(dir, &task.package_name));
+            self.windows.set_closed_size(&task.package_name, closed);
+        }
+    }
+
+    /// Remembers the size each window that closed closed at, beside the monitor its window
+    /// host remembers, so that its app's next window opens at it.
+    fn remember_closed_sizes(&mut self) {
+        let closed = self.windows.take_closed_sizes();
+        if closed.is_empty() {
+            return;
+        }
+        let Some(apps) = crate::paths::UserRoot::current().map(|root| root.apps()) else {
+            return;
+        };
+        for (package, size) in closed {
+            if let Err(why) = remember_closed_size(&apps, &package, size) {
+                self.log(&format!("the size {package}'s window closed at: {why}"));
+            }
         }
     }
 
@@ -1369,6 +1393,7 @@ impl Manager {
 
     /// A window that closes is no longer the active window, though it may never say so.
     fn closing(&mut self, changes: &[WindowChange]) {
+        self.remember_closed_sizes();
         let mut changed = false;
         for change in changes {
             if let WindowChange::Close { task_id } = change {

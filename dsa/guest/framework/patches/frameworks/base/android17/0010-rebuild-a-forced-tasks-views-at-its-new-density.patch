@@ -17,6 +17,13 @@ for reuse, is converted when it is added to a parent or a window again, or when 
 reads or sets one of its sizes through the framework, so that a size the app sets at the new
 density is not converted twice.
 
+After converting a window's views, the app lays out again at the window's new bounds: the window
+asks the window manager for its frame again, the window insets go through the tree again (so an
+inset listener works out its padding again, and a CoordinatorLayout hands the insets to its
+behaviours again), and every view in the tree measures and lays out again, so a parent that
+places its children from what it keeps itself (a CoordinatorLayout with an app bar) places them
+again from the converted sizes.
+
 Converted: layout parameters (width, height, margins), padding, minimum size, elevation,
 translation, scroll position, the drawables' density (bitmap, nine-patch, vector, animated vector,
 shape, layer, state list and inset drawables, in place, so an animation keeps running), a text
@@ -155,7 +162,7 @@ diff --git a/core/java/android/view/DsaDensityRescale.java b/core/java/android/v
 new file mode 100644
 --- /dev/null
 +++ b/core/java/android/view/DsaDensityRescale.java
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,165 @@
 +/*
 + * Copyright 2026 The DSA Authors
 + * SPDX-License-Identifier: Apache-2.0
@@ -216,6 +223,11 @@ new file mode 100644
 +     * window, its dialogs and popups) to the density their resources now have, and asks them to
 +     * lay out and draw again. Called by ActivityThread after the activity's resources take a new
 +     * density, before the activity hears of the change.
++     *
++     * <p>Converted views alone are not enough: the app has to lay out again at the window's new
++     * bounds as if it had been inflated at the new density. So each window asks the window
++     * manager for its frame again, the insets go through its tree again, and every view in it
++     * measures and lays out again ({@link #relayoutTree}).
 +     */
 +    public static void rescaleWindowsOf(IBinder token) {
 +        sActive = true;
@@ -230,8 +242,37 @@ new file mode 100644
 +                continue;
 +            }
 +            rescaleTree(view);
++            relayoutTree(view);
++            // The window takes its frame from the window manager again, so its surface follows
++            // the task's bounds at the new density instead of keeping the size it had.
++            root.mForceNextWindowRelayout = true;
++            // The insets go through the tree again: a listener that turns them into padding or
++            // margins (an app bar below the status bar, a player bar above the navigation bar)
++            // works them out again with the converted views, and a CoordinatorLayout hands them
++            // to its behaviours again.
++            view.requestApplyInsets();
 +            view.requestLayout();
 +            view.invalidate();
++        }
++    }
++
++    /**
++     * Makes every view in {@code view}'s tree measure and lay out again, converted or not: a
++     * parent that places its children from what it keeps itself (a CoordinatorLayout, and the
++     * behaviours of its app bar, its scrolling content and its bottom bar) works that out again
++     * from the converted sizes, where it would otherwise keep the places it found at the old
++     * density.
++     */
++    static void relayoutTree(View view) {
++        view.forceLayout();
++        if (view instanceof ViewGroup group) {
++            final int count = group.getChildCount();
++            for (int i = 0; i < count; i++) {
++                final View child = group.getChildAt(i);
++                if (child != null) {
++                    relayoutTree(child);
++                }
++            }
 +        }
 +    }
 +

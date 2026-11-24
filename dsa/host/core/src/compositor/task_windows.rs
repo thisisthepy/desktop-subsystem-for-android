@@ -13,6 +13,7 @@ use super::caption::{reported_tone, CaptionBand, CaptionTone};
 use super::frame_requests::FrameRequests;
 use super::resize_queue::DrawnFrames;
 use super::window_mode::WindowMode;
+use super::window_monitor::ClosedSize;
 use super::window_sizing::{
     density_for_dpi, rescale, scale_between, to_task_length, to_window_rect, to_window_size, Scale,
     ScalingMode, WindowSizing, BASE_DENSITY, DENSITY_AT_BASE_DPI, SETTLE,
@@ -416,6 +417,12 @@ pub struct TaskWindows {
     /// found it before the window opened ([`TaskWindows::set_opening_dpi`]). An app missing
     /// here opens at its task's size, and takes its monitor's once its window says which.
     opening_dpi: BTreeMap<String, u32>,
+    /// The size each app's last window closed at, by package, as the platform remembered it
+    /// ([`TaskWindows::set_closed_size`]): the size its next window opens at.
+    closed_sizes: BTreeMap<String, ClosedSize>,
+    /// The windows that closed since the platform last took them
+    /// ([`TaskWindows::take_closed_sizes`]), each with its app and the size it closed at.
+    just_closed: Vec<(String, ClosedSize)>,
     /// Requests made while a window opened, which go with the next
     /// [`TaskWindows::reconfigures`].
     queued: Vec<TaskRequest>,
@@ -497,6 +504,35 @@ impl TaskWindows {
     /// guest gave a task in place of the one its window asked for.
     pub fn take_notes(&mut self) -> Vec<String> {
         std::mem::take(&mut self.notes)
+    }
+
+    /// The windows that closed since this was last asked, each with its app and the size it
+    /// closed at, for the platform to remember
+    /// ([`super::window_monitor::remember_closed_size`]) and give back with
+    /// [`TaskWindows::set_closed_size`] when the app opens again.
+    pub fn take_closed_sizes(&mut self) -> Vec<(String, ClosedSize)> {
+        std::mem::take(&mut self.just_closed)
+    }
+
+    /// Notes the size the window of `task_id` closes at, while it has one: its task's size,
+    /// at the density the task draws at.
+    fn note_closed(&mut self, task_id: i32) {
+        if !self.has_window(task_id) || self.is_overlay(task_id) {
+            return;
+        }
+        let Some(task) = self.tasks.get(&task_id) else {
+            return;
+        };
+        let closed = ClosedSize {
+            size: (task.bounds.width(), task.bounds.height()),
+            density: task.density_dpi,
+        };
+        if !closed.usable() {
+            return;
+        }
+        let package = task.package_name.clone();
+        self.closed_sizes.insert(package.clone(), closed);
+        self.just_closed.push((package, closed));
     }
 
     /// Whether the task has a window now.
@@ -676,6 +712,24 @@ impl TaskWindows {
             .forced_on(&task.package_name, task.forced_density_available)
     }
 
+    /// Whether the density `task` takes before its window opens goes out forced: its app is
+    /// set to System (forced) scaling and DSA's image carries the framework change for it.
+    ///
+    /// The window decides once, on the task's first report, whether it waits for its
+    /// monitor's density, and that report may not say yet that the guest can give one without
+    /// a relaunch. A window that opened on that report opened on a 125% monitor at the main
+    /// monitor's density, shown scaled, and its task took the monitor's density only later,
+    /// while the window followed the frames the app drew (forced YouTube did exactly this). So
+    /// the opening density of such a task is asked for as an App mode task's is, always
+    /// forced: the agent marks the task first and gives the density only once it is marked, so
+    /// the app is never relaunched for it. A guest that cannot mark it gives no density, and
+    /// the window opens after the wait, scaled, as a System task's.
+    fn opening_forced_of(&self, task: &Task) -> bool {
+        DpiScaling::FORCED_AVAILABLE
+            && self.dpi_scaling_of(task).resolved_for(&task.package_name)
+                == DpiScaling::SystemForced
+    }
+
     /// A new record of how `task`'s window follows its task.
     fn sizing_for(&self, task: &Task) -> WindowSizing {
         let mut sizing = WindowSizing::with_mode(task, self.scaling_of(task));
@@ -757,34 +811,83 @@ impl TaskWindows {
     /// The density `task` is to draw at when its window opens, when that differs from the one
     /// it has: the density of the monitor the window opens on, for a task that follows its
     /// monitor. A task that keeps its density is shown scaled instead, and asked for nothing.
+    ///
+    /// A task of an app set to System (forced) scaling takes it as an App mode task does
+    /// ([`Self::opening_forced_of`]), whatever its first report says of the guest.
     fn opening_density(&self, task: &Task) -> Option<u32> {
         let dpi = *self.opening_dpi.get(&task.package_name)?;
-        if task.density_dpi == 0 || self.scaling_of(task) != ScalingMode::App {
+        let follows = self.scaling_of(task) == ScalingMode::App || self.opening_forced_of(task);
+        if task.density_dpi == 0 || !follows {
             return None;
         }
         let wanted = density_for_dpi(dpi);
         (wanted != task.density_dpi).then_some(wanted)
     }
 
+    /// The size `package`'s last window closed at, as the platform remembered it
+    /// ([`super::window_monitor::remembered_closed_size`]); `None` when nothing is remembered.
+    ///
+    /// Android gives an app's next task the bounds its last window closed at, in the pixels of
+    /// the density its task drew at then, but the new task starts at the main monitor's
+    /// density. A window that closed on a monitor of a lower scale, its task at that monitor's
+    /// density, is opened again from the size it closed at instead of from those pixels read
+    /// at the new density, which made it smaller each time it opened again there.
+    pub fn set_closed_size(&mut self, package: &str, closed: Option<ClosedSize>) {
+        match closed.filter(ClosedSize::usable) {
+            Some(closed) => {
+                self.closed_sizes.insert(package.to_string(), closed);
+            }
+            None => {
+                self.closed_sizes.remove(package);
+            }
+        }
+    }
+
     /// What a new task's window waits for before it opens: its start size
     /// ([`start_size`]), and the density of the monitor it opens on with the size there, the
     /// same size to the eye. `None` when it opens at once, at the size the task has.
+    ///
+    /// When the task is to take another density as it opens, the size it starts from is the
+    /// one its app's last window closed at ([`Self::set_closed_size`]), at the density it was
+    /// taken at: a window that closed on that monitor opens again at the size it closed at.
     fn opening_for(&self, task: &Task) -> Option<PendingOpen> {
-        let start = start_size(task, self.app_windows.get(&task.package_name));
         let density = self.opening_density(task);
-        if start.is_none() && density.is_none() {
-            return None;
-        }
-        let mut size = start.unwrap_or_else(|| window_size(&task.bounds));
-        if let Some(density) = density {
-            size = rescale(size, task.density_dpi, density);
-            if let Some(max) = task.max_size() {
-                size = fit_within(size, max);
-            }
+        let closed = density
+            .and(self.closed_sizes.get(&task.package_name))
+            .copied();
+        // The task as it would be had Android given it the size its window closed at, in the
+        // task's own density: the start size is worked out from it.
+        let reopened = closed.map(|closed| {
+            let mut reopened = task.clone();
+            let (width, height) = rescale(closed.size, closed.density, task.density_dpi);
+            reopened.bounds.right = reopened.bounds.left + width as i32;
+            reopened.bounds.bottom = reopened.bounds.top + height as i32;
+            reopened
+        });
+        let from = reopened.as_ref().unwrap_or(task);
+        let start = start_size(from, self.app_windows.get(&task.package_name));
+        let Some(density) = density else {
+            return start.map(|size| PendingOpen {
+                size,
+                density: None,
+                asked: None,
+            });
+        };
+        let mut size = match (start, closed) {
+            // At the density it closed at, it opens at exactly the size it closed at.
+            (None, Some(closed)) if closed.density == density => closed.size,
+            _ => rescale(
+                start.unwrap_or_else(|| window_size(&from.bounds)),
+                task.density_dpi,
+                density,
+            ),
+        };
+        if let Some(max) = task.max_size() {
+            size = fit_within(size, max);
         }
         Some(PendingOpen {
             size,
-            density,
+            density: Some(density),
             asked: None,
         })
     }
@@ -1058,6 +1161,9 @@ impl TaskWindows {
                 changes
             }
             TaskEvent::Removed { task_id } => {
+                // A window its app closed opens again at the size it closed at, as one the
+                // user closed does.
+                self.note_closed(*task_id);
                 self.displays.remove(task_id);
                 self.sizes.remove(task_id);
                 self.told_sizes.remove(task_id);
@@ -1160,6 +1266,7 @@ impl TaskWindows {
         if !self.has_window(task_id) || self.is_overlay(task_id) {
             return None;
         }
+        self.note_closed(task_id);
         self.closing.insert(task_id);
         Some(TaskRequest::Close { task_id })
     }
@@ -1580,7 +1687,9 @@ impl TaskWindows {
         let forced: BTreeMap<i32, bool> = self
             .pending
             .keys()
-            .filter_map(|task_id| Some((*task_id, self.forced_of(self.tasks.get(task_id)?))))
+            .filter_map(|task_id| {
+                Some((*task_id, self.opening_forced_of(self.tasks.get(task_id)?)))
+            })
             .collect();
         for (task_id, pending) in &mut self.pending {
             if pending.asked.is_none() && !self.closing.contains(task_id) {
@@ -1617,11 +1726,17 @@ impl TaskWindows {
 
     /// Forgets every task, as when the service went away, and closes every window.
     pub fn reset(&mut self) -> Vec<WindowChange> {
-        let changes = self
+        let changes: Vec<WindowChange> = self
             .windows()
             .into_iter()
             .map(|task_id| WindowChange::Close { task_id })
             .collect();
+        // Android keeps the bounds these windows have now for their apps' next tasks.
+        for change in &changes {
+            if let WindowChange::Close { task_id } = change {
+                self.note_closed(*task_id);
+            }
+        }
         self.tasks.clear();
         self.displays.clear();
         self.closing.clear();
@@ -4053,5 +4168,234 @@ mod tests {
         let changes = windows.tick(now + SETTLE);
         assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
         assert!(asks_for_density(&windows.reconfigures(now + SETTLE)));
+    }
+
+    /// Task windows whose app is set to `scaling`, opening on a 125% monitor (120 DPI).
+    fn on_the_secondary(scaling: DpiScaling) -> TaskWindows {
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "com.example.app1".into(),
+            dpi_scaling: scaling,
+            ..AppWindowSettings::default()
+        }]);
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        windows
+    }
+
+    /// FLO's next task as Android starts it after its window closed at 577x815 on the 125%
+    /// monitor: those bounds, at the main monitor's density.
+    fn reopened_flo() -> Task {
+        let mut flo = task(1, "FLO", 577, 815);
+        flo.density_dpi = 262;
+        flo.forced_density_available = true;
+        flo
+    }
+
+    /// The window of `windows`' task 1, opened once the task took `density` and `size` as
+    /// asked: the density first, then the size.
+    fn reopen(
+        windows: &mut TaskWindows,
+        density: u32,
+        size: (u32, u32),
+        forced: bool,
+    ) -> Vec<WindowChange> {
+        let mut flo = reopened_flo();
+        assert_eq!(windows.apply(&TaskEvent::Updated(flo.clone())), vec![]);
+        let requests = windows.reconfigures(Instant::now());
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| matches!(
+                    request,
+                    TaskRequest::SetDensity { .. } | TaskRequest::Resize { .. }
+                ))
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![
+                TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: density,
+                    forced,
+                },
+                TaskRequest::Resize {
+                    task_id: 1,
+                    width: size.0,
+                    height: size.1,
+                    live: false,
+                },
+            ]
+        );
+        flo.density_dpi = density;
+        flo.bounds.right = flo.bounds.left + size.0 as i32;
+        flo.bounds.bottom = flo.bounds.top + size.1 as i32;
+        windows.apply(&TaskEvent::Updated(flo))
+    }
+
+    #[test]
+    fn fr4_a_forced_window_reopens_on_a_lower_scale_monitor_at_the_size_it_closed_at() {
+        // FLO, forced, closed at 577x815 on the 125% monitor, where its task drew at 164 dpi.
+        // Read as pixels at 262 dpi, those bounds made each new window smaller by 164/262:
+        // 577x815, then 361x510, then smaller again.
+        let mut windows = on_the_secondary(DpiScaling::SystemForced);
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (577, 815),
+                density: 164,
+            }),
+        );
+        let changes = reopen(&mut windows, 164, (577, 815), true);
+        assert_eq!(opened_size(&changes), Some((577, 815)), "{changes:?}");
+        assert_eq!(windows.scale(1), (1, 1));
+        // Closed again at that size: the same size is remembered, so it reopens the same way
+        // however often it is closed.
+        assert!(windows.user_closed(1).is_some());
+        assert_eq!(
+            windows.take_closed_sizes(),
+            vec![(
+                "com.example.app1".to_string(),
+                ClosedSize {
+                    size: (577, 815),
+                    density: 164,
+                }
+            )]
+        );
+        assert_eq!(windows.take_closed_sizes(), vec![]);
+        windows.apply(&TaskEvent::Removed { task_id: 1 });
+        assert_eq!(windows.take_closed_sizes(), vec![], "noted once");
+        let changes = reopen(&mut windows, 164, (577, 815), true);
+        assert_eq!(opened_size(&changes), Some((577, 815)), "{changes:?}");
+    }
+
+    #[test]
+    fn fr4_an_app_mode_window_reopens_on_a_lower_scale_monitor_at_the_size_it_closed_at() {
+        let mut windows = on_the_secondary(DpiScaling::App);
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (577, 815),
+                density: 164,
+            }),
+        );
+        let changes = reopen(&mut windows, 164, (577, 815), false);
+        assert_eq!(opened_size(&changes), Some((577, 815)), "{changes:?}");
+        // A window whose app closed it is remembered too.
+        windows.apply(&TaskEvent::Removed { task_id: 1 });
+        assert_eq!(
+            windows.take_closed_sizes(),
+            vec![(
+                "com.example.app1".to_string(),
+                ClosedSize {
+                    size: (577, 815),
+                    density: 164,
+                }
+            )]
+        );
+        // Closed on the main monitor at 952x1318 (262 dpi) and opening on the 125% one: the
+        // same size to the eye there.
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (952, 1318),
+                density: 262,
+            }),
+        );
+        let mut flo = reopened_flo();
+        flo.bounds.right = flo.bounds.left + 952;
+        flo.bounds.bottom = flo.bounds.top + 1318;
+        windows.apply(&TaskEvent::Updated(flo));
+        assert!(windows
+            .reconfigures(Instant::now())
+            .contains(&TaskRequest::Resize {
+                task_id: 1,
+                width: 596,
+                height: 825,
+                live: false,
+            }));
+    }
+
+    #[test]
+    fn fr4_a_window_reopening_on_the_main_monitor_opens_as_before() {
+        // On the main monitor the task keeps the density it starts with: it opens at once, at
+        // the size Android gives it, whatever was remembered.
+        for closed in [
+            ClosedSize {
+                size: (952, 1318),
+                density: 262,
+            },
+            ClosedSize {
+                size: (577, 815),
+                density: 164,
+            },
+        ] {
+            let mut windows = TaskWindows::new();
+            windows.set_app_windows(&[AppWindowSettings {
+                package_name: "com.example.app1".into(),
+                dpi_scaling: DpiScaling::SystemForced,
+                ..AppWindowSettings::default()
+            }]);
+            windows.set_opening_dpi("com.example.app1", Some(192));
+            windows.set_closed_size("com.example.app1", Some(closed));
+            let mut flo = reopened_flo();
+            flo.bounds.right = flo.bounds.left + 952;
+            flo.bounds.bottom = flo.bounds.top + 1318;
+            let changes = windows.apply(&TaskEvent::Updated(flo));
+            assert_eq!(opened_size(&changes), Some((952, 1318)), "{changes:?}");
+            assert!(!asks_for_density(&windows.reconfigures(Instant::now())));
+        }
+        // A task that keeps its density on the 125% monitor is shown scaled, as before.
+        let mut windows = on_the_secondary(DpiScaling::System);
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (577, 815),
+                density: 164,
+            }),
+        );
+        let changes = windows.apply(&TaskEvent::Updated(flo(false)));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+    }
+
+    #[test]
+    fn fr4_a_forced_window_takes_its_monitors_density_forced_before_it_opens() {
+        // Its first report does not say yet that the guest can give a density without a
+        // relaunch: the window still waits for the monitor's density, as an App mode one does,
+        // and the density goes out forced, so the agent marks the task before it gives it.
+        let mut windows = on_the_secondary(DpiScaling::SystemForced);
+        let mut first = flo(false);
+        first.forced_density_available = false;
+        assert_eq!(windows.apply(&TaskEvent::Updated(first.clone())), vec![]);
+        let requests = windows.reconfigures(Instant::now());
+        assert_eq!(
+            requests.first(),
+            Some(&TaskRequest::SetDensity {
+                task_id: 1,
+                density_dpi: 164,
+                forced: true,
+            }),
+            "{requests:?}"
+        );
+        let mut taken = first.clone();
+        taken.forced_density_available = true;
+        taken.density_dpi = 164;
+        taken.bounds.right = taken.bounds.left + 626;
+        taken.bounds.bottom = taken.bounds.top + 1002;
+        let changes = windows.apply(&TaskEvent::Updated(taken));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        assert_eq!(windows.scale(1), (1, 1));
+
+        // A guest that cannot mark the task gives it no density: the window opens after the
+        // wait, scaled as a System one, and the app is never asked for a density unforced,
+        // which would relaunch it.
+        let mut windows = on_the_secondary(DpiScaling::SystemForced);
+        windows.apply(&TaskEvent::Updated(first));
+        let now = Instant::now();
+        windows.reconfigures(now);
+        let changes = windows.tick(now + SETTLE);
+        assert!(opened_size(&changes).is_some(), "{changes:?}");
+        assert!(!windows
+            .reconfigures(now + SETTLE)
+            .iter()
+            .any(|request| matches!(request, TaskRequest::SetDensity { forced: false, .. })));
     }
 }

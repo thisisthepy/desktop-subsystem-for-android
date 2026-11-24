@@ -11,6 +11,14 @@
 //! beside the places of its overlay windows ([`remember_monitor`], [`remembered_monitor`]), so
 //! the app opens there again the next time, also after DSA or Windows started again. A monitor
 //! that is not connected any more is passed over for the main one.
+//!
+//! The size the window closed at is remembered with it, in its task's pixels and at the
+//! density its task drew at then ([`remember_closed_size`], [`remembered_closed_size`]).
+//! Android keeps a closed window's bounds in those pixels too, and gives them to the app's next
+//! task, which starts at the main monitor's density. Read at that density, the pixels of a
+//! window that closed on a monitor of a lower scale made the window smaller each time it
+//! opened again there; read at the density they were taken at, it opens at the size it closed
+//! at.
 
 use std::path::{Path, PathBuf};
 
@@ -48,12 +56,44 @@ pub fn opening_monitor<'a>(
 /// The longest monitor ID kept: a Windows device interface path is under 200 characters.
 pub const MAX_MONITOR_ID: usize = 512;
 
-/// What is remembered of an app's last window.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// What is remembered of an app's last window. A file written before the size was kept has
+/// only the monitor, and one written before the monitor was known only the size.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct LastWindow {
     /// The ID of the monitor it closed on.
+    #[serde(default)]
     monitor: String,
+    /// The size its task had when it closed, in the task's pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<(u32, u32)>,
+    /// The density its task drew at when it closed, which [`LastWindow::size`] is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    density: Option<u32>,
 }
+
+/// The size an app's last window closed at: its task's size in the task's pixels, at the
+/// density the task drew at then.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClosedSize {
+    pub size: (u32, u32),
+    pub density: u32,
+}
+
+impl ClosedSize {
+    /// Whether it describes a window at all: a size and a density, none of them zero, and
+    /// none larger than a task can be.
+    pub fn usable(&self) -> bool {
+        let fits = |length: u32| (1..=MAX_CLOSED_LENGTH).contains(&length);
+        fits(self.size.0) && fits(self.size.1) && (1..=MAX_CLOSED_DENSITY).contains(&self.density)
+    }
+}
+
+/// The longest side of a closed window that is kept, in task pixels: larger than any display a
+/// guest has.
+const MAX_CLOSED_LENGTH: u32 = 65_536;
+
+/// The highest density of a closed window that is kept: far above any monitor's.
+const MAX_CLOSED_DENSITY: u32 = 4_096;
 
 /// Whether `id` can be a monitor's ID: not empty, not too long, one line of text.
 fn usable_id(id: &str) -> bool {
@@ -66,14 +106,51 @@ fn record_file(dir: &Path, package: &str) -> Option<PathBuf> {
     is_valid_package(package).then(|| dir.join(format!("{package}.monitor.json")))
 }
 
+/// What is remembered of `package`'s last window in `dir`, if anything is and it can be read.
+fn last_window(dir: &Path, package: &str) -> Option<LastWindow> {
+    let path = record_file(dir, package)?;
+    crate::settings::read_json::<LastWindow>(&path)
+        .ok()
+        .flatten()
+}
+
 /// The ID of the monitor `package`'s last window closed on, as remembered in `dir`, if one was
 /// and it can be read.
 pub fn remembered_monitor(dir: &Path, package: &str) -> Option<String> {
-    let path = record_file(dir, package)?;
-    let last = crate::settings::read_json::<LastWindow>(&path)
-        .ok()
-        .flatten()?;
+    let last = last_window(dir, package)?;
     usable_id(&last.monitor).then_some(last.monitor)
+}
+
+/// The size `package`'s last window closed at, as remembered in `dir`, if it was and it can be
+/// read.
+pub fn remembered_closed_size(dir: &Path, package: &str) -> Option<ClosedSize> {
+    let last = last_window(dir, package)?;
+    let closed = ClosedSize {
+        size: last.size?,
+        density: last.density?,
+    };
+    closed.usable().then_some(closed)
+}
+
+/// Remembers, in `dir`, that `package`'s last window closed at `closed`. The monitor it closed
+/// on stays as it was remembered.
+pub fn remember_closed_size(dir: &Path, package: &str, closed: ClosedSize) -> Result<(), String> {
+    if !closed.usable() {
+        return Err(format!(
+            "{}x{} at {} dpi is not a window's size; it is not remembered",
+            closed.size.0, closed.size.1, closed.density
+        ));
+    }
+    let path = record_file(dir, package).ok_or_else(|| {
+        format!("{package} is not a package name; its window's size is not remembered")
+    })?;
+    let mut last = last_window(dir, package).unwrap_or_default();
+    if last.size == Some(closed.size) && last.density == Some(closed.density) {
+        return Ok(());
+    }
+    last.size = Some(closed.size);
+    last.density = Some(closed.density);
+    crate::settings::write_json(&path, &last)
 }
 
 /// Remembers, in `dir`, that `package`'s last window closed on the monitor `id`.
@@ -89,12 +166,10 @@ pub fn remember_monitor(dir: &Path, package: &str, id: &str) -> Result<(), Strin
     if remembered_monitor(dir, package).as_deref() == Some(id) {
         return Ok(());
     }
-    crate::settings::write_json(
-        &path,
-        &LastWindow {
-            monitor: id.to_string(),
-        },
-    )
+    // The size the window closed at stays.
+    let mut last = last_window(dir, package).unwrap_or_default();
+    last.monitor = id.to_string();
+    crate::settings::write_json(&path, &last)
 }
 
 /// Where a window goes on the monitor whose work area is `to`, when the desktop put it at the
@@ -201,6 +276,61 @@ mod tests {
         assert!(remember_monitor(&dir, flo, "").is_err());
         assert!(remember_monitor(&dir, flo, "two\nlines").is_err());
         assert!(remember_monitor(&dir, flo, &"x".repeat(MAX_MONITOR_ID + 1)).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr4_the_size_an_apps_last_window_closed_at_is_remembered_with_its_monitor() {
+        let dir = std::env::temp_dir().join(format!(
+            "dsa-window-closed-size-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let flo = "skplanet.musicmate";
+        assert_eq!(remembered_closed_size(&dir, flo), None);
+        // A file from before the size was kept has only the monitor.
+        std::fs::write(
+            dir.join(format!("{flo}.monitor.json")),
+            r#"{ "monitor": "right" }"#,
+        )
+        .unwrap();
+        assert_eq!(remembered_monitor(&dir, flo).as_deref(), Some("right"));
+        assert_eq!(remembered_closed_size(&dir, flo), None);
+        // FLO closed at 577x815 at 164 dpi, the density of a 125% monitor.
+        let closed = ClosedSize {
+            size: (577, 815),
+            density: 164,
+        };
+        remember_closed_size(&dir, flo, closed).unwrap();
+        assert_eq!(remembered_closed_size(&dir, flo), Some(closed));
+        assert_eq!(remembered_monitor(&dir, flo).as_deref(), Some("right"));
+        // The monitor it closed on is written after the size; the size stays.
+        remember_monitor(&dir, flo, "left").unwrap();
+        assert_eq!(remembered_monitor(&dir, flo).as_deref(), Some("left"));
+        assert_eq!(remembered_closed_size(&dir, flo), Some(closed));
+        // Each app has its own.
+        assert_eq!(remembered_closed_size(&dir, "com.example.notes"), None);
+        // Nothing is kept for a size that is no size.
+        for bad in [
+            ClosedSize {
+                size: (0, 815),
+                density: 164,
+            },
+            ClosedSize {
+                size: (577, 815),
+                density: 0,
+            },
+            ClosedSize {
+                size: (577, MAX_CLOSED_LENGTH + 1),
+                density: 164,
+            },
+        ] {
+            assert!(remember_closed_size(&dir, flo, bad).is_err());
+        }
+        assert!(remember_closed_size(&dir, "../evil", closed).is_err());
+        assert_eq!(remembered_closed_size(&dir, flo), Some(closed));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
