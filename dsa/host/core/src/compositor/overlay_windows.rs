@@ -38,7 +38,11 @@
 //!
 //! **Its size** is what the app gave it, at the density of the monitor it is on, and never
 //! more than that monitor's work area: a larger one is shown smaller, in proportion
-//! ([`shown_size`]).
+//! ([`shown_size`]). The window manager works out the scale from the density the overlay is
+//! drawn at: the guest display's, or, for an app set to System (forced) scaling, the density
+//! its task was given, which its process draws its overlays at too, wherever they are. The
+//! window's size, its plane, the pointer inside it and a drag across monitors all take that
+//! one scale.
 
 use std::path::{Path, PathBuf};
 

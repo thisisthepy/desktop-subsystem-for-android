@@ -146,16 +146,37 @@ struct Overlay {
     window: bool,
     /// The DPI of the monitor its window reported; 0 until it has.
     dpi: u32,
+    /// The density its app's process draws it at, when that is not the guest display's: the
+    /// density the app's task was given without a relaunch, for an app set to System (forced)
+    /// scaling ([`TaskWindows::overlay_density`]). 0 when it is drawn at the display's.
+    drawn_at: u32,
 }
 
 impl Overlay {
-    /// How large the window shows each of the overlay's pixels: the overlay is drawn at the
-    /// guest display's density, and shown the size it would be at its monitor's.
+    /// The density the overlay is drawn at: the guest display's, which the guest reports for
+    /// it, or the one its app's process draws at instead.
+    fn density(&self) -> u32 {
+        if self.drawn_at != 0 {
+            self.drawn_at
+        } else {
+            self.task.density_dpi
+        }
+    }
+
+    /// How large the window shows each of the overlay's pixels: the overlay is drawn at its
+    /// density ([`Self::density`]), and shown the size it would be at its monitor's.
+    ///
+    /// An app given a density of its own without a relaunch lays out its overlays at that
+    /// density too, as its process has it, while the guest reports them at the display's.
+    /// Taken at the display's, the floating lyrics of FLO, set to System (forced) scaling on a
+    /// 125% monitor beside a 200% main one, were drawn at 164 dpi and shown as if at 262: 0.61
+    /// of their size beside FLO's window.
     fn scale(&self) -> Scale {
-        if self.dpi == 0 || self.task.density_dpi == 0 {
+        let density = self.density();
+        if self.dpi == 0 || density == 0 {
             return (1, 1);
         }
-        scale_between(density_for_dpi(self.dpi), self.task.density_dpi)
+        scale_between(density_for_dpi(self.dpi), density)
     }
 
     /// The window's client size: the overlay's size at its scale.
@@ -570,6 +591,7 @@ impl TaskWindows {
                 .as_ref()
                 .filter(|_| had_window && shows)
                 .map_or(0, |overlay| overlay.dpi),
+            drawn_at: self.overlay_density(&task.package_name),
         };
         self.overlays.insert(task_id, now.clone());
         match (previous.filter(|_| had_window), shows) {
@@ -610,6 +632,49 @@ impl TaskWindows {
             return Some(Vec::new());
         }
         Some(overlay.size_changes())
+    }
+
+    /// The density `package`'s process draws its overlays at, when that is not the guest
+    /// display's; 0 when it is.
+    ///
+    /// The guest gives a task of an app set to System (forced) scaling the density of its
+    /// window's monitor without relaunching the app, and the app's process then draws at that
+    /// density, its overlays included, wherever they are on the desktop. So that is the
+    /// density of the app's first task, in task ID order, whose density goes out forced. An
+    /// app of any other choice, or with no such task, draws its overlays at the display's.
+    fn overlay_density(&self, package: &str) -> u32 {
+        self.tasks
+            .values()
+            .filter(|task| task.package_name == package && task.density_dpi != 0)
+            .find(|task| self.forced_of(task))
+            .map_or(0, |task| task.density_dpi)
+    }
+
+    /// The overlays whose app draws them at another density now: its task was given another
+    /// (its window went to a monitor of another scale), it ended, or the user chose another
+    /// way for the app to follow a monitor. Returns what their windows must hear: their size
+    /// and scale at the new density.
+    fn redraw_overlays(&mut self) -> Vec<WindowChange> {
+        let drawn: Vec<(i32, u32)> = self
+            .overlays
+            .iter()
+            .map(|(task_id, overlay)| (*task_id, self.overlay_density(&overlay.task.package_name)))
+            .collect();
+        let mut changes = Vec::new();
+        for (task_id, drawn_at) in drawn {
+            let Some(overlay) = self.overlays.get_mut(&task_id) else {
+                continue;
+            };
+            if overlay.drawn_at == drawn_at {
+                continue;
+            }
+            let before = (overlay.window_size(), overlay.scale());
+            overlay.drawn_at = drawn_at;
+            if overlay.window && before != (overlay.window_size(), overlay.scale()) {
+                changes.extend(overlay.size_changes());
+            }
+        }
+        changes
     }
 
     /// The package of the task's root activity, while the task is known.
@@ -659,7 +724,9 @@ impl TaskWindows {
             .map(|app| (app.package_name.clone(), app.clone()))
             .collect();
         self.app_windows_known = true;
-        self.retell_modes()
+        let mut changes = self.retell_modes();
+        changes.extend(self.redraw_overlays());
+        changes
     }
 
     /// Takes where every app without its own choice shows its full screen, which the windows
@@ -948,7 +1015,9 @@ impl TaskWindows {
                 return self.apply(&TaskEvent::Updated(kept));
             }
         }
-        let changes = self.apply_event(event);
+        let mut changes = self.apply_event(event);
+        // A task of an app that draws its overlays at its own density may have taken another.
+        changes.extend(self.redraw_overlays());
         self.track_frames(&changes)
     }
 
@@ -3792,6 +3861,156 @@ mod tests {
             ]
         );
         assert_eq!(windows.scale(LYRICS), (82, 131));
+    }
+
+    /// FLO's task 21, 785 by 937, drawing at `density`, on a guest that can (`available`) or
+    /// cannot give it a density without a relaunch.
+    fn flo_task(density: u32, available: bool) -> Task {
+        Task {
+            task_id: 21,
+            bounds: Bounds {
+                left: 0,
+                top: 0,
+                right: 785,
+                bottom: 937,
+            },
+            package_name: "skplanet.musicmate".into(),
+            label: "FLO".into(),
+            density_dpi: density,
+            max_width: 3840,
+            max_height: 3840,
+            forced_density_available: available,
+            ..Task::default()
+        }
+    }
+
+    /// Task windows with FLO set to `scaling` and its task drawing at `density`, and FLO's
+    /// floating lyrics, 318 by 86 as Android reports them at the display's 262 dpi, in a
+    /// window that opened on a monitor of `dpi`. Returns the size that window opened at.
+    fn flo_lyrics(
+        scaling: DpiScaling,
+        density: u32,
+        available: bool,
+        dpi: u32,
+    ) -> (TaskWindows, (u32, u32)) {
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: scaling,
+            ..AppWindowSettings::default()
+        }]);
+        windows.apply(&TaskEvent::Updated(flo_task(density, available)));
+        windows.apply(&TaskEvent::Updated(lyrics(158, 82, 318, 86)));
+        let (size, _, _) = windows
+            .window_opened(LYRICS, dpi)
+            .expect("an overlay window");
+        (windows, size)
+    }
+
+    /// What the lyrics' window hears of its size and scale.
+    fn lyrics_sizes(changes: Vec<WindowChange>) -> Vec<WindowChange> {
+        changes
+            .into_iter()
+            .filter(|change| {
+                matches!(
+                    change,
+                    WindowChange::Resize {
+                        task_id: LYRICS,
+                        ..
+                    } | WindowChange::TaskSize {
+                        task_id: LYRICS,
+                        ..
+                    }
+                )
+            })
+            .collect()
+    }
+
+    fn lyrics_sized(width: u32, height: u32, scale: Scale) -> Vec<WindowChange> {
+        vec![
+            WindowChange::Resize {
+                task_id: LYRICS,
+                width,
+                height,
+            },
+            WindowChange::TaskSize {
+                task_id: LYRICS,
+                width: 318,
+                height: 86,
+                max: None,
+                min: None,
+                scale,
+            },
+        ]
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_a_forced_app_is_shown_at_the_density_its_task_draws_at() {
+        // FLO in System (forced) on the 125% monitor (120 dpi): its task draws at 164 dpi, 1:1
+        // there, and so does its process draw the lyrics. They are shown 1:1 too, the size they
+        // have beside FLO's window in Android (0.405 of its width), not 164/262 of it.
+        let (windows, size) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        assert_eq!(size, (318, 86));
+        assert_eq!(windows.scale(LYRICS), (1, 1));
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_a_forced_app_on_another_monitor_keeps_its_tasks_density() {
+        // The lyrics dragged onto the 200% main monitor (192 dpi) while FLO's window stays on
+        // the 125% one: FLO's process still draws them at 164 dpi, so they are shown at 262
+        // over 164, the size they would be drawn at 262.
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        let (changes, requests) = windows.window_dpi_changed(LYRICS, 192);
+        assert!(requests.is_empty());
+        assert_eq!(changes, lyrics_sized(508, 137, (131, 82)));
+        assert_eq!(windows.scale(LYRICS), (131, 82));
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_an_app_that_is_not_forced_is_shown_at_the_displays_density() {
+        // An app given its monitor's density with a relaunch, and a forced one on a guest that
+        // cannot give it without one: their overlays are drawn at the display's 262 dpi, and
+        // shown at 164 over 262 on the 125% monitor as before.
+        for (scaling, available) in [
+            (DpiScaling::App, true),
+            (DpiScaling::Auto, true),
+            (DpiScaling::SystemForced, false),
+        ] {
+            let (windows, size) = flo_lyrics(scaling, 164, available, 120);
+            assert_eq!(size, (199, 54), "{scaling:?} {available}");
+            assert_eq!(windows.scale(LYRICS), (82, 131), "{scaling:?} {available}");
+        }
+        // An overlay of an app with no task is drawn at the display's density too.
+        let mut windows = TaskWindows::new();
+        windows.apply(&TaskEvent::Updated(lyrics(158, 82, 318, 86)));
+        let (size, _, _) = windows.window_opened(LYRICS, 120).unwrap();
+        assert_eq!(size, (199, 54));
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_a_forced_app_follows_its_tasks_new_density() {
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        // FLO's window goes to the 200% monitor and its task takes 262 dpi: the lyrics, still
+        // on the 125% monitor, are drawn at 262 now and shown at 164 over 262.
+        let changes = windows.apply(&TaskEvent::Updated(flo_task(262, true)));
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(199, 54, (82, 131)));
+        // Back on the 125% monitor at 164: 1:1 again.
+        let changes = windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(318, 86, (1, 1)));
+        // The same density again changes nothing.
+        let changes = windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        assert_eq!(lyrics_sizes(changes), vec![]);
+        // The user sets FLO to another mode: its process is given no density of its own from
+        // now on, and the lyrics are taken at the display's again.
+        let changes = windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::App,
+            ..AppWindowSettings::default()
+        }]);
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(199, 54, (82, 131)));
+        // FLO's task ends while the lyrics stay: at the display's density, nothing to change.
+        let changes = windows.apply(&TaskEvent::Removed { task_id: 21 });
+        assert_eq!(lyrics_sizes(changes), vec![]);
     }
 
     #[test]
