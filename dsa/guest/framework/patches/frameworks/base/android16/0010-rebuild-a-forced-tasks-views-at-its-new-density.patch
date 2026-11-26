@@ -28,9 +28,24 @@ Converted: layout parameters (width, height, margins), padding, minimum size, el
 translation, scroll position, the drawables' density (bitmap, nine-patch, vector, animated vector,
 shape, layer, state list and inset drawables, in place, so an animation keeps running), a text
 view's text size, line spacing, shadow, size limits, auto-size range and compound drawables, and
-an image view's drawable and size limits. Not converted: sizes kept in fields of the app's own
-classes or of its libraries, sizes in text spans, an image matrix, and drawables an app made
-without resources.
+an image view's drawable and size limits.
+
+A view of the app's own class (or of a library the app ships) may also keep in its own fields
+sizes its constructor read from its XML attributes, and lay out with them ever after: a sliding
+panel reads its collapsed height (FLO's player panel, 112 dp) into a field once, so after a move
+from 262 to 164 dpi it stayed 183 px instead of 115: the player bar stood 68 px above the tab bar
+it sits on, and after a move the other way it slid 68 px behind it. The first time such a view is
+converted, the element it was inflated from is read again from its layout (the view's source
+layout, which every view records), the dimensions written on it and in its style are worked out
+at the old density, and each int or float field of the view's own classes that holds one of them
+is converted with it, the same fields every time after that. 0 and one pixel either way are never
+matched. This runs only when a view is converted, so a process that is never given a forced
+density change does nothing more and keeps nothing more; AssetManager.getStyleAttributes becomes
+a hidden public method for it.
+
+Not converted: sizes the app works out itself (from the display metrics, from resources it reads
+in code, or in objects other than the view), sizes that come only from a view's default style,
+sizes in text spans, an image matrix, and drawables an app made without resources.
 
 Nothing changes in a process until the first such change reaches it, and nothing changes for an
 activity that handles density itself or for any task that is not marked.
@@ -158,11 +173,26 @@ diff --git a/core/java/android/app/servertransaction/ActivityConfigurationChange
 +                + (mDsaRescaleViews ? ",dsaRescaleViews" : "") + "}";
      }
  }
+diff --git a/core/java/android/content/res/AssetManager.java b/core/java/android/content/res/AssetManager.java
+--- a/core/java/android/content/res/AssetManager.java
++++ b/core/java/android/content/res/AssetManager.java
+@@ -813,8 +813,10 @@ public final class AssetManager implements AutoCloseable {
+      * a &lt;style&gt; resource.
+      * @param resId The resource ID of the style
+      * @return An array of attribute IDs.
++     * @hide DSA: public for android.view.DsaDensityRescale, which reads the sizes in a view's
++     * style to convert the fields a view of the app's keeps them in.
+      */
+-    @AttrRes int[] getStyleAttributes(@StyleRes int resId) {
++    public @AttrRes int[] getStyleAttributes(@StyleRes int resId) {
+         synchronized (this) {
+             ensureValidLocked();
+             return nativeGetStyleAttributes(mObject, resId);
 diff --git a/core/java/android/view/DsaDensityRescale.java b/core/java/android/view/DsaDensityRescale.java
 new file mode 100644
 --- /dev/null
 +++ b/core/java/android/view/DsaDensityRescale.java
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,445 @@
 +/*
 + * Copyright 2026 The DSA Authors
 + * SPDX-License-Identifier: Apache-2.0
@@ -172,7 +202,21 @@ new file mode 100644
 +
 +import android.content.Context;
 +import android.content.res.Resources;
++import android.content.res.TypedArray;
++import android.content.res.XmlResourceParser;
 +import android.os.IBinder;
++import android.util.DisplayMetrics;
++import android.util.Log;
++import android.util.TypedValue;
++
++import org.xmlpull.v1.XmlPullParser;
++
++import java.lang.reflect.Field;
++import java.lang.reflect.Modifier;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.HashMap;
++import java.util.WeakHashMap;
 +
 +/**
 + * DSA: rebuilds the views of an activity at a new density without relaunching it.
@@ -199,10 +243,21 @@ new file mode 100644
 + * elevation, translation, scroll position, the density of the drawables a view shows (bitmap,
 + * nine-patch, vector, shape, layer, state list and inset drawables), a text view's text size,
 + * line spacing, shadow, size limits, auto-size range and compound drawables, and an image
-+ * view's drawable and size limits. What it cannot convert: sizes kept in fields of the app's
-+ * own classes or of its libraries (a custom view's measurements, an androidx Toolbar's insets,
-+ * a RecyclerView ItemDecoration's spacing, a ConstraintLayout guideline), sizes in text spans,
-+ * an image matrix, and drawables an app made itself without resources.
++ * view's drawable and size limits.
++ *
++ * <p>A view of the app's own class (or of a library it ships) may also keep in its own fields
++ * sizes its constructor read from its XML attributes, and lay out with them ever after: the
++ * collapsed height of a sliding panel. The first time such a view is converted, the element it
++ * was inflated from is read again from its layout ({@link View#getSourceLayoutResId}), the
++ * sizes written on it and in its style are worked out at the old density, and each int or float
++ * field of the view's own classes that holds one of them is converted with it, the same fields
++ * every time after that ({@link #rescaleAttributeFields}). Nothing of this runs, and nothing is
++ * kept, in a process that never converts a view.
++ *
++ * <p>What it cannot convert: sizes an app works out itself (from the display metrics, from
++ * resources it reads in code, or in objects other than the view), sizes that come only from a
++ * view's default style, sizes in text spans, an image matrix, and drawables an app made itself
++ * without resources.
 + *
 + * <p>Nothing changes in a process until the first such change reaches it, and no view of any
 + * other task is touched.
@@ -231,6 +286,9 @@ new file mode 100644
 +     */
 +    public static void rescaleWindowsOf(IBinder token) {
 +        sActive = true;
++        // The views of one layout read it once in this pass (layoutSizes).
++        sPassThread = Thread.currentThread();
++        sPassSizes = new HashMap<>();
 +        for (ViewRootImpl root : WindowManagerGlobal.getInstance().getRootViews(token)) {
 +            // A window of another thread is converted when that thread next adds or touches
 +            // its views; a view may only be changed on the thread that owns its window.
@@ -254,6 +312,8 @@ new file mode 100644
 +            view.requestLayout();
 +            view.invalidate();
 +        }
++        sPassSizes = null;
++        sPassThread = null;
 +    }
 +
 +    /**
@@ -298,6 +358,256 @@ new file mode 100644
 +        if (sActive && view != null) {
 +            rescaleTree(view);
 +        }
++    }
++
++    /**
++     * What finding a view's own fields keeps, in a class of its own so that it is made only the
++     * first time a view is converted: a process that is never given a forced change of density
++     * never loads it.
++     */
++    private static final class AttributeFields {
++        /**
++         * The fields of each converted view of the app's own class that hold a size from its
++         * layout's attributes ({@link #NONE} when none does), found the first time the view is
++         * converted. Weak, so it keeps no view alive.
++         */
++        static final WeakHashMap<View, Field[]> sFields = new WeakHashMap<>();
++        static final Field[] NONE = new Field[0];
++        static final float[] NO_SIZES = new float[0];
++    }
++
++    private static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
++
++    /** During {@link #rescaleWindowsOf}, on its thread: the sizes of each layout element read. */
++    private static HashMap<String, float[]> sPassSizes;
++    private static Thread sPassThread;
++
++    /**
++     * Converts the fields of {@code view}'s own classes that hold a size its constructor read
++     * from its XML attributes, from {@code fromDpi} to {@code toDpi}: a sliding panel's
++     * collapsed height, which the panel reads into a field of its own and lays out with ever
++     * after. The fields are found the first time the view is converted, while they still hold
++     * the sizes at the density the view was made at ({@link #layoutSizes},
++     * {@link #isAttributeSize}), and the same fields are converted every time after that. A view
++     * of the framework's own class keeps no such field: what it keeps, it converts itself.
++     */
++    static void rescaleAttributeFields(View view, int fromDpi, int toDpi) {
++        if (isFrameworkClass(view.getClass())) {
++            return;
++        }
++        Field[] fields;
++        synchronized (AttributeFields.sFields) {
++            fields = AttributeFields.sFields.get(view);
++        }
++        if (fields == null) {
++            fields = findAttributeFields(view, layoutSizes(view, fromDpi));
++            synchronized (AttributeFields.sFields) {
++                AttributeFields.sFields.put(view, fields);
++            }
++        }
++        for (Field field : fields) {
++            try {
++                if (field.getType() == int.class) {
++                    field.setInt(view, scale(field.getInt(view), fromDpi, toDpi));
++                } else {
++                    field.setFloat(view, scale(field.getFloat(view), fromDpi, toDpi));
++                }
++            } catch (ReflectiveOperationException | RuntimeException e) {
++                Log.w("DsaDensityRescale", "could not convert " + field + " of " + view, e);
++            }
++        }
++    }
++
++    /**
++     * The sizes, in pixels at {@code fromDpi}, written on the element of {@code view}'s layout it
++     * was inflated from and in that element's style. The element is the one whose class is the
++     * view's (or, for a short tag, the framework class the inflater made the app's subclass of,
++     * as AppCompat does for a TextView) and whose id is the view's; the root of a layout matches
++     * whatever its id, which an include may have replaced.
++     */
++    static float[] layoutSizes(View view, int fromDpi) {
++        final int layout = view.getSourceLayoutResId();
++        final Resources res = view.getResources();
++        if (layout == 0 || res == null || fromDpi <= 0) {
++            return AttributeFields.NO_SIZES;
++        }
++        final String key = layout + ":" + view.getClass().getName() + ":" + view.getId() + ":"
++                + fromDpi;
++        final HashMap<String, float[]> pass =
++                sPassThread == Thread.currentThread() ? sPassSizes : null;
++        final float[] known = pass != null ? pass.get(key) : null;
++        if (known != null) {
++            return known;
++        }
++        final DisplayMetrics now = res.getDisplayMetrics();
++        final DisplayMetrics old = new DisplayMetrics();
++        old.setTo(now);
++        old.densityDpi = fromDpi;
++        old.density = fromDpi / (float) DisplayMetrics.DENSITY_DEFAULT;
++        old.scaledDensity = now.density > 0 ? now.scaledDensity * old.density / now.density
++                : old.density;
++        float[] sizes = AttributeFields.NO_SIZES;
++        try (XmlResourceParser parser = res.getLayout(layout)) {
++            int type;
++            while ((type = parser.next()) != XmlPullParser.END_DOCUMENT) {
++                if (type == XmlPullParser.START_TAG && isElementOf(view, parser)) {
++                    sizes = addSizes(view, res, parser, old, sizes);
++                }
++            }
++        } catch (Exception e) {
++            // A layout that cannot be read again leaves the view's own fields as they are.
++            Log.w("DsaDensityRescale", "could not read the layout of " + view, e);
++        }
++        if (pass != null) {
++            pass.put(key, sizes);
++        }
++        return sizes;
++    }
++
++    /** Whether the element {@code parser} is at is the one {@code view} was inflated from. */
++    private static boolean isElementOf(View view, XmlResourceParser parser) {
++        String name = parser.getName();
++        if ("view".equals(name)) {
++            name = parser.getAttributeValue(null, "class");
++        }
++        if (name == null) {
++            return false;
++        }
++        final Class<?> c = view.getClass();
++        if (name.indexOf('.') >= 0) {
++            if (!name.equals(c.getName())) {
++                return false;
++            }
++        } else {
++            // A short name is a framework class the inflater may have made the app's subclass
++            // of (AppCompat makes an AppCompatTextView for a TextView): the first framework
++            // class above the view's must be the one named.
++            Class<?> framework = c;
++            while (framework != null && !isFrameworkClass(framework)) {
++                framework = framework.getSuperclass();
++            }
++            if (framework == null || !name.equals(framework.getSimpleName())) {
++                return false;
++            }
++        }
++        final int id = view.getId();
++        return id == View.NO_ID || parser.getDepth() == 1
++                || parser.getAttributeResourceValue(ANDROID_NS, "id", View.NO_ID) == id;
++    }
++
++    /**
++     * {@code sizes} and the sizes on the element {@code parser} is at: each attribute written on
++     * it or in its style whose value is a dimension, worked out with {@code old}.
++     */
++    private static float[] addSizes(View view, Resources res, XmlResourceParser parser,
++            DisplayMetrics old, float[] sizes) {
++        final int count = parser.getAttributeCount();
++        int[] attrs = new int[count];
++        int n = 0;
++        for (int i = 0; i < count; i++) {
++            final int attr = parser.getAttributeNameResource(i);
++            if (attr != 0) {
++                attrs[n++] = attr;
++            }
++        }
++        final int style = parser.getStyleAttribute();
++        final int[] styled = style != 0 ? res.getAssets().getStyleAttributes(style) : null;
++        if (styled != null) {
++            attrs = Arrays.copyOf(attrs, n + styled.length);
++            System.arraycopy(styled, 0, attrs, n, styled.length);
++            n += styled.length;
++        }
++        if (n == 0) {
++            return sizes;
++        }
++        // Theme.obtainStyledAttributes takes the attributes in ascending order, each once.
++        attrs = Arrays.copyOf(attrs, n);
++        Arrays.sort(attrs);
++        int unique = 0;
++        for (int i = 0; i < n; i++) {
++            if (unique == 0 || attrs[unique - 1] != attrs[i]) {
++                attrs[unique++] = attrs[i];
++            }
++        }
++        attrs = Arrays.copyOf(attrs, unique);
++        final TypedArray a = view.getContext().obtainStyledAttributes(parser, attrs);
++        try {
++            final TypedValue value = new TypedValue();
++            for (int i = 0; i < unique; i++) {
++                if (a.getValue(i, value) && value.type == TypedValue.TYPE_DIMENSION) {
++                    final float size = TypedValue.complexToDimension(value.data, old);
++                    if (Math.abs(size) > 1f) {
++                        sizes = Arrays.copyOf(sizes, sizes.length + 1);
++                        sizes[sizes.length - 1] = size;
++                    }
++                }
++            }
++        } finally {
++            a.recycle();
++        }
++        return sizes;
++    }
++
++    /**
++     * The int and float fields of {@code view}'s own classes, from its class up to the first
++     * class of the framework's, that hold one of the sizes in {@code sizes}.
++     */
++    private static Field[] findAttributeFields(View view, float[] sizes) {
++        if (sizes.length == 0) {
++            return AttributeFields.NONE;
++        }
++        final ArrayList<Field> found = new ArrayList<>();
++        for (Class<?> c = view.getClass(); c != null && !isFrameworkClass(c);
++                c = c.getSuperclass()) {
++            final Field[] fields;
++            try {
++                fields = c.getDeclaredFields();
++            } catch (RuntimeException | LinkageError e) {
++                continue;
++            }
++            for (Field field : fields) {
++                final Class<?> type = field.getType();
++                if (Modifier.isStatic(field.getModifiers())
++                        || (type != int.class && type != float.class)) {
++                    continue;
++                }
++                try {
++                    field.setAccessible(true);
++                    final float value = type == int.class
++                            ? field.getInt(view) : field.getFloat(view);
++                    if (isAttributeSize(value, sizes, sizes.length)) {
++                        found.add(field);
++                    }
++                } catch (ReflectiveOperationException | RuntimeException e) {
++                    // A field that cannot be read is left as it is.
++                }
++            }
++        }
++        return found.isEmpty() ? AttributeFields.NONE : found.toArray(AttributeFields.NONE);
++    }
++
++    /**
++     * Whether {@code value}, held by a field of a view's own class, is one of the {@code count}
++     * sizes in {@code sizes} that its layout gave it: as worked out, or cut or rounded to whole
++     * pixels as the view kept it. 0 and one pixel either way never are: a field holds them for
++     * any reason, and they stay as they are at any density.
++     */
++    static boolean isAttributeSize(float value, float[] sizes, int count) {
++        if (Math.abs(value) <= 1f) {
++            return false;
++        }
++        for (int i = 0; i < count; i++) {
++            final float size = sizes[i];
++            if (value == size || value == (int) size || value == Math.round(size)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    /** Whether {@code c} is the framework's own: loaded from the boot class path, not the app. */
++    static boolean isFrameworkClass(Class<?> c) {
++        return c.getClassLoader() == View.class.getClassLoader();
 +    }
 +
 +    /** The density of {@code context}'s resources, or 0 for a context without any. */
@@ -403,7 +713,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          mLayoutParams = params;
          resolveLayoutParams();
          if (mParent instanceof ViewGroup) {
-@@ -20961,6 +20977,107 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -20961,6 +20977,110 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
          requestLayout();
      }
  
@@ -457,9 +767,10 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
 +
 +    /**
 +     * DSA: converts the sizes this view keeps in pixels from {@code fromDpi} to {@code toDpi}:
-+     * its layout parameters, padding, minimum size, elevation, translation, scroll position and
-+     * the density of its background and foreground. A subclass that keeps more converts those
-+     * too and calls through.
++     * its layout parameters, padding, minimum size, elevation, translation, scroll position, the
++     * density of its background and foreground, and the fields of its own classes that hold a
++     * size from its layout's attributes. A subclass that keeps more converts those too and calls
++     * through.
 +     * @hide
 +     */
 +    protected void onDsaRescale(int fromDpi, int toDpi) {
@@ -506,12 +817,14 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
 +            mForegroundInfo.mBoundsChanged = true;
 +        }
 +        invalidateOutline();
++        // The sizes a view of the app's own class keeps in its own fields, from its layout.
++        DsaDensityRescale.rescaleAttributeFields(this, fromDpi, toDpi);
 +    }
 +
      /**
       * Resolve the layout parameters depending on the resolved layout direction
       *
-@@ -20980,6 +21097,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -20980,6 +21100,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       * @param y the y position to scroll to
       */
      public void scrollTo(int x, int y) {
@@ -519,7 +832,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          if (mScrollX != x || mScrollY != y) {
              int oldX = mScrollX;
              int oldY = mScrollY;
-@@ -26665,6 +26783,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -26665,6 +26786,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @Deprecated
      public void setBackgroundDrawable(Drawable background) {
@@ -527,7 +840,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          computeOpaqueFlags();
  
          if (background == mBackground) {
-@@ -26949,6 +27068,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -26949,6 +27071,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       * @attr ref android.R.styleable#View_foreground
       */
      public void setForeground(Drawable foreground) {
@@ -535,7 +848,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          if (mForegroundInfo == null) {
              if (foreground == null) {
                  // Nothing to do.
-@@ -27291,6 +27411,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27291,6 +27414,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       * @param bottom the bottom padding in pixels
       */
      public void setPadding(int left, int top, int right, int bottom) {
@@ -543,7 +856,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          resetResolvedPaddingInternal();
  
          mUserPaddingStart = UNDEFINED_PADDING;
-@@ -27385,6 +27506,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27385,6 +27509,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       * @param bottom the bottom padding in pixels
       */
      public void setPaddingRelative(int start, int top, int end, int bottom) {
@@ -551,7 +864,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          resetResolvedPaddingInternal();
  
          mUserPaddingStart = start;
-@@ -27425,6 +27547,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27425,6 +27550,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @InspectableProperty
      public int getPaddingTop() {
@@ -559,7 +872,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          return mPaddingTop;
      }
  
-@@ -27437,6 +27560,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27437,6 +27563,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @InspectableProperty
      public int getPaddingBottom() {
@@ -567,7 +880,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          return mPaddingBottom;
      }
  
-@@ -27449,6 +27573,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27449,6 +27576,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @InspectableProperty
      public int getPaddingLeft() {
@@ -575,7 +888,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          if (!isPaddingResolved()) {
              resolvePadding();
          }
-@@ -27463,6 +27588,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27463,6 +27591,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       * @return the start padding in pixels
       */
      public int getPaddingStart() {
@@ -583,7 +896,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          if (!isPaddingResolved()) {
              resolvePadding();
          }
-@@ -27479,6 +27605,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27479,6 +27608,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @InspectableProperty
      public int getPaddingRight() {
@@ -591,7 +904,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          if (!isPaddingResolved()) {
              resolvePadding();
          }
-@@ -27493,6 +27620,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -27493,6 +27623,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       * @return the end padding in pixels
       */
      public int getPaddingEnd() {
@@ -599,7 +912,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          if (!isPaddingResolved()) {
              resolvePadding();
          }
-@@ -28860,6 +28988,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -28860,6 +28991,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @RemotableViewMethod
      public void setMinimumHeight(int minHeight) {
@@ -607,7 +920,7 @@ diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
          mMinHeight = minHeight;
          requestLayout();
      }
-@@ -28891,6 +29020,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+@@ -28891,6 +29023,7 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
       */
      @RemotableViewMethod
      public void setMinimumWidth(int minWidth) {
