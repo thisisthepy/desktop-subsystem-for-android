@@ -44,7 +44,7 @@ inline bool wantsCpuUpload(uint64_t usage) {
     return (usage & kUploadUsageCpuWriteMask) != 0 && (usage & kUploadUsageGpuColorOutput) == 0;
 }
 
-enum class UploadKind { None, Rgb, Yuv420ThreePlane, Yuv420TwoPlane };
+enum class UploadKind { Unsupported, Rgb, Yuv420ThreePlane, Yuv420TwoPlane };
 
 // One plane as the host takes it: `rows` rows of `rowBytes` bytes, with no padding.
 struct UploadPlane {
@@ -54,7 +54,7 @@ struct UploadPlane {
 
 // How a buffer's planes go up, and the rcUpdateColorBuffer call that carries them.
 struct UploadLayout {
-    UploadKind kind = UploadKind::None;
+    UploadKind kind = UploadKind::Unsupported;
     uint32_t planeCount = 0;
     UploadPlane planes[3];
     uint32_t glFormat = 0;
@@ -62,7 +62,7 @@ struct UploadLayout {
     int32_t callWidth = 0;
     int32_t callHeight = 0;
 
-    bool valid() const { return kind != UploadKind::None; }
+    bool valid() const { return kind != UploadKind::Unsupported; }
     size_t packedSize() const {
         size_t size = 0;
         for (uint32_t i = 0; i < planeCount; ++i) {

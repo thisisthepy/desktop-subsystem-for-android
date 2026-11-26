@@ -36,7 +36,7 @@ class YuvPicturesPatchTests(unittest.TestCase):
                                          "host/vulkan/VkCommonOperations.h"])
 
     def test_fr26_each_color_buffer_records_what_its_uploads_left(self):
-        self.assertIn("dsa::YuvPicture picture = dsa::YuvPicture::None;", self.added)
+        self.assertIn("dsa::YuvPicture picture = dsa::YuvPicture::Unwritten;", self.added)
         self.assertIn("info->picture = dsa::yuvPictureAfterUpload(info->picture, jobs, started, "
                       "finished);", self.added)
         # A job counts as started once submitted, and finished once its fence is seen.

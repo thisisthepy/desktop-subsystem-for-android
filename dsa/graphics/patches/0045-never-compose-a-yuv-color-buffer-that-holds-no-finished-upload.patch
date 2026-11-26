@@ -107,7 +107,7 @@ diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
 +        if (layer.composeMode == HWC2_COMPOSITION_SOLID_COLOR || layer.cbHandle == 0) {
 +            continue;
 +        }
-+        dsa::YuvPicture picture = dsa::YuvPicture::None;
++        dsa::YuvPicture picture = dsa::YuvPicture::Unwritten;
 +        if (!m_emulationVk->colorBufferAwaitsPicture(layer.cbHandle, &picture)) {
 +            continue;
 +        }
@@ -257,7 +257,7 @@ diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
  
 +        // DSA: what the uploads have left in the image (dsa_yuv_pictures.h). A ColorBuffer made
 +        // again on a new device starts over with none.
-+        dsa::YuvPicture picture = dsa::YuvPicture::None;
++        dsa::YuvPicture picture = dsa::YuvPicture::Unwritten;
 +
          bool glExported = false;
          bool externalMemoryCompatible = false;

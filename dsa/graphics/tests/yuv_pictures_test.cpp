@@ -34,25 +34,25 @@ static std::vector<uint8_t> nv12(uint32_t width, uint32_t height, uint8_t luma, 
 static void fr26_a_yuv_color_buffer_no_upload_finished_in_is_never_composed() {
     // A new ColorBuffer, or one made again on a new device after a GPU reset, holds its
     // allocation's zeros: solid green as YUV.
-    EXPECT(!dsa::yuvPictureComposable(YuvPicture::None));
+    EXPECT(!dsa::yuvPictureComposable(YuvPicture::Unwritten));
     EXPECT(!dsa::yuvPictureComposable(YuvPicture::Partial));
     EXPECT(dsa::yuvPictureComposable(YuvPicture::Whole));
 }
 
 static void fr26_only_an_upload_whose_every_job_finished_leaves_a_whole_picture() {
     // NV12 goes up in two jobs, one a plane.
-    EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::None, 2, 2, 2) == YuvPicture::Whole);
+    EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Unwritten, 2, 2, 2) == YuvPicture::Whole);
     EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Partial, 2, 2, 2) == YuvPicture::Whole);
     // The luma landed and the chroma job failed: new luma over zero or old chroma.
     EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Whole, 2, 1, 1) == YuvPicture::Partial);
-    EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::None, 2, 2, 1) == YuvPicture::Partial);
+    EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Unwritten, 2, 2, 1) == YuvPicture::Partial);
     // The last job reached the GPU but its fence was never seen: nothing says it finished.
     EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Whole, 2, 2, 1) == YuvPicture::Partial);
 }
 
 static void fr26_an_upload_that_reached_no_gpu_leaves_the_picture_it_found() {
     EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Whole, 2, 0, 0) == YuvPicture::Whole);
-    EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::None, 3, 0, 0) == YuvPicture::None);
+    EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Unwritten, 3, 0, 0) == YuvPicture::Unwritten);
     EXPECT(dsa::yuvPictureAfterUpload(YuvPicture::Partial, 2, 0, 0) == YuvPicture::Partial);
 }
 
@@ -92,7 +92,7 @@ static void fr26_the_log_says_at_once_then_at_most_every_five_seconds() {
     dsa::YuvPictureTally tally;
     std::string line;
     constexpr uint64_t kSecond = 1000000000ULL;
-    EXPECT(tally.compositionHeld(YuvPicture::None, 10 * kSecond, &line));
+    EXPECT(tally.compositionHeld(YuvPicture::Unwritten, 10 * kSecond, &line));
     EXPECT(line.find("1 composition(s)") != std::string::npos);
     EXPECT(line.find("1 never written, 0 left part-written") != std::string::npos);
 

@@ -56,6 +56,7 @@ if ((-not (Test-Path "$GfxstreamDir/CMakeLists.txt")) -or
 }
 
 # Import Visual Studio environment if available
+$VsPath = $null
 $Vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (Test-Path $Vswhere) {
     $VsPath = & $Vswhere -latest -property installationPath
@@ -92,6 +93,18 @@ $ConfigureArgs = @(
 )
 
 $HasNinja = [bool](Get-Command ninja.exe -ErrorAction SilentlyContinue)
+# Visual Studio's own clang-cl comes first. Its C++ library checks the compiler's version,
+# and a standalone LLVM earlier on PATH can be older than that library accepts: on the
+# windows-2025-vs2026 runner, LLVM 20 met a library that wants Clang 22 and stopped every
+# file with STL1000. The clang that ships with the library always matches it.
+if ($VsPath) {
+    $VsLlvmArch = if ($HostIsArm64) { "ARM64" } else { "x64" }
+    $VsClangBin = Join-Path $VsPath "VC\Tools\Llvm\$VsLlvmArch\bin"
+    if (Test-Path (Join-Path $VsClangBin "clang-cl.exe")) {
+        $env:PATH = "$VsClangBin;$env:PATH"
+        Write-Host "Using Visual Studio's clang-cl from $VsClangBin"
+    }
+}
 $HasClangCl = [bool](Get-Command clang-cl.exe -ErrorAction SilentlyContinue)
 
 # Optimised as before, plus a PDB beside the DLL: a crash in the renderer, or in a GPU driver

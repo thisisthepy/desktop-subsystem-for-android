@@ -33,7 +33,7 @@ namespace dsa {
 // The picture in a YUV ColorBuffer, as far as the renderer's uploads go.
 enum class YuvPicture {
     // No upload has finished since the image was made (or made again on a new device).
-    None,
+    Unwritten,
     // An upload's GPU jobs started and did not all finish: some planes are new and some not.
     Partial,
     // The last upload finished: every plane holds the same picture.
