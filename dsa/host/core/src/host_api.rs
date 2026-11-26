@@ -5525,12 +5525,6 @@ impl HostApiService {
                     task_id: close.task_id,
                 },
             ),
-            Some(request::Body::FocusTask(focus)) => self.request(
-                peer,
-                TaskRequest::Focus {
-                    task_id: focus.task_id,
-                },
-            ),
             Some(request::Body::LaunchApp(launch)) if launch.new_window => self.request(
                 peer,
                 TaskRequest::NewWindow {
@@ -5597,6 +5591,7 @@ impl HostApiService {
                 peer,
                 TaskRequest::CaptionCompat {
                     below_title_bar: compat.below_title_bar,
+                    keep_focus: compat.keep_focus,
                 },
             ),
             Some(request::Body::SetTaskCaption(caption)) => self.request(
@@ -5708,7 +5703,6 @@ impl HostApiService {
                         | request::Body::UninstallApp(_)
                         | request::Body::WatchTasks(_)
                         | request::Body::CloseTask(_)
-                        | request::Body::FocusTask(_)
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
@@ -8288,12 +8282,6 @@ impl HostApiClient {
         self.done(request::Body::CloseTask(types::CloseTask { task_id }))
     }
 
-    /// Asks the caller's Android to give a task the input focus, for an app that keeps its
-    /// focus while its window is not the active one.
-    pub fn focus_task(&mut self, task_id: i32) -> Result<(), ClientError> {
-        self.done(request::Body::FocusTask(types::FocusTask { task_id }))
-    }
-
     /// Asks the caller's Android to end every process of an app and give its memory back,
     /// even one a widget or a foreground service keeps running: the user's Stop.
     pub fn stop_app(&mut self, package_name: &str) -> Result<(), ClientError> {
@@ -8357,10 +8345,16 @@ impl HostApiClient {
         }))
     }
 
-    /// Tells the caller's Android which apps start below the title bar.
-    pub fn set_caption_compat(&mut self, below_title_bar: &[String]) -> Result<(), ClientError> {
+    /// Tells the caller's Android which apps start below the title bar, and which keep their
+    /// focus while another app's window has it.
+    pub fn set_caption_compat(
+        &mut self,
+        below_title_bar: &[String],
+        keep_focus: &[String],
+    ) -> Result<(), ClientError> {
         self.done(request::Body::SetCaptionCompat(types::SetCaptionCompat {
             below_title_bar: below_title_bar.to_vec(),
+            keep_focus: keep_focus.to_vec(),
         }))
     }
 
@@ -8406,7 +8400,6 @@ impl HostApiClient {
     pub fn request(&mut self, request: &TaskRequest) -> Result<(), ClientError> {
         match request {
             TaskRequest::Close { task_id } => self.close_task(*task_id),
-            TaskRequest::Focus { task_id } => self.focus_task(*task_id),
             TaskRequest::Launch { package_name } => self.launch_app(package_name),
             TaskRequest::NewWindow { package_name } => self.new_window(package_name),
             TaskRequest::OpenAppSettings { package_name, page } => {
@@ -8433,9 +8426,10 @@ impl HostApiClient {
                 self.set_task_full_screen(*task_id, *in_window)
             }
             TaskRequest::RequestFrame { task_id } => self.request_task_frame(*task_id),
-            TaskRequest::CaptionCompat { below_title_bar } => {
-                self.set_caption_compat(below_title_bar)
-            }
+            TaskRequest::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            } => self.set_caption_compat(below_title_bar, keep_focus),
             TaskRequest::WindowsShown { shown } => self.set_windows_shown(*shown),
             TaskRequest::TasksShown { task_ids } => self.set_tasks_shown(task_ids),
             TaskRequest::StopApp { package_name } => self.stop_app(package_name),

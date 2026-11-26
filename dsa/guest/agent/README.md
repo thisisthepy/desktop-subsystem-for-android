@@ -49,7 +49,11 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   container transaction's inset sources, given again whenever the task's top edge moves.
   `CaptionCompat` names the apps the user set to start below the title bar: a task of one of
   them gets no status bar inset and a caption bar inset the framework consumes for the app,
-  settled when the task starts, and is reported with `below_title_bar`.
+  settled when the task starts, and is reported with `below_title_bar`. Its `keep_focus` names
+  the apps the user set to keep game focus: the agent gives them to the framework (the window
+  manager's `dsa-keep-focus` command), which then does not tell such an app that it lost the
+  focus to another app's window while its task stays visible. Keys and text still go only to
+  the window that has the focus.
 - **Status bar tone.** Each `TaskUpdated` carries what the task's app told the system about
   its status bar (light or dark icons, and its color), read from the task description, so
   the host draws its caption buttons in a tone that stays readable over it.

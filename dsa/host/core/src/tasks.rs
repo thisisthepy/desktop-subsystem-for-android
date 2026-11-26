@@ -426,13 +426,16 @@ pub enum TaskRequest {
     /// The apps whose tasks start below the title bar, as the user chose for each: the guest
     /// gives a task of one of them no status bar inset and a caption inset the framework
     /// consumes for the app. The list replaces the one before, and counts when a task starts.
-    CaptionCompat { below_title_bar: Vec<String> },
+    /// With it, the apps that keep their focus while another app's window has it
+    /// (`keep_focus`, "keep game focus"): while a task of one of them stays visible, Android
+    /// does not tell its app that it lost the focus. That list replaces the one before too,
+    /// and counts at once.
+    CaptionCompat {
+        below_title_bar: Vec<String>,
+        keep_focus: Vec<String>,
+    },
     /// The user closed the task's window; the agent ends the task.
     Close { task_id: i32 },
-    /// Give the task the input focus in Android, for an app that keeps its focus while its
-    /// window is not the active one ([`crate::compositor::keep_focus`]). Only the latest
-    /// counts.
-    Focus { task_id: i32 },
     /// Start the app's launcher activity as a new task in its own window.
     Launch { package_name: String },
     /// Start another task of an app that supports several windows, even when it has one, in
@@ -506,10 +509,13 @@ impl TaskRequest {
     pub fn describe(&self) -> String {
         match self {
             TaskRequest::Close { task_id } => format!("end task {task_id}"),
-            TaskRequest::Focus { task_id } => format!("give task {task_id} the input focus"),
-            TaskRequest::CaptionCompat { below_title_bar } => format!(
-                "start the tasks of {} apps below the title bar",
-                below_title_bar.len()
+            TaskRequest::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            } => format!(
+                "start the tasks of {} apps below the title bar, and keep the focus of {} apps",
+                below_title_bar.len(),
+                keep_focus.len()
             ),
             TaskRequest::Launch { package_name } => format!("launch {package_name}"),
             TaskRequest::NewWindow { package_name } => {
@@ -628,7 +634,6 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                 (TaskRequest::WindowsShown { .. }, TaskRequest::WindowsShown { .. }) => true,
                 (TaskRequest::TasksShown { .. }, TaskRequest::TasksShown { .. }) => true,
                 (TaskRequest::CaptionCompat { .. }, TaskRequest::CaptionCompat { .. }) => true,
-                (TaskRequest::Focus { .. }, TaskRequest::Focus { .. }) => true,
                 (
                     TaskRequest::RequestFrame { task_id: a },
                     TaskRequest::RequestFrame { task_id: b },

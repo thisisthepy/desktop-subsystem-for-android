@@ -378,9 +378,11 @@ pub struct AppWindowSettings {
     /// choice for the app ([`starts_below_title_bar`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub below_title_bar: Option<bool>,
-    /// Whether the app keeps the input focus inside Android while its window is not the
-    /// active one on the desktop, so a game that pauses when it loses the focus keeps running
-    /// behind another window ([`crate::compositor::keep_focus`]). Off by default.
+    /// Whether the app keeps its focus while another app's window has it ("keep game
+    /// focus"): while its task stays visible, Android does not tell it that it lost the
+    /// focus, so a game that pauses when it loses the focus keeps running while the user works
+    /// in another app's window. Keys and text still go only to the window that has the focus.
+    /// The guest hears the list with `TaskRequest::CaptionCompat`. Off by default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub keep_focus: bool,
 }
@@ -482,8 +484,8 @@ impl AppWindowSettings {
     }
 }
 
-/// The packages that keep the input focus while their window is not the active one, sorted,
-/// each once: what the window manager follows.
+/// The packages that keep their focus while another app's window has it, sorted, each once:
+/// what the guest is told.
 pub fn keep_focus_packages(apps: &[AppWindowSettings]) -> Vec<String> {
     let mut packages: Vec<String> = apps
         .iter()

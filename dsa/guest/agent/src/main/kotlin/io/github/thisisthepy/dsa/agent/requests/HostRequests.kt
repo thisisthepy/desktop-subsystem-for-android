@@ -129,6 +129,21 @@ interface TaskActions {
      * refused.
      */
     fun markForcedDensity(taskId: Int, forced: Boolean): Boolean = false
+
+    /**
+     * Whether the framework can keep an app's focus while another app's window has it
+     * ([setKeepFocus]). Only an image whose framework carries that change can. False when it
+     * cannot, or this cannot tell.
+     */
+    fun keepFocusSupported(): Boolean = false
+
+    /**
+     * Tells the framework which apps keep their focus while another app's window has it ("keep
+     * game focus"), replacing the ones before: while a task of one of [packages] stays visible,
+     * its app is not told that it lost the focus. Keys and text still go only to the window
+     * that has the focus. False when the framework has no such change or refused.
+     */
+    fun setKeepFocus(packages: Set<String>): Boolean = false
 }
 
 /** Which of Android Settings' pages of an app to open. */
@@ -176,13 +191,6 @@ sealed interface RequestResult {
     data class CloseRefused(val taskId: Int, val reason: String) : RequestResult
 
     /**
-     * The task took the input focus, for an app the user set to keep its focus while its
-     * window is not the active one on the desktop.
-     */
-    data class Focused(val taskId: Int) : RequestResult
-    data class FocusRefused(val taskId: Int, val reason: String) : RequestResult
-
-    /**
      * The host resized the task's window; the task takes [size]. [live] while the user is
      * still dragging the window's edge. The first one with [live] false after a drag ends
      * the drag, even when [size] is the size the task already has.
@@ -208,8 +216,15 @@ sealed interface RequestResult {
      */
     data class FullScreen(val taskId: Int, val inWindow: Boolean) : RequestResult
 
-    /** The apps whose tasks start below the title bar, as the host's user chose for each. */
-    data class CaptionCompat(val belowTitleBar: Set<String>) : RequestResult
+    /**
+     * The apps whose tasks start below the title bar, as the host's user chose for each, and
+     * the apps that keep their focus while another app's window has it ([keepFocus], "keep
+     * game focus").
+     */
+    data class CaptionCompat(
+        val belowTitleBar: Set<String>,
+        val keepFocus: Set<String> = emptySet(),
+    ) : RequestResult
 
     /** A resize or density for a task the host was never told about. */
     data class SizeRefused(val taskId: Int, val reason: String) : RequestResult
@@ -252,15 +267,16 @@ class HostRequests(
             Envelope.BodyCase.OPEN_APP_SETTINGS ->
                 settings(envelope.openAppSettings.packageName, pageOf(envelope.openAppSettings.page))
             Envelope.BodyCase.CLOSE_TASK -> close(envelope.closeTask.taskId)
-            Envelope.BodyCase.FOCUS_TASK -> focus(envelope.focusTask.taskId)
             Envelope.BodyCase.RESIZE_TASK -> envelope.resizeTask.let {
                 resize(it.taskId, it.width, it.height, it.live)
             }
             Envelope.BodyCase.SET_TASK_DENSITY -> envelope.setTaskDensity.let {
                 density(it.taskId, it.densityDpi, it.forced)
             }
-            Envelope.BodyCase.CAPTION_COMPAT ->
-                RequestResult.CaptionCompat(envelope.captionCompat.belowTitleBarList.filter { it.isNotEmpty() }.toSet())
+            Envelope.BodyCase.CAPTION_COMPAT -> RequestResult.CaptionCompat(
+                envelope.captionCompat.belowTitleBarList.filter { it.isNotEmpty() }.toSet(),
+                envelope.captionCompat.keepFocusList.filter { it.isNotEmpty() }.toSet(),
+            )
             Envelope.BodyCase.SET_TASK_CAPTION -> caption(
                 envelope.setTaskCaption.taskId,
                 envelope.setTaskCaption.height,
@@ -329,12 +345,6 @@ class HostRequests(
         !reported(taskId) -> RequestResult.CloseRefused(taskId, "the host was never told about this task")
         actions.closeTask(taskId) -> RequestResult.Closed(taskId)
         else -> RequestResult.CloseRefused(taskId, "the framework has no such task or refused to end it")
-    }
-
-    private fun focus(taskId: Int): RequestResult = when {
-        !reported(taskId) -> RequestResult.FocusRefused(taskId, "the host was never told about this task")
-        actions.focusTask(taskId) -> RequestResult.Focused(taskId)
-        else -> RequestResult.FocusRefused(taskId, "the framework has no such task or refused to focus it")
     }
 
     // The sizes are unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.

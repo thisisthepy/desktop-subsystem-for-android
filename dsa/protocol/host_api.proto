@@ -172,13 +172,6 @@ message UninstallResult {
   string message = 3;
 }
 
-// Asks the caller's Android to give a task the input focus, for an app that keeps its focus
-// while its window is not the active one (AppWindowSettings.keep_focus). Keys still go to a
-// window only while it is the active one: its window host sends them.
-message FocusTask {
-  int32 task_id = 1;
-}
-
 // The user closed a task's window: asks the caller's Android to end the task.
 message CloseTask {
   int32 task_id = 1;
@@ -256,9 +249,12 @@ message SetTaskCaption {
 
 // Tells the caller's Android which apps start below the title bar: the packages whose
 // AppWindowSettings.below_title_bar is on. The list replaces the one before, and counts for
-// the tasks that start after it.
+// the tasks that start after it. keep_focus: the packages whose AppWindowSettings.keep_focus
+// is on, which Android does not tell that they lost the focus to another app's window while
+// their task stays visible. That list replaces the one before too, and counts at once.
 message SetCaptionCompat {
   repeated string below_title_bar = 1;
+  repeated string keep_focus = 2;
 }
 
 // Where a task's window shows a clear full screen request of its app: asks the caller's
@@ -2968,10 +2964,10 @@ message AppWindowSettings {
   // app whose top bar is squeezed or hidden under the title bar. Off by default; it counts
   // from the next time a window of the app opens.
   bool below_title_bar = 8;
-  // Whether the app keeps the input focus inside Android while its window is not the active
-  // one on the desktop ("keep game focus"), so a game that pauses when it loses the focus
-  // keeps running behind another window. Keys and text still go to a window only while it is
-  // the active one. Off by default.
+  // Whether the app keeps its focus while another app's window has it ("keep game focus"):
+  // while its task stays visible, Android does not tell it that it lost the focus, so a game
+  // that pauses when it loses the focus keeps running while the user works in another app's
+  // window. Keys and text still go only to the window that has the focus. Off by default.
   bool keep_focus = 9;
 }
 
@@ -3131,7 +3127,6 @@ message Request {
     RemoveWidevine remove_widevine = 702;
     LaunchPlacement launch_placement = 710;
     SetCaptionCompat set_caption_compat = 715;
-    FocusTask focus_task = 750;
     GetWidgetPreviews get_widget_previews = 740;
   }
 }

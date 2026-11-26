@@ -8,7 +8,6 @@ import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.AppSettingsPage
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
-import io.github.thisisthepy.dsa.control.v1.FocusTask
 import io.github.thisisthepy.dsa.control.v1.LaunchApp
 import io.github.thisisthepy.dsa.control.v1.OpenAppSettings
 import io.github.thisisthepy.dsa.control.v1.ResizeTask
@@ -28,9 +27,6 @@ class HostRequestsTest {
 
     private fun close(taskId: Int) =
         Envelope.newBuilder().setCloseTask(CloseTask.newBuilder().setTaskId(taskId)).build().toByteArray()
-
-    private fun focusTask(taskId: Int) =
-        Envelope.newBuilder().setFocusTask(FocusTask.newBuilder().setTaskId(taskId)).build().toByteArray()
 
     private fun resize(taskId: Int, width: Int, height: Int, live: Boolean = false) = Envelope.newBuilder()
         .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height).setLive(live))
@@ -135,6 +131,28 @@ class HostRequestsTest {
     }
 
     @Test
+    fun fr44_the_apps_that_keep_their_focus_are_handed_back() {
+        val frame = { packages: List<String> ->
+            Envelope.newBuilder()
+                .setCaptionCompat(
+                    io.github.thisisthepy.dsa.control.v1.CaptionCompat.newBuilder()
+                        .addBelowTitleBar("com.example.player")
+                        .addAllKeepFocus(packages),
+                )
+                .build().toByteArray()
+        }
+        assertEquals(
+            RequestResult.CaptionCompat(setOf("com.example.player"), setOf("com.ustwo.monumentvalley")),
+            requests.handle(frame(listOf("com.ustwo.monumentvalley", "", "com.ustwo.monumentvalley"))),
+        )
+        // Every app off, the default, is a list too.
+        assertEquals(
+            RequestResult.CaptionCompat(setOf("com.example.player"), emptySet()),
+            requests.handle(frame(emptyList())),
+        )
+    }
+
+    @Test
     fun fr22_the_reach_of_a_windows_icon_and_buttons_is_handed_back_with_its_height() {
         reported += 3
         val frame = Envelope.newBuilder()
@@ -217,24 +235,6 @@ class HostRequestsTest {
 
         assertEquals(RequestResult.Closed(12), result)
         assertEquals(listOf(12), actions.closed)
-    }
-
-    @Test
-    fun fr44_focus_task_gives_a_kept_games_task_the_input_focus() {
-        reported += 21
-
-        assertEquals(RequestResult.Focused(21), requests.handle(focusTask(21)))
-        assertEquals(listOf(21), actions.focused)
-    }
-
-    @Test
-    fun fr44_focus_task_of_a_task_the_host_was_never_told_about_is_refused() {
-        assertTrue(requests.handle(focusTask(22)) is RequestResult.FocusRefused)
-        assertEquals(emptyList<Int>(), actions.focused)
-
-        reported += 23
-        actions.focusable = false
-        assertTrue(requests.handle(focusTask(23)) is RequestResult.FocusRefused)
     }
 
     @Test

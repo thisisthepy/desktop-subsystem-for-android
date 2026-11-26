@@ -218,10 +218,21 @@ pub struct OverlayWindow {
 /// before. It counts when a task starts: a task that runs already keeps what it started
 /// with, because an app may read its insets once per screen. The host sends it when it
 /// connects and whenever the list changes.
+///
+/// keep_focus: the apps the user set to keep game focus. While a task of one of these
+/// packages stays resumed (its window is visible), its app is not told that it lost the focus
+/// to another app's window: no onTopResumedActivityChanged(false) and no
+/// onWindowFocusChanged(false), so a game that pauses on either keeps running. Keys and IME
+/// text still go only to the window that has the focus. The agent gives the list to the
+/// framework (the window manager's shell command dsa-keep-focus), where it counts at once; an
+/// image whose framework lacks that change ignores it. Empty, the default, keeps every app as
+/// before.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CaptionCompat {
     #[prost(string, repeated, tag = "1")]
     pub below_title_bar: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "2")]
+    pub keep_focus: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Guest to host, from the agent: the task ended; the host closes its window.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -245,18 +256,6 @@ pub struct TaskFrames {
 /// bounded number of times, while no frame arrives.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RequestTaskFrame {
-    #[prost(int32, tag = "1")]
-    pub task_id: i32,
-}
-/// Host to guest: give the task the input focus (IActivityTaskManager.setFocusedTask), so its
-/// top window is the one Android sends keys to and the one its app hears it has the focus
-/// in. The host sends it for an app the user set to keep its focus while its window is not
-/// the active one on the desktop ("keep game focus"): when such an app's window becomes the
-/// active one, when another task's window becomes active while such an app holds the focus,
-/// and when no task window is active and such an app was the last to be. For every other
-/// app the focus follows the user's clicks and keys alone, as before.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct FocusTask {
     #[prost(int32, tag = "1")]
     pub task_id: i32,
 }
@@ -3804,7 +3803,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 416, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 750, 740, 741"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 416, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -4226,8 +4225,6 @@ pub mod envelope {
         LaunchPlacement(super::LaunchPlacement),
         #[prost(message, tag = "715")]
         CaptionCompat(super::CaptionCompat),
-        #[prost(message, tag = "750")]
-        FocusTask(super::FocusTask),
         #[prost(message, tag = "740")]
         GetWidgetPreviews(super::GetWidgetPreviews),
         #[prost(message, tag = "741")]

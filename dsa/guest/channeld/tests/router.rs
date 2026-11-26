@@ -122,6 +122,7 @@ fn fr22_an_agent_that_starts_after_the_host_spoke_hears_which_apps_start_below_t
     let compat = |packages: &[&str]| {
         frame(Body::CaptionCompat(CaptionCompat {
             below_title_bar: packages.iter().map(|package| package.to_string()).collect(),
+            keep_focus: Vec::new(),
         }))
     };
     // The host says it as soon as it connects, before the agent has started.

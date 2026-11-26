@@ -3906,7 +3906,7 @@ fn fr44_keep_game_focus_is_off_by_default_and_stored_with_the_window_settings() 
     assert_eq!(kept["apps"][0]["keep_focus"], true);
     let output = dsa(&endpoint, "app-window com.example.chess");
     assert!(
-        stdout(&output).contains("keeps its focus behind other windows"),
+        stdout(&output).contains("keeps its focus while another app's window has it"),
         "{}",
         stdout(&output)
     );

@@ -236,8 +236,18 @@ message OverlayWindow {
 // before. It counts when a task starts: a task that runs already keeps what it started
 // with, because an app may read its insets once per screen. The host sends it when it
 // connects and whenever the list changes.
+//
+// keep_focus: the apps the user set to keep game focus. While a task of one of these
+// packages stays resumed (its window is visible), its app is not told that it lost the focus
+// to another app's window: no onTopResumedActivityChanged(false) and no
+// onWindowFocusChanged(false), so a game that pauses on either keeps running. Keys and IME
+// text still go only to the window that has the focus. The agent gives the list to the
+// framework (the window manager's shell command dsa-keep-focus), where it counts at once; an
+// image whose framework lacks that change ignores it. Empty, the default, keeps every app as
+// before.
 message CaptionCompat {
   repeated string below_title_bar = 1;
+  repeated string keep_focus = 2;
 }
 
 // How a task's app asks to fill the screen.
@@ -293,17 +303,6 @@ message TaskFrames {
 // settings page) would otherwise never draw into the new window. The host asks again, a
 // bounded number of times, while no frame arrives.
 message RequestTaskFrame {
-  int32 task_id = 1;
-}
-
-// Host to guest: give the task the input focus (IActivityTaskManager.setFocusedTask), so its
-// top window is the one Android sends keys to and the one its app hears it has the focus
-// in. The host sends it for an app the user set to keep its focus while its window is not
-// the active one on the desktop ("keep game focus"): when such an app's window becomes the
-// active one, when another task's window becomes active while such an app holds the focus,
-// and when no task window is active and such an app was the last to be. For every other
-// app the focus follows the user's clicks and keys alone, as before.
-message FocusTask {
   int32 task_id = 1;
 }
 
@@ -3751,7 +3750,6 @@ message Envelope {
     DnsAnswer dns_answer = 691;
     LaunchPlacement launch_placement = 710;
     CaptionCompat caption_compat = 715;
-    FocusTask focus_task = 750;
     GetWidgetPreviews get_widget_previews = 740;
     WidgetPreviews widget_previews = 741;
   }

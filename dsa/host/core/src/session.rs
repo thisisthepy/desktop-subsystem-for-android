@@ -672,8 +672,8 @@ enum Command {
     HostMemoryLow(bool),
     /// Which tasks have their window shown changed.
     TasksShown(Vec<i32>),
-    /// Which apps start below the title bar changed.
-    CaptionCompat(Vec<String>),
+    /// Which apps start below the title bar, or keep their focus, changed.
+    CaptionCompat(control::CaptionCompat),
     /// The host's system settings or one of its game controllers changed.
     System(SystemInput),
     /// Freeze the guest after this long in Doze, or never.
@@ -2676,12 +2676,20 @@ impl Session {
             .map_err(|_| SessionError::Gone)
     }
 
-    /// Says which apps start below the title bar, as the user chose for each. The session keeps
-    /// the latest word in every state; the guest is told now if it is up, and each time it
+    /// Says which apps start below the title bar, and which keep their focus while another
+    /// app's window has it (`keep_focus`), as the user chose for each. The session keeps the
+    /// latest word in every state; the guest is told now if it is up, and each time it
     /// connects, so a task that starts has its insets settled before its first screen.
-    pub fn caption_compat(&self, below_title_bar: Vec<String>) -> Result<(), SessionError> {
+    pub fn caption_compat(
+        &self,
+        below_title_bar: Vec<String>,
+        keep_focus: Vec<String>,
+    ) -> Result<(), SessionError> {
         self.commands
-            .send(Command::CaptionCompat(below_title_bar))
+            .send(Command::CaptionCompat(control::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            }))
             .map_err(|_| SessionError::Gone)
     }
 
@@ -3437,10 +3445,10 @@ impl Session {
             TaskRequest::WindowsShown { shown } => return self.windows_shown(shown),
             TaskRequest::TasksShown { task_ids } => return self.tasks_shown(task_ids),
             TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
-            TaskRequest::Focus { task_id } => Body::FocusTask(control::FocusTask { task_id }),
-            TaskRequest::CaptionCompat { below_title_bar } => {
-                return self.caption_compat(below_title_bar)
-            }
+            TaskRequest::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            } => return self.caption_compat(below_title_bar, keep_focus),
             TaskRequest::Launch { package_name } => Body::LaunchApp(control::LaunchApp {
                 package_name,
                 new_window: false,
@@ -4680,9 +4688,9 @@ struct Worker {
     tasks_shown: Option<Vec<i32>>,
     /// Set when they changed while the guest was frozen, so it is told after the thaw.
     tasks_shown_pending: bool,
-    /// The apps that start below the title bar, as last recorded, once the window manager
-    /// has said.
-    caption_compat: Option<Vec<String>>,
+    /// The apps that start below the title bar and those that keep their focus, as last
+    /// recorded, once the window manager has said.
+    caption_compat: Option<control::CaptionCompat>,
     /// Set when they changed while the guest was frozen, so it is told after the thaw.
     caption_compat_pending: bool,
     /// The host's system settings, as last recorded.
@@ -6202,11 +6210,11 @@ impl Worker {
     }
 
     /// Records which apps start below the title bar, and tells a guest that is up.
-    fn set_caption_compat(&mut self, below_title_bar: Vec<String>) {
-        if self.caption_compat.as_ref() == Some(&below_title_bar) {
+    fn set_caption_compat(&mut self, compat: control::CaptionCompat) {
+        if self.caption_compat.as_ref() == Some(&compat) {
             return;
         }
-        self.caption_compat = Some(below_title_bar);
+        self.caption_compat = Some(compat);
         match self.state() {
             SessionState::Starting
             | SessionState::Stalled
@@ -6217,12 +6225,11 @@ impl Worker {
         }
     }
 
-    /// Tells the guest which apps start below the title bar, once the window manager has said.
+    /// Tells the guest which apps start below the title bar and which keep their focus, once
+    /// the window manager has said.
     fn send_caption_compat(&mut self) {
-        if let Some(below_title_bar) = self.caption_compat.clone() {
-            self.send_body(Body::CaptionCompat(control::CaptionCompat {
-                below_title_bar,
-            }));
+        if let Some(compat) = self.caption_compat.clone() {
+            self.send_body(Body::CaptionCompat(compat));
         }
     }
 
@@ -7506,7 +7513,6 @@ impl Worker {
             | Some(Body::HostMemory(_))
             | Some(Body::HostSleep(_))
             | Some(Body::CloseTask(_))
-            | Some(Body::FocusTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
             | Some(Body::RequestTaskFrame(_))

@@ -1,10 +1,11 @@
-//! The Games page's list: the installed apps with whether each keeps its focus while its
-//! window is not the active one ("keep game focus"), games first, and what its "Select all"
-//! does. `dsa games` and, through it, every settings app read them from here.
+//! The Games page's list: the installed apps with whether each keeps its focus while another
+//! app's window has it ("keep game focus"), games first, and what its "Select all" does.
+//! `dsa games` and, through it, every settings app read them from here.
 //!
 //! The setting itself is an app window setting ([`AppWindowSettings::keep_focus`]), stored and
-//! sent with the others; what it does to the guest's focus is
-//! [`crate::compositor::keep_focus`].
+//! sent with the others. The guest hears the apps switched on with the other per-app lists
+//! (`TaskRequest::CaptionCompat`), and its framework then does not tell such an app that it
+//! lost the focus while its task stays visible.
 
 use crate::app_windows::AppWindowSettings;
 use crate::tasks::AppInfo;

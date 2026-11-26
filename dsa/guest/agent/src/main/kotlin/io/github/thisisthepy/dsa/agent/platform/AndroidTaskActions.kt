@@ -473,6 +473,32 @@ class AndroidTaskActions(
         false
     }
 
+    /**
+     * Asks the window manager's dsa-keep-focus shell command, which DSA's framework adds, to
+     * answer. An image without that change answers "Unknown command", which [serviceShell]
+     * turns into a failure.
+     */
+    override fun keepFocusSupported(): Boolean = try {
+        serviceShell(WINDOW_SERVICE, KEEP_FOCUS_COMMAND) == "supported"
+    } catch (e: Exception) {
+        log.info("the window manager has no $KEEP_FOCUS_COMMAND command (${e.message})")
+        false
+    }
+
+    /**
+     * Sets the apps that keep their focus through the window manager's dsa-keep-focus shell
+     * command (`cmd window dsa-keep-focus set [PACKAGE...]`), which needs the
+     * MANAGE_ACTIVITY_TASKS permission the agent holds. The framework keeps the list until the
+     * window manager's process ends.
+     */
+    override fun setKeepFocus(packages: Set<String>): Boolean = try {
+        serviceShell(WINDOW_SERVICE, KEEP_FOCUS_COMMAND, "set", *packages.sorted().toTypedArray())
+        true
+    } catch (e: Exception) {
+        log.warn("the window manager did not take the apps that keep their focus", e)
+        false
+    }
+
     private val statusBarHeights = HashMap<Int, Int>()
 
     /**
@@ -586,6 +612,7 @@ class AndroidTaskActions(
         // framework adds to it.
         const val WINDOW_SERVICE = "window"
         const val FORCED_DENSITY_COMMAND = "dsa-forced-density"
+        const val KEEP_FOCUS_COMMAND = "dsa-keep-focus"
 
         // InsetsSource.FLAG_FORCE_CONSUMING (1 shl 2) and
         // FLAG_FORCE_CONSUMING_OPAQUE_CAPTION_BAR (1 shl 4), the same in Android 16 and 17:

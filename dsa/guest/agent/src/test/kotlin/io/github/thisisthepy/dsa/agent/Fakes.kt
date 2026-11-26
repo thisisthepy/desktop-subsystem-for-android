@@ -352,6 +352,24 @@ class FakeActions : TaskActions {
         forcedMarks += taskId to forced
         return marksTaken
     }
+
+    /** Whether the framework can keep an app's focus, and how often that was asked. */
+    var keepFocus = false
+    var keepFocusAsked = 0
+
+    /** Each list of apps that keep their focus given to the framework, in order. */
+    val keepFocusLists = mutableListOf<Set<String>>()
+    var keepFocusTaken = true
+
+    override fun keepFocusSupported(): Boolean {
+        keepFocusAsked++
+        return keepFocus
+    }
+
+    override fun setKeepFocus(packages: Set<String>): Boolean {
+        keepFocusLists += packages
+        return keepFocusTaken
+    }
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {

@@ -19,8 +19,8 @@ use super::window_sizing::{
     ScalingMode, WindowSizing, BASE_DENSITY, DENSITY_AT_BASE_DPI, SETTLE,
 };
 use crate::app_windows::{
-    below_title_bar_packages, full_screen_place, AppWindowSettings, DpiScaling, FullScreenDefaults,
-    FullScreenPlace,
+    below_title_bar_packages, full_screen_place, keep_focus_packages, AppWindowSettings,
+    DpiScaling, FullScreenDefaults, FullScreenPlace,
 };
 use crate::tasks::{Bounds, Task, TaskEvent, TaskOrientation, TaskRequest};
 
@@ -404,9 +404,9 @@ pub struct TaskWindows {
     /// Whether the user's window settings were read yet. Until then nothing is known of which
     /// apps start below the title bar, and the guest is told nothing.
     app_windows_known: bool,
-    /// The apps the guest was last told start below the title bar; `None` when it must be
-    /// told again.
-    told_below_title_bar: Option<Vec<String>>,
+    /// The apps the guest was last told start below the title bar, and those it was told keep
+    /// their focus; `None` when it must be told again.
+    told_below_title_bar: Option<(Vec<String>, Vec<String>)>,
     /// Where every app without its own choice shows its full screen.
     fullscreen_defaults: FullScreenDefaults,
     /// Whether each task was last told to keep a clear full screen request inside its window.
@@ -1608,22 +1608,24 @@ impl TaskWindows {
         requests
     }
 
-    /// The request that tells the guest which apps start below the title bar, when the user's
-    /// settings say another list than the guest was last told. The guest settles a task's
-    /// insets when the task starts, so it hears the list before any window asks for it; an
-    /// empty list is told too, since the guest may hold an older one.
+    /// The request that tells the guest which apps start below the title bar and which keep
+    /// their focus while another app's window has it ("keep game focus"), when the user's
+    /// settings say other lists than the guest was last told. The guest settles a task's
+    /// insets when the task starts, so it hears the lists before any window asks for them;
+    /// empty lists are told too, since the guest may hold older ones.
     fn caption_compat(&mut self) -> Option<TaskRequest> {
         if !self.app_windows_known {
             return None;
         }
         let apps: Vec<AppWindowSettings> = self.app_windows.values().cloned().collect();
-        let packages = below_title_bar_packages(&apps);
-        if self.told_below_title_bar.as_ref() == Some(&packages) {
+        let lists = (below_title_bar_packages(&apps), keep_focus_packages(&apps));
+        if self.told_below_title_bar.as_ref() == Some(&lists) {
             return None;
         }
-        self.told_below_title_bar = Some(packages.clone());
+        self.told_below_title_bar = Some(lists.clone());
         Some(TaskRequest::CaptionCompat {
-            below_title_bar: packages,
+            below_title_bar: lists.0,
+            keep_focus: lists.1,
         })
     }
 
@@ -2011,6 +2013,7 @@ mod tests {
         let now = Instant::now();
         let compat = |packages: &[&str]| TaskRequest::CaptionCompat {
             below_title_bar: packages.iter().map(|package| package.to_string()).collect(),
+            keep_focus: Vec::new(),
         };
         let app = |package: &str, below: bool| AppWindowSettings {
             package_name: package.into(),
@@ -2049,6 +2052,61 @@ mod tests {
         assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
         windows.reset();
         assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
+    }
+
+    #[test]
+    fn fr44_the_guest_is_told_which_apps_keep_their_focus() {
+        let now = Instant::now();
+        let compat = |keep_focus: &[&str]| TaskRequest::CaptionCompat {
+            below_title_bar: Vec::new(),
+            keep_focus: keep_focus
+                .iter()
+                .map(|package| package.to_string())
+                .collect(),
+        };
+        let app = |package: &str, keep_focus: bool| AppWindowSettings {
+            package_name: package.into(),
+            fixed_size: true,
+            keep_focus,
+            ..AppWindowSettings::default()
+        };
+        let mut windows = TaskWindows::new();
+        assert!(windows.reconfigures(now).is_empty());
+        // Every app off, the default: the guest hears an empty list, so it holds no older one.
+        windows.set_app_windows(&[app("com.ustwo.monumentvalley", false)]);
+        assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
+        // Switched on: told once.
+        windows.set_app_windows(&[
+            app("com.ustwo.monumentvalley", true),
+            app("com.example.notes", false),
+        ]);
+        assert_eq!(
+            windows.reconfigures(now),
+            vec![compat(&["com.ustwo.monumentvalley"])]
+        );
+        assert!(windows.reconfigures(now).is_empty());
+        // Select all, then off again.
+        windows.set_app_windows(&[
+            app("com.ustwo.monumentvalley", true),
+            app("com.example.notes", true),
+        ]);
+        assert_eq!(
+            windows.reconfigures(now),
+            vec![compat(&["com.example.notes", "com.ustwo.monumentvalley"])]
+        );
+        windows.set_app_windows(&[
+            app("com.ustwo.monumentvalley", false),
+            app("com.example.notes", false),
+        ]);
+        assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
+        // An Android that started again hears it again.
+        windows.set_app_windows(&[app("com.ustwo.monumentvalley", true)]);
+        windows.reconfigures(now);
+        windows.sync(&[]);
+        assert_eq!(
+            windows.reconfigures(now),
+            vec![compat(&["com.ustwo.monumentvalley"])]
+        );
     }
 
     #[test]
@@ -3392,6 +3450,7 @@ mod tests {
             vec![
                 TaskRequest::CaptionCompat {
                     below_title_bar: Vec::new(),
+                    keep_focus: Vec::new(),
                 },
                 TaskRequest::Resize {
                     task_id: 1,
@@ -3528,6 +3587,7 @@ mod tests {
             vec![
                 TaskRequest::CaptionCompat {
                     below_title_bar: Vec::new(),
+                    keep_focus: Vec::new(),
                 },
                 TaskRequest::SetFullScreen {
                     task_id: 1,

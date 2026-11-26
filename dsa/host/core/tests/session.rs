@@ -2916,6 +2916,7 @@ fn fr22_the_guest_is_told_which_apps_start_below_the_title_bar_when_it_connects_
     let compat = |packages: &[&str]| {
         Body::CaptionCompat(dsa_protocol::control::CaptionCompat {
             below_title_bar: packages.iter().map(|package| package.to_string()).collect(),
+            keep_focus: Vec::new(),
         })
     };
     let launcher = FakeLauncher::default();
@@ -2926,6 +2927,7 @@ fn fr22_the_guest_is_told_which_apps_start_below_the_title_bar_when_it_connects_
     session
         .request(TaskRequest::CaptionCompat {
             below_title_bar: vec!["com.example.player".into()],
+            keep_focus: Vec::new(),
         })
         .unwrap();
     session.start();
@@ -2936,9 +2938,44 @@ fn fr22_the_guest_is_told_which_apps_start_below_the_title_bar_when_it_connects_
     );
     // The same list again is not news; an emptied one is.
     session
-        .caption_compat(vec!["com.example.player".into()])
+        .caption_compat(vec!["com.example.player".into()], Vec::new())
         .unwrap();
-    session.caption_compat(Vec::new()).unwrap();
+    session.caption_compat(Vec::new(), Vec::new()).unwrap();
+    assert_eq!(next_caption_compat(&mut daemon), compat(&[]));
+}
+
+#[test]
+fn fr44_the_guest_is_told_which_apps_keep_their_focus_when_it_connects_and_on_each_change() {
+    let compat = |keep_focus: &[&str]| {
+        Body::CaptionCompat(dsa_protocol::control::CaptionCompat {
+            below_title_bar: Vec::new(),
+            keep_focus: keep_focus
+                .iter()
+                .map(|package| package.to_string())
+                .collect(),
+        })
+    };
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    // Said before the guest runs: told as soon as it connects.
+    session
+        .request(TaskRequest::CaptionCompat {
+            below_title_bar: Vec::new(),
+            keep_focus: vec!["com.ustwo.monumentvalley".into()],
+        })
+        .unwrap();
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    assert_eq!(
+        next_caption_compat(&mut daemon),
+        compat(&["com.ustwo.monumentvalley"])
+    );
+    // The same lists again are not news; turning the app off is.
+    session
+        .caption_compat(Vec::new(), vec!["com.ustwo.monumentvalley".into()])
+        .unwrap();
+    session.caption_compat(Vec::new(), Vec::new()).unwrap();
     assert_eq!(next_caption_compat(&mut daemon), compat(&[]));
 }
 

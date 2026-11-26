@@ -1,0 +1,414 @@
+Subject: Keep the focus of an app set to keep game focus while another app's window has it
+
+DSA shows each task in its own host window, and the guest's tasks never cover each other, so a
+task that loses the focus to another app's task stays visible and resumed. Android still tells
+its app that it lost the focus, in two ways: the activity is no longer the top resumed one
+(Activity.onTopResumedActivityChanged(false), from the TopResumedActivityChangeItem the window
+manager sends when another task becomes the top resumed one), and its window lost the window
+focus (Activity.onWindowFocusChanged(false), which ViewRootImpl hands to the views when the input
+dispatcher moves the focus to another window). Games pause on these: a Unity game such as
+Monument Valley pauses on onWindowFocusChanged(false), which is also why this file already gives
+an unfocused Unity app a fake focus in split screen (dispatchCompatFakeFocus). So the game stops
+whenever the user clicks another app's window, although it is still in view.
+
+A user can set an app to keep game focus. The window manager's shell command "dsa-keep-focus
+set [PACKAGE...]" sets which packages do; the DSA agent, which holds MANAGE_ACTIVITY_TASKS, sets
+the packages the user switched on, when it starts and whenever the user changes them. Without
+arguments the command prints "supported", which is how the agent tells an image with this change
+from one without it.
+
+Every TopResumedActivityChangeItem now says whether the activity's package keeps its focus
+(ActivityRecord.dsaKeepFocus), and the app's process keeps that on the activity's record
+(ActivityClientRecord.mDsaKeepFocus). For such an activity, while it stays resumed:
+
+- ActivityThread.handleTopResumedActivityChanged does not report the loss of the top resumed
+  state to the activity. It still records the state, and the item still tells the window
+  manager the loss was handled (activityTopResumedStateLost), so the next top activity does not
+  wait for it. The activity hears the loss when it pauses, before onPause, as Android always
+  reports it then (performPauseActivityIfNeeded), and not at all if it is the top resumed one
+  again before that.
+- ViewRootImpl does not tell the views of its windows (the activity's own and its dialogs') that
+  the window lost the window focus while another app's task is the top resumed one and the
+  window is visible. The window manager moves the top resumed activity before the window focus,
+  so the word that another task is on top normally comes first; when the loss of window focus
+  comes first, it waits up to 300 ms for that word, and the views are told after all without it
+  (the focus went to another window of the same app). When the window gets the focus back, the
+  views are not told either, since they never heard they lost it. When the window is hidden, the
+  views are told of the loss then.
+
+Only what the app hears changes. The window focus itself follows the input dispatcher as before:
+mAttachInfo.mHasWindowFocus, the IME's served window, the input stages and pointer capture take
+the loss at once, so keys and IME text go only to the window that has the focus. Nothing changes
+for an app that is not set, nor while no package is set, which is the default.
+
+Applies to frameworks/base at 45034f0663f960d9ee5fb0a101a4732b71f6e2f4 (Android 16), after 0010.
+---
+diff --git a/core/java/android/app/ActivityThread.java b/core/java/android/app/ActivityThread.java
+--- a/core/java/android/app/ActivityThread.java
++++ b/core/java/android/app/ActivityThread.java
+@@ -679,6 +679,13 @@ public final class ActivityThread extend
+         // server may come at random time, but we always need to report changes between ON_RESUME
+         // and ON_PAUSE to the app.
+         boolean lastReportedTopResumedState;
++        /**
++         * DSA: whether this activity's app keeps its focus while another app's task is the top
++         * resumed one ("keep game focus"), as the window manager last said with a
++         * TopResumedActivityChangeItem.
++         * @hide
++         */
++        public boolean mDsaKeepFocus;
+ 
+         ProfilerInfo profilerInfo;
+ 
+@@ -4198,6 +4205,35 @@ public final class ActivityThread extend
+         return mActivities.get(token);
+     }
+ 
++    /** DSA: the window does not keep its app's focus ({@link #dsaWindowFocusKept}). @hide */
++    public static final int DSA_FOCUS_NOT_KEPT = 0;
++    /** DSA: the window keeps its app's focus: another app's task is the top resumed one. @hide */
++    public static final int DSA_FOCUS_KEPT = 1;
++    /**
++     * DSA: the window's app keeps its focus, but its activity is still the top resumed one as
++     * far as this process knows, so the focus may have gone to another window of the same app,
++     * or the window manager's word that another task is on top is still on its way. @hide
++     */
++    public static final int DSA_FOCUS_MAYBE_KEPT = 2;
++
++    /**
++     * DSA: whether a window of the activity with {@code activityToken} (its own window or a
++     * dialog's) keeps its app's focus when it loses the window focus ("keep game focus"): the
++     * app is marked (ActivityClientRecord.mDsaKeepFocus) and the activity is resumed, so its
++     * task is still visible. ViewRootImpl then does not tell the app's views of the loss.
++     * Called on the main thread, where the records are kept. @hide
++     */
++    public int dsaWindowFocusKept(IBinder activityToken) {
++        if (activityToken == null || Looper.myLooper() != Looper.getMainLooper()) {
++            return DSA_FOCUS_NOT_KEPT;
++        }
++        final ActivityClientRecord r = mActivities.get(activityToken);
++        if (r == null || !r.mDsaKeepFocus || r.getLifecycleState() != ON_RESUME) {
++            return DSA_FOCUS_NOT_KEPT;
++        }
++        return r.isTopResumedActivity ? DSA_FOCUS_MAYBE_KEPT : DSA_FOCUS_KEPT;
++    }
++
+     @VisibleForTesting(visibility = PACKAGE)
+     public Configuration getConfiguration() {
+         return mConfigurationController.getConfiguration();
+@@ -6056,6 +6092,21 @@ public final class ActivityThread extend
+         r.isTopResumedActivity = onTop;
+ 
+         if (r.getLifecycleState() == ON_RESUME) {
++            // DSA: an app that keeps its focus ("keep game focus") is not told that another
++            // app's task became the top resumed one while its own activity stays resumed, so a
++            // game that pauses when it hears it is no longer on top keeps running while the
++            // user works in another app's window. It hears it once the activity pauses
++            // (performPauseActivityIfNeeded reports the loss before onPause), and not at all
++            // if it is the top resumed one again before that. Only the report to the app is
++            // left out: isTopResumedActivity follows the window manager, and the item still
++            // tells the window manager the loss was handled, so the next activity is not kept
++            // waiting for it.
++            if (!onTop && r.mDsaKeepFocus) {
++                if (DEBUG_ORDER) {
++                    Slog.d(TAG, "Keeping top position for an app that keeps its focus: " + r);
++                }
++                return;
++            }
+             reportTopResumedActivityChanged(r, onTop, "topStateChangedWhenResumed");
+         } else {
+             if (DEBUG_ORDER) {
+diff --git a/core/java/android/app/servertransaction/TopResumedActivityChangeItem.java b/core/java/android/app/servertransaction/TopResumedActivityChangeItem.java
+--- a/core/java/android/app/servertransaction/TopResumedActivityChangeItem.java
++++ b/core/java/android/app/servertransaction/TopResumedActivityChangeItem.java
+@@ -36,15 +36,32 @@ public class TopResumedActivityChangeIte
+ 
+     private final boolean mOnTop;
+ 
++    /**
++     * DSA: whether the activity's app keeps its focus while another app's task is the top
++     * resumed one ("keep game focus"), as the window manager says for its package
++     * (ActivityRecord.dsaKeepFocus).
++     */
++    private final boolean mDsaKeepFocus;
++
+     public TopResumedActivityChangeItem(@NonNull IBinder activityToken, boolean onTop) {
++        this(activityToken, onTop, false);
++    }
++
++    /** DSA: the item for an activity whose app keeps its focus or not (mDsaKeepFocus). */
++    public TopResumedActivityChangeItem(@NonNull IBinder activityToken, boolean onTop,
++            boolean dsaKeepFocus) {
+         super(activityToken);
+         mOnTop = onTop;
++        mDsaKeepFocus = dsaKeepFocus;
+     }
+ 
+     @Override
+     public void execute(@NonNull ClientTransactionHandler client, @NonNull ActivityClientRecord r,
+             @NonNull PendingTransactionActions pendingActions) {
+         Trace.traceBegin(TRACE_TAG_ACTIVITY_MANAGER, "topResumedActivityChangeItem");
++        // DSA: the mark goes with every item, so the activity's process always has the one the
++        // window manager last gave.
++        r.mDsaKeepFocus = mDsaKeepFocus;
+         client.handleTopResumedActivityChanged(r, mOnTop, "topResumedActivityChangeItem");
+         Trace.traceEnd(TRACE_TAG_ACTIVITY_MANAGER);
+     }
+@@ -72,12 +89,14 @@ public class TopResumedActivityChangeIte
+     public void writeToParcel(@NonNull Parcel dest, int flags) {
+         super.writeToParcel(dest, flags);
+         dest.writeBoolean(mOnTop);
++        dest.writeBoolean(mDsaKeepFocus);
+     }
+ 
+     /** Reads from Parcel. */
+     private TopResumedActivityChangeItem(@NonNull Parcel in) {
+         super(in);
+         mOnTop = in.readBoolean();
++        mDsaKeepFocus = in.readBoolean();
+     }
+ 
+     public static final @NonNull Creator<TopResumedActivityChangeItem> CREATOR = new Creator<>() {
+@@ -99,7 +118,7 @@ public class TopResumedActivityChangeIte
+             return false;
+         }
+         final TopResumedActivityChangeItem other = (TopResumedActivityChangeItem) o;
+-        return mOnTop == other.mOnTop;
++        return mOnTop == other.mOnTop && mDsaKeepFocus == other.mDsaKeepFocus;
+     }
+ 
+     @Override
+@@ -107,11 +126,13 @@ public class TopResumedActivityChangeIte
+         int result = 17;
+         result = 31 * result + super.hashCode();
+         result = 31 * result + (mOnTop ? 1 : 0);
++        result = 31 * result + (mDsaKeepFocus ? 1 : 0);
+         return result;
+     }
+ 
+     @Override
+     public String toString() {
+-        return "TopResumedActivityChangeItem{" + super.toString() + ",onTop=" + mOnTop + "}";
++        return "TopResumedActivityChangeItem{" + super.toString() + ",onTop=" + mOnTop
++                + (mDsaKeepFocus ? ",dsaKeepFocus" : "") + "}";
+     }
+ }
+diff --git a/core/java/android/view/ViewRootImpl.java b/core/java/android/view/ViewRootImpl.java
+--- a/core/java/android/view/ViewRootImpl.java
++++ b/core/java/android/view/ViewRootImpl.java
+@@ -712,6 +712,25 @@ public final class ViewRootImpl implemen
+     boolean mWindowFocusChanged;
+     @GuardedBy("this")
+     boolean mUpcomingWindowFocus;
++
++    /**
++     * DSA: set while this window lost the window focus but its views were not told, because
++     * its app keeps its focus while another app's window has it ("keep game focus",
++     * ActivityThread.dsaWindowFocusKept). They are told when the window is hidden
++     * (dsaReleaseFocusLoss), and not at all if it gets the focus back first.
++     */
++    private boolean mDsaFocusLossHeld;
++
++    /**
++     * DSA: how long a kept app's window waits, after it lost the window focus while its
++     * activity was still the top resumed one, for the window manager to say another app's
++     * task is on top. The window manager says that before it moves the window focus, so the
++     * wait is only for the order the two reach this process in. Without that word by then, the
++     * focus went to another window of the same app, and the views are told after all.
++     */
++    private static final long DSA_FOCUS_LOSS_SETTLE_MS = 300;
++
++    private final Runnable mDsaFocusLossCheck = this::dsaCheckFocusLoss;
+     @GuardedBy("this")
+     boolean mUpcomingInTouchMode;
+     /**
+@@ -2294,6 +2313,10 @@ public final class ViewRootImpl implemen
+         }
+         mSeqId = Math.max(seqId, mSeqId);
+         if (mAppVisible != visible) {
++            // DSA: a hidden window no longer keeps its app's focus.
++            if (!visible) {
++                dsaReleaseFocusLoss();
++            }
+             final boolean previousVisible = getHostVisibility() == View.VISIBLE;
+             mAppVisible = visible;
+             final boolean currentVisible = getHostVisibility() == View.VISIBLE;
+@@ -4962,14 +4985,86 @@ public final class ViewRootImpl implemen
+ 
+         if (mView != null) {
+             mAttachInfo.mKeyDispatchState.reset();
+-            mView.dispatchWindowFocusChanged(hasWindowFocus);
+-            mAttachInfo.mTreeObserver.dispatchOnWindowFocusChange(hasWindowFocus);
++            // DSA: the window focus itself (mHasWindowFocus, the IME, the input stages) follows
++            // the window manager, so keys and text go only to the window that has it; only the
++            // app's views are not told of a loss its app keeps ("keep game focus").
++            if (fakeFocus || !dsaKeepsFocus(hasWindowFocus)) {
++                mView.dispatchWindowFocusChanged(hasWindowFocus);
++                mAttachInfo.mTreeObserver.dispatchOnWindowFocusChange(hasWindowFocus);
++            }
+             if (mAttachInfo.mTooltipHost != null) {
+                 mAttachInfo.mTooltipHost.hideTooltip();
+             }
+         }
+     }
+ 
++    /**
++     * DSA: whether the views are not told of this change of window focus, because the app
++     * keeps its focus ("keep game focus"). A loss is kept while another app's task is the top
++     * resumed one and this window is visible (ActivityThread.dsaWindowFocusKept); while the
++     * activity is still on top as far as this process knows, the loss waits
++     * DSA_FOCUS_LOSS_SETTLE_MS for the word that another task is (dsaCheckFocusLoss). A gain
++     * after a kept loss is not told either: the views never heard they lost the focus.
++     */
++    private boolean dsaKeepsFocus(boolean hasWindowFocus) {
++        mHandler.removeCallbacks(mDsaFocusLossCheck);
++        if (hasWindowFocus) {
++            final boolean held = mDsaFocusLossHeld;
++            mDsaFocusLossHeld = false;
++            return held;
++        }
++        if (mDsaFocusLossHeld) {
++            return true;
++        }
++        if (!mAppVisible) {
++            return false;
++        }
++        final ActivityThread thread = ActivityThread.currentActivityThread();
++        if (thread == null) {
++            return false;
++        }
++        switch (thread.dsaWindowFocusKept(mWindowAttributes.token)) {
++            case ActivityThread.DSA_FOCUS_KEPT:
++                mDsaFocusLossHeld = true;
++                return true;
++            case ActivityThread.DSA_FOCUS_MAYBE_KEPT:
++                mDsaFocusLossHeld = true;
++                mHandler.postDelayed(mDsaFocusLossCheck, DSA_FOCUS_LOSS_SETTLE_MS);
++                return true;
++            default:
++                return false;
++        }
++    }
++
++    /**
++     * DSA: a loss of window focus that waited for the word that another app's task is the top
++     * resumed one: kept if that came, told to the views now if it did not.
++     */
++    private void dsaCheckFocusLoss() {
++        if (!mDsaFocusLossHeld || mAttachInfo.mHasWindowFocus) {
++            return;
++        }
++        final ActivityThread thread = ActivityThread.currentActivityThread();
++        if (mAppVisible && thread != null && thread.dsaWindowFocusKept(mWindowAttributes.token)
++                == ActivityThread.DSA_FOCUS_KEPT) {
++            return;
++        }
++        dsaReleaseFocusLoss();
++    }
++
++    /** DSA: tells the views of a loss of window focus they were not told of, if any. */
++    private void dsaReleaseFocusLoss() {
++        mHandler.removeCallbacks(mDsaFocusLossCheck);
++        if (!mDsaFocusLossHeld) {
++            return;
++        }
++        mDsaFocusLossHeld = false;
++        if (mView != null && !mAttachInfo.mHasWindowFocus) {
++            mView.dispatchWindowFocusChanged(false);
++            mAttachInfo.mTreeObserver.dispatchOnWindowFocusChange(false);
++        }
++    }
++
+     private void handleWindowTouchModeChanged() {
+         final boolean inTouchMode;
+         synchronized (this) {
+diff --git a/services/core/java/com/android/server/wm/ActivityRecord.java b/services/core/java/com/android/server/wm/ActivityRecord.java
+--- a/services/core/java/com/android/server/wm/ActivityRecord.java
++++ b/services/core/java/com/android/server/wm/ActivityRecord.java
+@@ -1432,10 +1432,29 @@ final class ActivityRecord extends Windo
+         ProtoLog.v(WM_DEBUG_STATES, "Sending position change to %s, onTop: %b",
+                 this, onTop);
+ 
+-        final TopResumedActivityChangeItem item = new TopResumedActivityChangeItem(token, onTop);
++        final TopResumedActivityChangeItem item = new TopResumedActivityChangeItem(token, onTop,
++                dsaKeepFocus());
+         return mAtmService.getLifecycleManager().scheduleTransactionItem(app.getThread(), item);
+     }
+ 
++    /**
++     * DSA: the packages whose activities keep their focus while another app's task is the top
++     * resumed one ("keep game focus"), as the DSA agent last set them through the window
++     * manager's shell command dsa-keep-focus. The set is replaced, never changed in place.
++     */
++    static volatile java.util.Set<String> sDsaKeepFocusPackages = java.util.Collections.emptySet();
++
++    /**
++     * DSA: whether this activity's app keeps its focus. The activity's process then does not
++     * tell the app that another app's task became the top resumed one, nor its views that its
++     * window lost the window focus, while the activity stays resumed
++     * (ActivityThread.handleTopResumedActivityChanged, ViewRootImpl.dsaKeepsFocus). Which
++     * window gets keys and text does not change: that follows the window focus as before.
++     */
++    boolean dsaKeepFocus() {
++        return packageName != null && sDsaKeepFocusPackages.contains(packageName);
++    }
++
+     void updateMultiWindowMode() {
+         if (task == null || task.getRootTask() == null || !attachedToProcess()) {
+             return;
+diff --git a/services/core/java/com/android/server/wm/WindowManagerShellCommand.java b/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
+--- a/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
++++ b/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
+@@ -165,6 +165,9 @@ public class WindowManagerShellCommand e
+                 // DSA: whether a change of density alone relaunches a task's activities.
+                 case "dsa-forced-density":
+                     return runDsaForcedDensity(pw);
++                // DSA: which apps keep their focus while another app's task is on top.
++                case "dsa-keep-focus":
++                    return runDsaKeepFocus(pw);
+                 case "shell":
+                     return runWmShellCommand(pw);
+                 default:
+@@ -1555,6 +1558,42 @@ public class WindowManagerShellCommand e
+         return 0;
+     }
+ 
++    /**
++     * DSA: sets the packages whose activities keep their focus while another app's task is the
++     * top resumed one ("keep game focus", ActivityRecord.dsaKeepFocus).
++     *
++     *     dsa-keep-focus                          prints "supported"
++     *     dsa-keep-focus set [PACKAGE...]         the packages, replacing those before
++     *
++     * The DSA agent sets the packages the user switched on, when it starts and whenever the
++     * user changes them; "set" alone switches every app off. Without arguments the command only
++     * answers, which tells the agent this framework has the change: one without it answers
++     * "Unknown command". The set lives in the window manager's process, so it ends when that
++     * process does, and the agent sets it again when it starts. An activity hears of a change
++     * with the next change of its top resumed state. The caller needs MANAGE_ACTIVITY_TASKS.
++     */
++    private int runDsaKeepFocus(PrintWriter pw) {
++        mInternal.mContext.enforceCallingOrSelfPermission(
++                android.Manifest.permission.MANAGE_ACTIVITY_TASKS, "dsa-keep-focus");
++        final String verb = getNextArg();
++        if (verb == null) {
++            pw.println("supported");
++            return 0;
++        }
++        if (!"set".equals(verb)) {
++            getErrPrintWriter().println("Error: expected set, not " + verb);
++            return -1;
++        }
++        final android.util.ArraySet<String> packages = new android.util.ArraySet<>();
++        for (String arg = getNextArg(); arg != null; arg = getNextArg()) {
++            if (!arg.isEmpty()) {
++                packages.add(arg);
++            }
++        }
++        ActivityRecord.sDsaKeepFocusPackages = java.util.Collections.unmodifiableSet(packages);
++        return 0;
++    }
++
+     private int runWmShellCommand(PrintWriter pw) {
+         final String[] args = peekRemainingArgs();
+         ArrayList<String> sbArgs = new ArrayList<>();

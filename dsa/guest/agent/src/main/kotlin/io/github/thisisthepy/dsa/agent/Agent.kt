@@ -103,6 +103,7 @@ import io.github.thisisthepy.dsa.agent.widgets.WidgetManager
 import io.github.thisisthepy.dsa.agent.widgets.WidgetPlatform
 import io.github.thisisthepy.dsa.agent.widgets.WidgetStore
 import io.github.thisisthepy.dsa.agent.windowing.ForcedDensity
+import io.github.thisisthepy.dsa.agent.windowing.KeepFocus
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.GestureExclusion
 import io.github.thisisthepy.dsa.agent.windowing.BelowTitleBar
@@ -492,6 +493,7 @@ class Agent(
     private val captions = CaptionInsets(actions, log)
     private val belowTitleBar = BelowTitleBar()
     private val forcedDensity = ForcedDensity(actions, log)
+    private val keepFocus = KeepFocus(actions, log)
     private val fullScreenHolds = FullScreenHolds()
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
     private val shortcutReporter = ShortcutReporter(ownPackage) { frame -> channel.send(frame) }
@@ -947,10 +949,6 @@ class Agent(
                 log.warn("could not open the settings of ${result.packageName ?: "every app"}: ${result.reason}")
             is RequestResult.Closed -> log.info("ended task ${result.taskId}")
             is RequestResult.CloseRefused -> log.warn("did not end task ${result.taskId}: ${result.reason}")
-            // A game that keeps its focus behind another window: its task holds Android's
-            // input focus, so it hears it has the focus and stays the top resumed activity.
-            is RequestResult.Focused -> log.info("gave task ${result.taskId} the input focus, as its app keeps it")
-            is RequestResult.FocusRefused -> log.warn("did not give task ${result.taskId} the input focus: ${result.reason}")
             is RequestResult.Resize -> {
                 trace.received(result.taskId, result.size, result.live, queuedMillis)
                 arranger.resize(result.taskId, result.size, result.live)
@@ -989,6 +987,7 @@ class Agent(
             is RequestResult.CaptionCompat -> {
                 log.info("${result.belowTitleBar.size} apps start below the title bar")
                 belowTitleBar.hostSays(result.belowTitleBar)
+                keepFocus.hostSays(result.keepFocus)
             }
             is RequestResult.SizeRefused -> log.warn("did not resize task ${result.taskId}: ${result.reason}")
             is RequestResult.Malformed -> log.warn("dropped a frame: ${result.reason}")

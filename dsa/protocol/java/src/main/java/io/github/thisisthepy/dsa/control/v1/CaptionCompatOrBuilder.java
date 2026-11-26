@@ -31,4 +31,29 @@ public interface CaptionCompatOrBuilder extends
    */
   com.google.protobuf.ByteString
       getBelowTitleBarBytes(int index);
+
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @return A list containing the keepFocus.
+   */
+  java.util.List<java.lang.String>
+      getKeepFocusList();
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @return The count of keepFocus.
+   */
+  int getKeepFocusCount();
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param index The index of the element to return.
+   * @return The keepFocus at the given index.
+   */
+  java.lang.String getKeepFocus(int index);
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param index The index of the element to return.
+   * @return The keepFocus at the given index.
+   */
+  com.google.protobuf.ByteString
+      getKeepFocusBytes(int index);
 }

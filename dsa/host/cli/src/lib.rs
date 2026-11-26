@@ -81,9 +81,10 @@
 //! unified title bar, the app's content begins under the band and the band takes the app's own
 //! bar color. It is for an app whose top bar is squeezed or hidden under the title bar, is off
 //! by default, and counts from the next time a window of the app opens.
-//! `--keep-focus on|off` keeps the app focused inside Android while its window is not the
-//! active one, so a game that pauses when it loses the focus keeps running behind another
-//! window. Keys and text still go to a window only while it is the active one. Off by default.
+//! `--keep-focus on|off` keeps the app's focus while another app's window has it: while its
+//! window is visible, Android does not tell the app that it lost the focus, so a game that
+//! pauses when it loses the focus keeps running while the user works in another app's window.
+//! Keys and text still go only to the window that has the focus. Off by default.
 //! `reset` puts the app back to the defaults. With `--json` it prints `apps`, each with `package`, `fixed_size`, `start_size`
 //! (null for none, else `[width, height]`), `dpi_scaling`, `default_dpi_scaling` (what `auto`
 //! is for that app: `system` for an app on the built-in list, else `auto`, its own way),
@@ -653,7 +654,7 @@ pub enum AppWindowAction {
     /// (`Some(None)` for the size Android gives the task), and how it follows its window to a
     /// monitor of another scale, where it shows a clear full screen request and its bars
     /// hidden alone, whether it starts below the title bar, and whether it keeps its focus
-    /// while its window is not the active one.
+    /// while another app's window has it.
     Set {
         package: String,
         fixed_size: Option<bool>,
@@ -2682,7 +2683,7 @@ fn describe_app_window(app: &AppWindowSettings) -> String {
         line.push_str(", starts below the title bar");
     }
     if app.keep_focus {
-        line.push_str(", keeps its focus behind other windows");
+        line.push_str(", keeps its focus while another app's window has it");
     }
     line
 }
