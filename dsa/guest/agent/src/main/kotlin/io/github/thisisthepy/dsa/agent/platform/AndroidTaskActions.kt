@@ -499,6 +499,40 @@ class AndroidTaskActions(
         false
     }
 
+    /**
+     * Asks the window manager's dsa-overlay-density shell command, which DSA's framework adds,
+     * to answer. An image without that change answers "Unknown command", which [serviceShell]
+     * turns into a failure.
+     */
+    override fun overlayDensitySupported(): Boolean = try {
+        serviceShell(WINDOW_SERVICE, OVERLAY_DENSITY_COMMAND) == "supported"
+    } catch (e: Exception) {
+        log.info("the window manager has no $OVERLAY_DENSITY_COMMAND command (${e.message})")
+        false
+    }
+
+    /**
+     * Gives the overlay window its density, or takes it away with 0, through the window
+     * manager's dsa-overlay-density shell command (`cmd window dsa-overlay-density <window>
+     * <dpi>`), which needs the MANAGE_ACTIVITY_TASKS permission the agent holds. The window
+     * manager passes it to the window's app, which converts that window's views.
+     */
+    override fun setOverlayDensity(window: String, densityDpi: Int): Boolean = try {
+        serviceShell(WINDOW_SERVICE, OVERLAY_DENSITY_COMMAND, window, densityDpi.toString())
+        true
+    } catch (e: Exception) {
+        log.warn("the window manager did not give overlay window $window $densityDpi dpi", e)
+        false
+    }
+
+    /** The density the window manager says it gave the overlay window last, 0 for none. */
+    override fun overlayDensity(window: String): Int = try {
+        serviceShell(WINDOW_SERVICE, OVERLAY_DENSITY_COMMAND, window).toIntOrNull() ?: 0
+    } catch (e: Exception) {
+        log.info("could not read the density of overlay window $window (${e.message})")
+        0
+    }
+
     private val statusBarHeights = HashMap<Int, Int>()
 
     /**
@@ -613,6 +647,7 @@ class AndroidTaskActions(
         const val WINDOW_SERVICE = "window"
         const val FORCED_DENSITY_COMMAND = "dsa-forced-density"
         const val KEEP_FOCUS_COMMAND = "dsa-keep-focus"
+        const val OVERLAY_DENSITY_COMMAND = "dsa-overlay-density"
 
         // InsetsSource.FLAG_FORCE_CONSUMING (1 shl 2) and
         // FLAG_FORCE_CONSUMING_OPAQUE_CAPTION_BAR (1 shl 4), the same in Android 16 and 17:

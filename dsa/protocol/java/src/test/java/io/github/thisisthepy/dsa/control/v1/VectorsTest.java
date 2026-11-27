@@ -97,6 +97,17 @@ public final class VectorsTest {
         cases.put("set_task_density_forced", Envelope.newBuilder()
                 .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240).setForced(true))
                 .build());
+        cases.put("set_overlay_density", Envelope.newBuilder()
+                .setSetOverlayDensity(SetOverlayDensity.newBuilder().setOverlayId(0x40000001).setDensityDpi(262))
+                .build());
+        cases.put("set_overlay_density_back", Envelope.newBuilder()
+                .setSetOverlayDensity(SetOverlayDensity.newBuilder().setOverlayId(0x40000001))
+                .build());
+        cases.put("task_updated_overlay_density", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(0x40000001)
+                        .setOverlay(OverlayWindow.newBuilder().setWindowType(2038).setDensityDpi(262)))
+                .build());
         cases.put("task_updated_forced_density", Envelope.newBuilder()
                 .setTaskUpdated(TaskUpdated.newBuilder().setTaskId(42).setForcedDensityAvailable(true))
                 .build());

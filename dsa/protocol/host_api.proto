@@ -218,6 +218,15 @@ message SetTaskDensity {
   bool forced = 4;
 }
 
+// An app overlay window's window is on a monitor whose density differs from the one its app,
+// set to System (forced) scaling, draws at: asks the caller's Android to draw that window alone
+// at `density_dpi`, or at its app's own density again with 0 (the control protocol's
+// SetOverlayDensity).
+message SetOverlayDensity {
+  int32 overlay_id = 1;
+  uint32 density_dpi = 2;
+}
+
 // The monitor the window of the next task opens on: asks the caller's Android to start the
 // tasks it starts from now on at that monitor's density and size, so an app's first frame is
 // already right and it is never relaunched right after it opens (see the control protocol's
@@ -1434,6 +1443,9 @@ message OverlayWindow {
   bool focusable = 2;
   // Whether the window takes pointer input; the pointer passes through one that does not.
   bool touchable = 3;
+  // The density the app draws this window at once it took the one the window manager asked
+  // for it (SetOverlayDensity); 0 while it draws it as the rest of its process.
+  uint32 density_dpi = 4;
 }
 
 // How a task's app asks to fill the screen.
@@ -3042,6 +3054,7 @@ message Request {
     StreamInput stream_input = 11;
     ResizeTask resize_task = 12;
     SetTaskDensity set_task_density = 13;
+    SetOverlayDensity set_overlay_density = 49;
     GetMemory get_memory = 14;
     ListApps list_apps = 15;
     GetSettings get_settings = 16;

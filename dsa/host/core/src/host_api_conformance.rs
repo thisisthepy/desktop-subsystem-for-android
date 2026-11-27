@@ -2020,6 +2020,16 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
         .resize_task(9, 1280, 720, true)
         .expect("the live resize");
     client.resize_task(9, 1280, 720, false).expect("the resize");
+    // An overlay window of a forced app on a monitor of another density, and back.
+    client
+        .set_overlay_density(0x4000_0001, 262)
+        .expect("the overlay's density");
+    client
+        .request(&TaskRequest::SetOverlayDensity {
+            overlay_id: 0x4000_0001,
+            density_dpi: 0,
+        })
+        .expect("the overlay's own density again");
     assert_eq!(
         *androids.of(&user).unwrap().requests.lock().unwrap(),
         vec![
@@ -2044,6 +2054,14 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
                 width: 1280,
                 height: 720,
                 live: false
+            },
+            TaskRequest::SetOverlayDensity {
+                overlay_id: 0x4000_0001,
+                density_dpi: 262
+            },
+            TaskRequest::SetOverlayDensity {
+                overlay_id: 0x4000_0001,
+                density_dpi: 0
             },
         ]
     );

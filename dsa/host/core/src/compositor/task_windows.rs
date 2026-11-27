@@ -150,17 +150,62 @@ struct Overlay {
     /// density the app's task was given without a relaunch, for an app set to System (forced)
     /// scaling ([`TaskWindows::overlay_density`]). 0 when it is drawn at the display's.
     drawn_at: u32,
+    /// The density the guest was last asked to draw this window alone at
+    /// ([`TaskRequest::SetOverlayDensity`], 0 for its app's own); `None` until it was asked
+    /// anything, when the guest's report says what it has.
+    asked: Option<u32>,
+    /// Whether the user is dragging the window now: it is asked for no density until the drag
+    /// ends, so a drag across monitors asks once, for the monitor it ends on.
+    dragged: bool,
+}
+
+/// The density the window manager asks the guest to draw one app overlay window at, when the
+/// app draws at `drawn_at` (the density of its task, for an app set to System (forced) scaling;
+/// 0 for any other) and the window is on a monitor of `dpi` (0 while the window has not said).
+/// That monitor's density when it differs from the app's, so the overlay is drawn sharp there
+/// instead of stretched; 0, the app's own, when it is the same or the app is not forced. An app
+/// that is not forced draws its overlays at the display's density, and its windows are never
+/// asked anything.
+pub fn overlay_density_wanted(drawn_at: u32, dpi: u32) -> u32 {
+    if drawn_at == 0 || dpi == 0 {
+        return 0;
+    }
+    let monitor = density_for_dpi(dpi);
+    if monitor == drawn_at {
+        0
+    } else {
+        monitor
+    }
 }
 
 impl Overlay {
-    /// The density the overlay is drawn at: the guest display's, which the guest reports for
-    /// it, or the one its app's process draws at instead.
+    /// The density the overlay is drawn at: the one the guest says the app took for this window
+    /// alone, else the one its app's process draws at, else the guest display's, which the
+    /// guest reports for it.
     fn density(&self) -> u32 {
-        if self.drawn_at != 0 {
+        let own = self.task.overlay.map_or(0, |overlay| overlay.density_dpi);
+        if own != 0 {
+            own
+        } else if self.drawn_at != 0 {
             self.drawn_at
         } else {
             self.task.density_dpi
         }
+    }
+
+    /// The density this window alone is to be drawn at ([`overlay_density_wanted`]), when the
+    /// guest is to be asked for it now: it differs from what the guest was last asked, or, if
+    /// it was never asked, from what the guest says the window has. `None` while the window is
+    /// dragged, has no window, or has what it should.
+    fn density_request(&self) -> Option<u32> {
+        if !self.window || self.dragged {
+            return None;
+        }
+        let wanted = overlay_density_wanted(self.drawn_at, self.dpi);
+        let has = self
+            .asked
+            .unwrap_or_else(|| self.task.overlay.map_or(0, |overlay| overlay.density_dpi));
+        (wanted != has).then_some(wanted)
     }
 
     /// How large the window shows each of the overlay's pixels: the overlay is drawn at its
@@ -461,7 +506,9 @@ pub struct TaskWindows {
     notes: Vec<String>,
     /// The app overlay windows the guest reported. They are kept apart from the tasks: none
     /// of what the host asks of a task (a size, a density, a title bar, an end) is ever asked
-    /// of an overlay, whose app alone moves, sizes and removes it.
+    /// of an overlay, whose app alone moves, sizes and removes it. The one thing asked of an
+    /// overlay of an app set to System (forced) scaling is the density of the monitor its
+    /// window is on ([`Self::overlay_density_requests`]).
     overlays: BTreeMap<i32, Overlay>,
     /// The windows that have no frame yet, and when each asks the guest for one.
     frame_requests: FrameRequests,
@@ -592,6 +639,12 @@ impl TaskWindows {
                 .filter(|_| had_window && shows)
                 .map_or(0, |overlay| overlay.dpi),
             drawn_at: self.overlay_density(&task.package_name),
+            // What the guest was asked for this window holds while the window lives.
+            asked: previous.as_ref().and_then(|overlay| overlay.asked),
+            dragged: previous
+                .as_ref()
+                .filter(|_| had_window && shows)
+                .is_some_and(|overlay| overlay.dragged),
         };
         self.overlays.insert(task_id, now.clone());
         match (previous.filter(|_| had_window), shows) {
@@ -648,6 +701,31 @@ impl TaskWindows {
             .filter(|task| task.package_name == package && task.density_dpi != 0)
             .find(|task| self.forced_of(task))
             .map_or(0, |task| task.density_dpi)
+    }
+
+    /// What the guest is to be asked of the overlays' own densities now, each once
+    /// ([`Overlay::density_request`]).
+    ///
+    /// An app set to System (forced) scaling draws its overlays at its task's density, wherever
+    /// they are, so on a monitor of another density the window shows the overlay stretched:
+    /// FLO's floating lyrics, drawn at 164 dpi beside FLO's window on a 125% monitor, were 1.6
+    /// times larger on the 200% main monitor, the right size but blurred. The guest is asked to
+    /// draw that window alone at its monitor's density, and at its app's again once it is back
+    /// on a monitor of the task's density. Until the guest says the app took it
+    /// ([`crate::tasks::OverlayWindow::density_dpi`]), the window goes on scaling the overlay
+    /// from the density it is drawn at, so its size never jumps; then it shows it 1:1.
+    fn overlay_density_requests(&mut self) -> Vec<TaskRequest> {
+        let mut requests = Vec::new();
+        for (task_id, overlay) in &mut self.overlays {
+            if let Some(density_dpi) = overlay.density_request() {
+                overlay.asked = Some(density_dpi);
+                requests.push(TaskRequest::SetOverlayDensity {
+                    overlay_id: *task_id,
+                    density_dpi,
+                });
+            }
+        }
+        requests
     }
 
     /// The overlays whose app draws them at another density now: its task was given another
@@ -1345,8 +1423,9 @@ impl TaskWindows {
     /// new window has to be told. Nothing for a task that has no window.
     pub fn reopen(&mut self, task_id: i32) -> Vec<WindowChange> {
         if let Some(overlay) = self.overlays.get_mut(&task_id).filter(|o| o.window) {
-            // The new window says which monitor it is on.
+            // The new window says which monitor it is on, and no drag of the old one goes on.
             overlay.dpi = 0;
+            overlay.dragged = false;
             let changes = overlay.open_changes();
             return self.track_frames(&changes);
         }
@@ -1443,9 +1522,11 @@ impl TaskWindows {
     /// whose app does not say it handles a change of density is never asked for another
     /// unless the user chose the app mode for it (Android then recreates its activity).
     pub fn window_dpi(&mut self, task_id: i32, dpi: u32) -> (Vec<WindowChange>, Vec<TaskRequest>) {
-        // An overlay is never asked for a density: its window shows it at its monitor's scale.
+        // An overlay is asked for no density of the task's kind: its window shows it at its
+        // monitor's scale, and only an overlay of a forced app is drawn at that monitor's
+        // density ([`Self::overlay_density_requests`]).
         if let Some(changes) = self.overlay_dpi(task_id, dpi) {
-            return (changes, Vec::new());
+            return (changes, self.overlay_density_requests());
         }
         if !self.has_window(task_id) {
             return (Vec::new(), Vec::new());
@@ -1500,7 +1581,9 @@ impl TaskWindows {
                 .into_iter()
                 .filter(|change| !matches!(change, WindowChange::Resize { .. }))
                 .collect();
-            return Some((size, Vec::new(), changes));
+            // An overlay of a forced app that opens on a monitor of another density than its
+            // task's (where the user's drag left it) is drawn at that monitor's.
+            return Some((size, self.overlay_density_requests(), changes));
         }
         if !self.has_window(task_id) {
             return None;
@@ -1550,7 +1633,7 @@ impl TaskWindows {
         dpi: u32,
     ) -> (Vec<WindowChange>, Vec<TaskRequest>) {
         if let Some(changes) = self.overlay_dpi(task_id, dpi) {
-            return (changes, Vec::new());
+            return (changes, self.overlay_density_requests());
         }
         if !self.has_window(task_id) {
             return (Vec::new(), Vec::new());
@@ -1580,6 +1663,16 @@ impl TaskWindows {
         active: bool,
         now: Instant,
     ) -> Vec<TaskRequest> {
+        // The user drags an overlay by its app's own drag, which may carry it onto another
+        // monitor: its density is asked for once the drag ends, on the monitor it ends on.
+        if let Some(overlay) = self.overlays.get_mut(&task_id).filter(|o| o.window) {
+            overlay.dragged = active;
+            return if active {
+                Vec::new()
+            } else {
+                self.overlay_density_requests()
+            };
+        }
         if !self.has_window(task_id) {
             return Vec::new();
         }
@@ -1672,6 +1765,9 @@ impl TaskWindows {
         );
         requests.extend(self.full_screen_requests());
         requests.append(&mut self.queued);
+        // An overlay of a forced app whose task took another density, or whose app the user
+        // set to another mode, may be drawn at its monitor's density now, or at its app's again.
+        requests.extend(self.overlay_density_requests());
         requests.extend(self.size_reconfigures(now));
         requests.extend(self.frame_asks(now));
         requests
@@ -3744,6 +3840,7 @@ mod tests {
                 window_type: 2038,
                 focusable: false,
                 touchable: true,
+                ..OverlayWindow::default()
             }),
             ..Task::default()
         }
@@ -3955,13 +4052,15 @@ mod tests {
     }
 
     #[test]
-    fn fr41_an_overlay_of_a_forced_app_on_another_monitor_keeps_its_tasks_density() {
-        // The lyrics dragged onto the 200% main monitor (192 dpi) while FLO's window stays on
-        // the 125% one: FLO's process still draws them at 164 dpi, so they are shown at 262
-        // over 164, the size they would be drawn at 262.
+    fn fr41_an_overlay_of_a_forced_app_on_another_monitor_is_shown_from_its_tasks_density_until_redrawn(
+    ) {
+        // The lyrics moved onto the 200% main monitor (192 dpi) while FLO's window stays on
+        // the 125% one: until FLO draws that window at the monitor's density, its process still
+        // draws them at 164 dpi, so they are shown at 262 over 164, the size they would be drawn
+        // at 262. A move that is no drag of the user's asks for that density at once.
         let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
         let (changes, requests) = windows.window_dpi_changed(LYRICS, 192);
-        assert!(requests.is_empty());
+        assert_eq!(requests, vec![overlay_density(262)]);
         assert_eq!(changes, lyrics_sized(508, 137, (131, 82)));
         assert_eq!(windows.scale(LYRICS), (131, 82));
     }
@@ -4011,6 +4110,223 @@ mod tests {
         // FLO's task ends while the lyrics stay: at the display's density, nothing to change.
         let changes = windows.apply(&TaskEvent::Removed { task_id: 21 });
         assert_eq!(lyrics_sizes(changes), vec![]);
+    }
+
+    /// FLO's floating lyrics as the guest reports them once FLO drew that window at `own` dpi
+    /// (0: at FLO's own density), `width` by `height` on the guest's display.
+    fn lyrics_drawn_at(width: i32, height: i32, own: u32) -> Task {
+        Task {
+            overlay: Some(OverlayWindow {
+                window_type: 2038,
+                touchable: true,
+                density_dpi: own,
+                ..OverlayWindow::default()
+            }),
+            ..lyrics(158, 82, width, height)
+        }
+    }
+
+    fn overlay_density(density_dpi: u32) -> TaskRequest {
+        TaskRequest::SetOverlayDensity {
+            overlay_id: LYRICS,
+            density_dpi,
+        }
+    }
+
+    /// The overlay densities among `requests`.
+    fn overlay_densities(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
+        requests
+            .into_iter()
+            .filter(|request| matches!(request, TaskRequest::SetOverlayDensity { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn fr41_the_density_asked_for_a_forced_apps_overlay_is_its_monitors_when_it_differs() {
+        // FLO in System (forced) with its task at 164 dpi (125%): on the 200% main monitor
+        // (192 dpi) the lyrics are to be drawn at 262, on the 125% monitor at FLO's own.
+        assert_eq!(overlay_density_wanted(164, 192), 262);
+        assert_eq!(overlay_density_wanted(164, 120), 0);
+        assert_eq!(overlay_density_wanted(262, 120), 164);
+        // An app that is not forced, or a window that has not said its monitor: nothing.
+        assert_eq!(overlay_density_wanted(0, 192), 0);
+        assert_eq!(overlay_density_wanted(164, 0), 0);
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_dragged_onto_another_density_is_asked_for_it_when_the_drag_ends()
+    {
+        let now = Instant::now();
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        // On the task's monitor nothing is asked.
+        assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+        assert!(windows.window_dragging(LYRICS, true, now).is_empty());
+        // Dragged onto the 200% main monitor: shown as #1039 shows it, and asked nothing yet.
+        let (changes, requests) = windows.window_dpi(LYRICS, 192);
+        assert_eq!(changes, lyrics_sized(508, 137, (131, 82)));
+        assert!(requests.is_empty());
+        assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+        // The drag ends there: that window alone is asked for the monitor's density, once.
+        assert_eq!(
+            windows.window_dragging(LYRICS, false, now),
+            vec![overlay_density(262)]
+        );
+        assert!(windows.window_dragging(LYRICS, false, now).is_empty());
+        assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_is_scaled_until_the_guest_draws_it_then_shown_one_to_one() {
+        let now = Instant::now();
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        windows.window_dragging(LYRICS, true, now);
+        windows.window_dpi(LYRICS, 192);
+        windows.window_dragging(LYRICS, false, now);
+        // Until the guest says FLO drew it at 262, the 318 by 86 picture drawn at 164 is
+        // stretched to 508 by 137.
+        assert_eq!(windows.scale(LYRICS), (131, 82));
+        // FLO lays the window out at 262: 508 by 137 on the guest's display, shown 1:1, at the
+        // same size on the desktop. Only the lyrics' window hears of it.
+        let changes = windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        assert_eq!(
+            changes,
+            vec![
+                WindowChange::Resize {
+                    task_id: LYRICS,
+                    width: 508,
+                    height: 137,
+                },
+                WindowChange::TaskSize {
+                    task_id: LYRICS,
+                    width: 508,
+                    height: 137,
+                    max: None,
+                    min: None,
+                    scale: (1, 1),
+                },
+            ]
+        );
+        assert_eq!(windows.scale(LYRICS), (1, 1));
+        // Nothing more is asked of it, and FLO's own task is asked no size or density.
+        assert_nothing_asked_of_sizes(windows.reconfigures(now));
+    }
+
+    /// `requests` ask no task or overlay for a size or a density.
+    fn assert_nothing_asked_of_sizes(requests: Vec<TaskRequest>) {
+        assert!(
+            !requests.iter().any(|request| matches!(
+                request,
+                TaskRequest::SetOverlayDensity { .. }
+                    | TaskRequest::SetDensity { .. }
+                    | TaskRequest::Resize { .. }
+            )),
+            "{requests:?}"
+        );
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_back_on_its_tasks_monitor_returns_to_its_tasks_density() {
+        let now = Instant::now();
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        windows.window_dragging(LYRICS, true, now);
+        windows.window_dpi(LYRICS, 192);
+        windows.window_dragging(LYRICS, false, now);
+        windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        // Dragged back onto the 125% monitor: the picture drawn at 262 is shown at 164 over
+        // 262, the size it has there, until the drag ends.
+        windows.window_dragging(LYRICS, true, now);
+        let (_, requests) = windows.window_dpi(LYRICS, 120);
+        assert!(requests.is_empty());
+        assert_eq!(windows.scale(LYRICS), (82, 131));
+        // Then the window is drawn at FLO's own density again.
+        assert_eq!(
+            windows.window_dragging(LYRICS, false, now),
+            vec![overlay_density(0)]
+        );
+        let changes = windows.apply(&TaskEvent::Updated(lyrics_drawn_at(318, 86, 0)));
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(318, 86, (1, 1)));
+        assert_nothing_asked_of_sizes(windows.reconfigures(now));
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_follows_its_tasks_density_and_mode() {
+        let now = Instant::now();
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::SystemForced,
+            ..AppWindowSettings::default()
+        }]);
+        windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        windows.apply(&TaskEvent::Updated(lyrics(158, 82, 318, 86)));
+        // The lyrics open on the main monitor, where the user's drag left them last time.
+        let (_, requests, _) = windows.window_opened(LYRICS, 192).unwrap();
+        assert_eq!(requests, vec![overlay_density(262)]);
+        windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        // FLO's window goes to the main monitor too and its task takes 262: the lyrics are
+        // drawn at FLO's own density again, which is the monitor's.
+        windows.apply(&TaskEvent::Updated(flo_task(262, true)));
+        assert_eq!(
+            overlay_densities(windows.reconfigures(now)),
+            vec![overlay_density(0)]
+        );
+        // FLO's window goes back to the 125% monitor: the lyrics are asked for 262 again.
+        windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        assert_eq!(
+            overlay_densities(windows.reconfigures(now)),
+            vec![overlay_density(262)]
+        );
+        // The user sets FLO to another mode: the window is drawn as the rest of FLO again.
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::App,
+            ..AppWindowSettings::default()
+        }]);
+        assert_eq!(
+            overlay_densities(windows.reconfigures(now)),
+            vec![overlay_density(0)]
+        );
+    }
+
+    #[test]
+    fn fr41_an_overlay_the_guest_draws_at_a_density_nobody_asked_for_is_asked_back() {
+        // The window manager started again while FLO still draws the lyrics at 262 on the 125%
+        // monitor: they are shown at the size they have, and asked for FLO's density.
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::SystemForced,
+            ..AppWindowSettings::default()
+        }]);
+        windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        let (size, requests, _) = windows.window_opened(LYRICS, 120).unwrap();
+        assert_eq!(size, (318, 86));
+        assert_eq!(requests, vec![overlay_density(0)]);
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_an_app_that_is_not_forced_is_never_asked_a_density() {
+        let now = Instant::now();
+        for (scaling, available) in [
+            (DpiScaling::App, true),
+            (DpiScaling::Auto, true),
+            (DpiScaling::System, true),
+            (DpiScaling::SystemForced, false),
+        ] {
+            let (mut windows, _) = flo_lyrics(scaling, 164, available, 120);
+            windows.window_dragging(LYRICS, true, now);
+            let (changes, requests) = windows.window_dpi(LYRICS, 192);
+            assert!(requests.is_empty(), "{scaling:?} {available}");
+            // Shown as before: drawn at the display's 262, 1:1 on the 200% monitor.
+            assert_eq!(windows.scale(LYRICS), (1, 1), "{scaling:?} {available}");
+            assert_eq!(lyrics_sizes(changes), lyrics_sized(318, 86, (1, 1)));
+            assert!(
+                windows.window_dragging(LYRICS, false, now).is_empty(),
+                "{scaling:?} {available}"
+            );
+            assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+        }
     }
 
     #[test]
@@ -4073,6 +4389,7 @@ mod tests {
                 window_type: 2038,
                 focusable: false,
                 touchable: false,
+                ..OverlayWindow::default()
             }),
             ..lyrics(0, 0, 3840, 3840)
         };
@@ -4140,6 +4457,7 @@ mod tests {
                 window_type: 2038,
                 focusable: true,
                 touchable: true,
+                ..OverlayWindow::default()
             }),
             ..lyrics(158, 82, 508, 138)
         };

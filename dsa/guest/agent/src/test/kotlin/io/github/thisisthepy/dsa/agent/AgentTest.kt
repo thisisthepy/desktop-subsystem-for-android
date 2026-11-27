@@ -386,6 +386,87 @@ class AgentTest {
         assertEquals(listOf(Triple(1, TaskBounds(0, 0, 400, 300), 262 as Int?)), actions.resized)
     }
 
+    /** The display's windows, as a fake SurfaceFlinger lists them, and its listener. */
+    private class FakeOverlayWindows : io.github.thisisthepy.dsa.agent.overlays.OverlaySource {
+        var listener: ((List<io.github.thisisthepy.dsa.agent.overlays.GuestWindow>) -> Unit)? = null
+        var windows = emptyList<io.github.thisisthepy.dsa.agent.overlays.GuestWindow>()
+
+        override fun listen(onChange: (List<io.github.thisisthepy.dsa.agent.overlays.GuestWindow>) -> Unit): Boolean {
+            listener = onChange
+            onChange(windows)
+            return true
+        }
+
+        override fun density() = 262
+
+        fun list(now: List<io.github.thisisthepy.dsa.agent.overlays.GuestWindow>) {
+            windows = now
+            listener?.invoke(now)
+        }
+    }
+
+    /** FLO's floating lyrics, `width` by `height`, as SurfaceFlinger lists them. */
+    private fun floLyrics(width: Int, height: Int) = io.github.thisisthepy.dsa.agent.overlays.GuestWindow(
+        identity = "faa9c03",
+        packageName = "skplanet.musicmate",
+        ownerUid = 10157,
+        type = io.github.thisisthepy.dsa.agent.overlays.OverlayRules.TYPE_APPLICATION_OVERLAY,
+        surface = TaskBounds(158, 82, 158 + width, 82 + height),
+        title = "",
+        visible = true,
+        focusable = false,
+        touchable = true,
+        windowName = "faa9c03",
+    )
+
+    private fun overlayDensity(overlayId: Int, densityDpi: Int) = daemon.deliver(
+        Envelope.newBuilder()
+            .setSetOverlayDensity(
+                io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.newBuilder().setOverlayId(overlayId).setDensityDpi(densityDpi),
+            )
+            .build().toByteArray(),
+    )
+
+    @Test
+    fun fr41_the_host_gives_an_overlay_window_a_density_and_hears_when_its_app_drew_it() {
+        actions.overlayDensity = true
+        val overlays = FakeOverlayWindows().apply { windows = listOf(floLyrics(318, 86)) }
+        locator.up = daemon
+        Agent(AGENT, tasks, actions, locator, windowing, injector, scheduler, log, overlayWindows = overlays).start()
+        scheduler.runDue()
+        val lyrics = io.github.thisisthepy.dsa.agent.overlays.OverlayRules.FIRST_ID
+        assertEquals(0, taskUpdates().last { it.taskId == lyrics }.overlay.densityDpi)
+
+        // The lyrics are on the 200% monitor: their window alone is given 262 dpi, by its name.
+        overlayDensity(lyrics, 262)
+        scheduler.runDue()
+        assertEquals(listOf("faa9c03" to 262), actions.overlayDensities)
+
+        // FLO lays the window out at 262, 508 by 137: the host hears it is drawn at 262.
+        overlays.list(listOf(floLyrics(508, 137)))
+        scheduler.runDue()
+        assertEquals(262, taskUpdates().last { it.taskId == lyrics }.overlay.densityDpi)
+
+        // An overlay the host was never told of is given nothing.
+        overlayDensity(lyrics + 1, 262)
+        scheduler.runDue()
+        assertEquals(listOf("faa9c03" to 262), actions.overlayDensities)
+    }
+
+    @Test
+    fun fr41_an_image_without_the_change_gives_an_overlay_window_no_density() {
+        actions.overlayDensity = false
+        val overlays = FakeOverlayWindows().apply { windows = listOf(floLyrics(318, 86)) }
+        locator.up = daemon
+        Agent(AGENT, tasks, actions, locator, windowing, injector, scheduler, log, overlayWindows = overlays).start()
+        scheduler.runDue()
+
+        overlayDensity(io.github.thisisthepy.dsa.agent.overlays.OverlayRules.FIRST_ID, 262)
+        scheduler.runDue()
+
+        assertTrue(actions.overlayDensities.isEmpty())
+    }
+
     @Test
     fun fr4_a_forced_density_is_not_given_on_an_image_that_would_relaunch_the_app() {
         actions.forcedDensity = false

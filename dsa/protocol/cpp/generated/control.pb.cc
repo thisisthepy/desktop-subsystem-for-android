@@ -146,6 +146,7 @@ PROTOBUF_CONSTEXPR OverlayWindow::OverlayWindow(
     /*decltype(_impl_.window_type_)*/0
   , /*decltype(_impl_.focusable_)*/false
   , /*decltype(_impl_.touchable_)*/false
+  , /*decltype(_impl_.density_dpi_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct OverlayWindowDefaultTypeInternal {
   PROTOBUF_CONSTEXPR OverlayWindowDefaultTypeInternal()
@@ -282,6 +283,20 @@ struct SetTaskDensityDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SetTaskDensityDefaultTypeInternal _SetTaskDensity_default_instance_;
+PROTOBUF_CONSTEXPR SetOverlayDensity::SetOverlayDensity(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.overlay_id_)*/0
+  , /*decltype(_impl_.density_dpi_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct SetOverlayDensityDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR SetOverlayDensityDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~SetOverlayDensityDefaultTypeInternal() {}
+  union {
+    SetOverlayDensity _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SetOverlayDensityDefaultTypeInternal _SetOverlayDensity_default_instance_;
 PROTOBUF_CONSTEXPR LaunchPlacement::LaunchPlacement(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.density_dpi_)*/0u
@@ -8765,12 +8780,13 @@ OverlayWindow::OverlayWindow(const OverlayWindow& from)
       decltype(_impl_.window_type_){}
     , decltype(_impl_.focusable_){}
     , decltype(_impl_.touchable_){}
+    , decltype(_impl_.density_dpi_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&_impl_.window_type_, &from._impl_.window_type_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.touchable_) -
-    reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.touchable_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.density_dpi_) -
+    reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.density_dpi_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.OverlayWindow)
 }
 
@@ -8782,6 +8798,7 @@ inline void OverlayWindow::SharedCtor(
       decltype(_impl_.window_type_){0}
     , decltype(_impl_.focusable_){false}
     , decltype(_impl_.touchable_){false}
+    , decltype(_impl_.density_dpi_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -8810,8 +8827,8 @@ void OverlayWindow::Clear() {
   (void) cached_has_bits;
 
   ::memset(&_impl_.window_type_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.touchable_) -
-      reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.touchable_));
+      reinterpret_cast<char*>(&_impl_.density_dpi_) -
+      reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.density_dpi_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -8841,6 +8858,14 @@ const char* OverlayWindow::_InternalParse(const char* ptr, ::_pbi::ParseContext*
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.touchable_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 density_dpi = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.density_dpi_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -8892,6 +8917,12 @@ uint8_t* OverlayWindow::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_touchable(), target);
   }
 
+  // uint32 density_dpi = 4;
+  if (this->_internal_density_dpi() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_density_dpi(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -8921,6 +8952,11 @@ size_t OverlayWindow::ByteSizeLong() const {
   // bool touchable = 3;
   if (this->_internal_touchable() != 0) {
     total_size += 1 + 1;
+  }
+
+  // uint32 density_dpi = 4;
+  if (this->_internal_density_dpi() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_density_dpi());
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -8953,6 +8989,9 @@ void OverlayWindow::MergeFrom(const OverlayWindow& from) {
   if (from._internal_touchable() != 0) {
     _this->_internal_set_touchable(from._internal_touchable());
   }
+  if (from._internal_density_dpi() != 0) {
+    _this->_internal_set_density_dpi(from._internal_density_dpi());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -8971,8 +9010,8 @@ void OverlayWindow::InternalSwap(OverlayWindow* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(OverlayWindow, _impl_.touchable_)
-      + sizeof(OverlayWindow::_impl_.touchable_)
+      PROTOBUF_FIELD_OFFSET(OverlayWindow, _impl_.density_dpi_)
+      + sizeof(OverlayWindow::_impl_.density_dpi_)
       - PROTOBUF_FIELD_OFFSET(OverlayWindow, _impl_.window_type_)>(
           reinterpret_cast<char*>(&_impl_.window_type_),
           reinterpret_cast<char*>(&other->_impl_.window_type_));
@@ -10923,6 +10962,219 @@ void SetTaskDensity::InternalSwap(SetTaskDensity* other) {
 
 std::string SetTaskDensity::GetTypeName() const {
   return "dsa.control.v1.SetTaskDensity";
+}
+
+
+// ===================================================================
+
+class SetOverlayDensity::_Internal {
+ public:
+};
+
+SetOverlayDensity::SetOverlayDensity(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.SetOverlayDensity)
+}
+SetOverlayDensity::SetOverlayDensity(const SetOverlayDensity& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  SetOverlayDensity* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.overlay_id_){}
+    , decltype(_impl_.density_dpi_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.overlay_id_, &from._impl_.overlay_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.density_dpi_) -
+    reinterpret_cast<char*>(&_impl_.overlay_id_)) + sizeof(_impl_.density_dpi_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.SetOverlayDensity)
+}
+
+inline void SetOverlayDensity::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.overlay_id_){0}
+    , decltype(_impl_.density_dpi_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+SetOverlayDensity::~SetOverlayDensity() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.SetOverlayDensity)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void SetOverlayDensity::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void SetOverlayDensity::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void SetOverlayDensity::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.SetOverlayDensity)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.overlay_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.density_dpi_) -
+      reinterpret_cast<char*>(&_impl_.overlay_id_)) + sizeof(_impl_.density_dpi_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* SetOverlayDensity::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 overlay_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.overlay_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 density_dpi = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.density_dpi_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* SetOverlayDensity::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.SetOverlayDensity)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 overlay_id = 1;
+  if (this->_internal_overlay_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_overlay_id(), target);
+  }
+
+  // uint32 density_dpi = 2;
+  if (this->_internal_density_dpi() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_density_dpi(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.SetOverlayDensity)
+  return target;
+}
+
+size_t SetOverlayDensity::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.SetOverlayDensity)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 overlay_id = 1;
+  if (this->_internal_overlay_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_overlay_id());
+  }
+
+  // uint32 density_dpi = 2;
+  if (this->_internal_density_dpi() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_density_dpi());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void SetOverlayDensity::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const SetOverlayDensity*>(
+      &from));
+}
+
+void SetOverlayDensity::MergeFrom(const SetOverlayDensity& from) {
+  SetOverlayDensity* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.SetOverlayDensity)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_overlay_id() != 0) {
+    _this->_internal_set_overlay_id(from._internal_overlay_id());
+  }
+  if (from._internal_density_dpi() != 0) {
+    _this->_internal_set_density_dpi(from._internal_density_dpi());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void SetOverlayDensity::CopyFrom(const SetOverlayDensity& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.SetOverlayDensity)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool SetOverlayDensity::IsInitialized() const {
+  return true;
+}
+
+void SetOverlayDensity::InternalSwap(SetOverlayDensity* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(SetOverlayDensity, _impl_.density_dpi_)
+      + sizeof(SetOverlayDensity::_impl_.density_dpi_)
+      - PROTOBUF_FIELD_OFFSET(SetOverlayDensity, _impl_.overlay_id_)>(
+          reinterpret_cast<char*>(&_impl_.overlay_id_),
+          reinterpret_cast<char*>(&other->_impl_.overlay_id_));
+}
+
+std::string SetOverlayDensity::GetTypeName() const {
+  return "dsa.control.v1.SetOverlayDensity";
 }
 
 
@@ -73493,6 +73745,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ResizeTask& resize_task(const Envelope* msg);
   static const ::dsa::control::v1::SetTaskDensity& set_task_density(const Envelope* msg);
   static const ::dsa::control::v1::PointerEvent& pointer_event(const Envelope* msg);
+  static const ::dsa::control::v1::SetOverlayDensity& set_overlay_density(const Envelope* msg);
   static const ::dsa::control::v1::AppInfo& app_info(const Envelope* msg);
   static const ::dsa::control::v1::KeyEvent& key_event(const Envelope* msg);
   static const ::dsa::control::v1::ImeComposition& ime_composition(const Envelope* msg);
@@ -73742,6 +73995,10 @@ Envelope::_Internal::set_task_density(const Envelope* msg) {
 const ::dsa::control::v1::PointerEvent&
 Envelope::_Internal::pointer_event(const Envelope* msg) {
   return *msg->_impl_.body_.pointer_event_;
+}
+const ::dsa::control::v1::SetOverlayDensity&
+Envelope::_Internal::set_overlay_density(const Envelope* msg) {
+  return *msg->_impl_.body_.set_overlay_density_;
 }
 const ::dsa::control::v1::AppInfo&
 Envelope::_Internal::app_info(const Envelope* msg) {
@@ -74721,6 +74978,21 @@ void Envelope::set_allocated_pointer_event(::dsa::control::v1::PointerEvent* poi
     _impl_.body_.pointer_event_ = pointer_event;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.pointer_event)
+}
+void Envelope::set_allocated_set_overlay_density(::dsa::control::v1::SetOverlayDensity* set_overlay_density) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (set_overlay_density) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(set_overlay_density);
+    if (message_arena != submessage_arena) {
+      set_overlay_density = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, set_overlay_density, submessage_arena);
+    }
+    set_has_set_overlay_density();
+    _impl_.body_.set_overlay_density_ = set_overlay_density;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.set_overlay_density)
 }
 void Envelope::set_allocated_app_info(::dsa::control::v1::AppInfo* app_info) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -77744,6 +78016,11 @@ Envelope::Envelope(const Envelope& from)
           from._internal_pointer_event());
       break;
     }
+    case kSetOverlayDensity: {
+      _this->_internal_mutable_set_overlay_density()->::dsa::control::v1::SetOverlayDensity::MergeFrom(
+          from._internal_set_overlay_density());
+      break;
+    }
     case kAppInfo: {
       _this->_internal_mutable_app_info()->::dsa::control::v1::AppInfo::MergeFrom(
           from._internal_app_info());
@@ -78841,6 +79118,12 @@ void Envelope::clear_body() {
     case kPointerEvent: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.pointer_event_;
+      }
+      break;
+    }
+    case kSetOverlayDensity: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.set_overlay_density_;
       }
       break;
     }
@@ -80144,6 +80427,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 13:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 106)) {
           ptr = ctx->ParseMessage(_internal_mutable_pointer_event(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.SetOverlayDensity set_overlay_density = 14;
+      case 14:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 114)) {
+          ptr = ctx->ParseMessage(_internal_mutable_set_overlay_density(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -81836,6 +82127,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::pointer_event(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.SetOverlayDensity set_overlay_density = 14;
+  if (_internal_has_set_overlay_density()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(14, _Internal::set_overlay_density(this),
+        _Internal::set_overlay_density(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.AppInfo app_info = 15;
   if (_internal_has_app_info()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -83316,6 +83614,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.pointer_event_);
       break;
     }
+    // .dsa.control.v1.SetOverlayDensity set_overlay_density = 14;
+    case kSetOverlayDensity: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.set_overlay_density_);
+      break;
+    }
     // .dsa.control.v1.AppInfo app_info = 15;
     case kAppInfo: {
       total_size += 1 +
@@ -84779,6 +85084,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_pointer_event());
       break;
     }
+    case kSetOverlayDensity: {
+      _this->_internal_mutable_set_overlay_density()->::dsa::control::v1::SetOverlayDensity::MergeFrom(
+          from._internal_set_overlay_density());
+      break;
+    }
     case kAppInfo: {
       _this->_internal_mutable_app_info()->::dsa::control::v1::AppInfo::MergeFrom(
           from._internal_app_info());
@@ -85861,6 +86171,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ResizeTask >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::SetTaskDensity*
 Arena::CreateMaybeMessage< ::dsa::control::v1::SetTaskDensity >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::SetTaskDensity >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::SetOverlayDensity*
+Arena::CreateMaybeMessage< ::dsa::control::v1::SetOverlayDensity >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::SetOverlayDensity >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::LaunchPlacement*
 Arena::CreateMaybeMessage< ::dsa::control::v1::LaunchPlacement >(Arena* arena) {

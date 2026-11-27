@@ -35,6 +35,7 @@ class OverlayReporterTest {
         visible = true,
         focusable = false,
         touchable = true,
+        windowName = identity.toString(),
     )
 
     /** An app's own window: a task's surface. */
@@ -175,6 +176,66 @@ class OverlayReporterTest {
         channelUp = true
         reporter.update(listOf(lyrics()), display, 262)
         assertEquals(OverlayRules.FIRST_ID, updates().single().taskId)
+    }
+
+    /** The lyrics `width` by `height`, as FLO lays them out at another density. */
+    private fun lyricsSized(width: Int, height: Int) = lyrics().copy(surface = TaskBounds(158, 82, 158 + width, 82 + height))
+
+    @Test
+    fun fr41_an_overlay_is_reported_at_the_density_given_once_its_app_has_laid_it_out_again() {
+        reporter.update(listOf(lyrics()), display, 262)
+        assertEquals("faa9c03", reporter.windowName(OverlayRules.FIRST_ID))
+        assertEquals(0, updates().single().overlay.densityDpi)
+        sent.clear()
+        // The host gives the lyrics' window 262 dpi: until FLO lays it out again, it is still
+        // drawn as the rest of FLO, and moving it changes nothing of that.
+        reporter.densityGiven(OverlayRules.FIRST_ID, 262)
+        reporter.update(listOf(lyrics(left = 258)), display, 262)
+        assertEquals(0, updates().single().overlay.densityDpi)
+        sent.clear()
+        // FLO has laid it out at 262: 1.6 times larger, and reported with its density.
+        reporter.update(listOf(lyricsSized(813, 221)), display, 262)
+        assertEquals(262, updates().single().overlay.densityDpi)
+        sent.clear()
+        // A change of size of its own afterwards keeps the density.
+        reporter.update(listOf(lyricsSized(900, 221)), display, 262)
+        assertEquals(262, updates().single().overlay.densityDpi)
+        sent.clear()
+        // Back to FLO's own density: reported so once it is laid out again.
+        reporter.densityGiven(OverlayRules.FIRST_ID, 0)
+        reporter.update(listOf(lyricsSized(900, 221)), display, 262)
+        assertTrue(sent.isEmpty())
+        reporter.update(listOf(lyrics()), display, 262)
+        assertEquals(0, updates().single().overlay.densityDpi)
+    }
+
+    @Test
+    fun fr41_an_overlay_given_the_density_it_has_waits_for_nothing() {
+        reporter.update(listOf(lyrics()), display, 262)
+        reporter.densityGiven(OverlayRules.FIRST_ID, 0)
+        sent.clear()
+        reporter.update(listOf(lyricsSized(600, 138)), display, 262)
+        assertEquals(0, updates().single().overlay.densityDpi)
+    }
+
+    @Test
+    fun fr41_an_overlay_there_before_the_agent_is_reported_at_the_density_the_framework_gave_it() {
+        // The agent started again while FLO still draws its lyrics at 262: the framework says
+        // so, for the windows of the first list only.
+        val asked = mutableListOf<String>()
+        val restarted = OverlayReporter(AGENT, apps, givenDensity = { window ->
+            asked += window
+            if (window == "faa9c03") 262 else 0
+        }) { frame ->
+            sent += decode(frame)
+            true
+        }
+        restarted.update(listOf(lyrics()), display, 262)
+        assertEquals(262, updates().single().overlay.densityDpi)
+        // A window that appears later was given nothing, and the framework is not asked.
+        restarted.update(listOf(lyrics(), lyrics(identity = "c0ffee1")), display, 262)
+        assertEquals(listOf("faa9c03"), asked)
+        assertEquals(0, updates().last().overlay.densityDpi)
     }
 
     private companion object {

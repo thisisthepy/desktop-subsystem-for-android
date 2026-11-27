@@ -187,7 +187,8 @@ pub struct TaskUpdated {
 /// the overlay's ID as `task_id`, the positions relative to the top left corner of `bounds`.
 /// It never sends CloseTask, ResizeTask, SetTaskDensity, SetTaskCaption or SetTaskFullScreen
 /// for one, and the agent ignores them: how an overlay moves, changes size and closes is its
-/// app's.
+/// app's. The one thing it asks of an overlay is a density (SetOverlayDensity), and only for an
+/// app set to System (forced) scaling.
 ///
 /// An overlay whose `bounds` cover the whole display (a screen filter, a dimmer) is reported
 /// the same way. The host opens no window for it, because that window would cover the user's
@@ -209,6 +210,12 @@ pub struct OverlayWindow {
     /// pointer passes through the host's window of one that does not.
     #[prost(bool, tag = "3")]
     pub touchable: bool,
+    /// The density the app draws this window at, in dots per inch, when the host gave the window
+    /// one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+    /// window's size on the guest's display has changed since. 0 while the app draws it as the
+    /// rest of its process, as every overlay the host gave no density.
+    #[prost(uint32, tag = "4")]
+    pub density_dpi: u32,
 }
 /// Host to guest: the apps whose tasks start below the title bar, as the user chose for each
 /// (the per-app window setting). A task of one of these packages gets no status bar inset,
@@ -334,6 +341,26 @@ pub struct SetTaskDensity {
     pub recreate: bool,
     #[prost(bool, tag = "4")]
     pub forced: bool,
+}
+/// Host to guest: the window of an app overlay window (see OverlayWindow) is on a monitor whose
+/// density differs from the one its app draws at; the app is to draw that window alone at
+/// `density_dpi` (130 at a scale of 100%). 0 has the app draw it at its own density again, when
+/// the window is back on a monitor of that density.
+///
+/// The host asks it only for an app the user set to System (forced) scaling, whose process draws
+/// at the density of the monitor its task's window is on, overlays included: such an overlay on
+/// another monitor would otherwise be shown stretched. The other windows of the app's process,
+/// its tasks among them, keep their density. The agent gives the window the density through the
+/// framework (the window manager's shell command dsa-overlay-density, which converts that
+/// window's views in the app's process); an image whose framework lacks that change ignores it.
+/// Once the app has laid the window out again, the agent reports the overlay with
+/// OverlayWindow.density_dpi set, and the host shows it 1:1 on that monitor from then on.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOverlayDensity {
+    #[prost(int32, tag = "1")]
+    pub overlay_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
 }
 /// Host to guest: the monitor the window of the next task opens on, so that the task starts at
 /// that monitor's density and its size there from its first frame, and its app is never
@@ -3803,7 +3830,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 416, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 416, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3837,6 +3864,8 @@ pub mod envelope {
         SetTaskDensity(super::SetTaskDensity),
         #[prost(message, tag = "13")]
         PointerEvent(super::PointerEvent),
+        #[prost(message, tag = "14")]
+        SetOverlayDensity(super::SetOverlayDensity),
         #[prost(message, tag = "15")]
         AppInfo(super::AppInfo),
         #[prost(message, tag = "16")]

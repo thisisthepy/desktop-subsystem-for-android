@@ -3502,6 +3502,13 @@ impl Session {
                 recreate: false,
                 forced,
             }),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            } => Body::SetOverlayDensity(control::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            }),
             TaskRequest::SetCaption {
                 task_id,
                 height,
@@ -7148,6 +7155,7 @@ impl Worker {
                         window_type: overlay.window_type,
                         focusable: overlay.focusable,
                         touchable: overlay.touchable,
+                        density_dpi: overlay.density_dpi,
                     }),
                     below_title_bar: update.below_title_bar,
                 }));
@@ -7517,6 +7525,7 @@ impl Worker {
             | Some(Body::ResizeTask(_))
             | Some(Body::RequestTaskFrame(_))
             | Some(Body::SetTaskDensity(_))
+            | Some(Body::SetOverlayDensity(_))
             | Some(Body::LaunchPlacement(_))
             | Some(Body::CaptionCompat(_))
             | Some(Body::SetTaskCaption(_))

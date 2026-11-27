@@ -21,7 +21,8 @@ use dsa_protocol::control::{
     NodeRange, NotificationClicked, NotificationDismissed, NotificationRemoved, OpenFile, OpenLink,
     PackageState, PointerAction, PointerEvent, PointerTool, PowerHint, PowerHintKind, PowerState,
     ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory, RequestTaskFrame,
-    ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    ResizeTask, Role, ScreenState, SetOverlayDensity, SetTaskDensity, TaskFrames, TaskRemoved,
+    TaskUpdated,
 };
 use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, ReconfigureWidget, RemoveWidget, ResizeWidget, WidgetAdded,
@@ -207,6 +208,32 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             })),
         ),
         (
+            "set_overlay_density",
+            wrap(Body::SetOverlayDensity(SetOverlayDensity {
+                overlay_id: 0x4000_0001,
+                density_dpi: 262,
+            })),
+        ),
+        (
+            "set_overlay_density_back",
+            wrap(Body::SetOverlayDensity(SetOverlayDensity {
+                overlay_id: 0x4000_0001,
+                density_dpi: 0,
+            })),
+        ),
+        (
+            "task_updated_overlay_density",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 0x4000_0001,
+                overlay: Some(dsa_protocol::control::OverlayWindow {
+                    window_type: 2038,
+                    density_dpi: 262,
+                    ..dsa_protocol::control::OverlayWindow::default()
+                }),
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
             "task_updated_negative_origin",
             wrap(Body::TaskUpdated(TaskUpdated {
                 task_id: 7,
@@ -238,6 +265,7 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                     window_type: 2038,
                     focusable: false,
                     touchable: true,
+                    density_dpi: 0,
                 }),
                 ..TaskUpdated::default()
             })),

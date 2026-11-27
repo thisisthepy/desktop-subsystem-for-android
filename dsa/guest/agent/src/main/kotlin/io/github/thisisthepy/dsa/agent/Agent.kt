@@ -264,13 +264,25 @@ class Agent(
         intercept = ::interceptFrame,
     )
     private val reporter = TaskReporter(ownPackage, apps) { frame -> channel.send(frame) }
-    private val requests = HostRequests(ownPackage, actions, reporter::isReported)
+    private val requests = HostRequests(
+        ownPackage,
+        actions,
+        overlayReported = { id -> overlays.isReported(id) },
+        reported = reporter::isReported,
+    )
+
+    /** The densities the host gives single overlay windows of apps set to System (forced) scaling. */
+    private val overlayDensity = io.github.thisisthepy.dsa.agent.windowing.OverlayDensity(actions, log)
 
     /**
      * The apps' overlay windows (floating lyrics, a chat head), which are in no task: the host
      * shows each in a window of its own, and its input comes with the overlay's ID.
      */
-    private val overlays = io.github.thisisthepy.dsa.agent.overlays.OverlayReporter(ownPackage, apps) { frame ->
+    private val overlays = io.github.thisisthepy.dsa.agent.overlays.OverlayReporter(
+        ownPackage,
+        apps,
+        givenDensity = { window -> overlayDensity.given(window) },
+    ) { frame ->
         channel.send(frame)
     }
 
@@ -961,6 +973,26 @@ class Agent(
                     log.info("task ${result.taskId} draws at ${result.densityDpi} dpi" + if (result.forced) ", without a relaunch" else "")
                     arranger.setDensity(result.taskId, result.densityDpi)
                     accessibilityExport.resizing(result.taskId)
+                }
+            }
+            is RequestResult.OverlayDensity -> {
+                // The overlay's window alone takes the density; the host is told it has it once
+                // its app has laid it out again.
+                val window = overlays.windowName(result.overlayId)
+                when {
+                    window == null ->
+                        log.warn("did not give app overlay window ${result.overlayId} a density: it is not on the screen")
+                    overlayDensity.give(window, result.densityDpi) -> {
+                        overlays.densityGiven(result.overlayId, result.densityDpi)
+                        log.info(
+                            if (result.densityDpi == 0) {
+                                "app overlay window ${result.overlayId} draws at its app's density again"
+                            } else {
+                                "app overlay window ${result.overlayId} draws at ${result.densityDpi} dpi"
+                            },
+                        )
+                    }
+                    else -> Unit
                 }
             }
             is RequestResult.Caption -> {

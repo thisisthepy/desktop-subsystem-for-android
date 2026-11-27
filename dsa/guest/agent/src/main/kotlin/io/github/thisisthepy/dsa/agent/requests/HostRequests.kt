@@ -144,6 +144,27 @@ interface TaskActions {
      * that has the focus. False when the framework has no such change or refused.
      */
     fun setKeepFocus(packages: Set<String>): Boolean = false
+
+    /**
+     * Whether the framework can draw one app overlay window at another density than its app's
+     * ([setOverlayDensity]). Only an image whose framework carries that change can. False when
+     * it cannot, or this cannot tell.
+     */
+    fun overlayDensitySupported(): Boolean = false
+
+    /**
+     * Has the app of the overlay window [window] (the identity hash that starts the window's
+     * name in SurfaceFlinger's list) draw that window alone at [densityDpi], or at its own
+     * density again with 0. The app's other windows keep theirs. False when the framework has
+     * no such change, has no such window, or refused.
+     */
+    fun setOverlayDensity(window: String, densityDpi: Int): Boolean = false
+
+    /**
+     * The density the overlay window [window] was last given ([setOverlayDensity]), which its
+     * app still draws it at: 0 for none, or when this cannot tell.
+     */
+    fun overlayDensity(window: String): Int = 0
 }
 
 /** Which of Android Settings' pages of an app to open. */
@@ -205,6 +226,13 @@ sealed interface RequestResult {
     data class Density(val taskId: Int, val densityDpi: Int, val forced: Boolean = false) : RequestResult
 
     /**
+     * The host's window for the app overlay window [overlayId] is on a monitor whose density
+     * differs from its app's (set to System (forced) scaling): the app is to draw that window
+     * alone at [densityDpi], or at its own density again with 0.
+     */
+    data class OverlayDensity(val overlayId: Int, val densityDpi: Int) : RequestResult
+
+    /**
      * The host's window for the task draws its title bar over the task's top [height] pixels;
      * the task gets a top inset of that height (0 removes it).
      */
@@ -251,6 +279,8 @@ sealed interface RequestResult {
 class HostRequests(
     private val ownPackage: String,
     private val actions: TaskActions,
+    /** Whether the host was told about the app overlay window, and so may give it a density. */
+    private val overlayReported: (Int) -> Boolean = { false },
     /** Whether the host was told about the task, and so may close it. */
     private val reported: (Int) -> Boolean,
 ) {
@@ -272,6 +302,9 @@ class HostRequests(
             }
             Envelope.BodyCase.SET_TASK_DENSITY -> envelope.setTaskDensity.let {
                 density(it.taskId, it.densityDpi, it.forced)
+            }
+            Envelope.BodyCase.SET_OVERLAY_DENSITY -> envelope.setOverlayDensity.let {
+                overlayDensity(it.overlayId, it.densityDpi)
             }
             Envelope.BodyCase.CAPTION_COMPAT -> RequestResult.CaptionCompat(
                 envelope.captionCompat.belowTitleBarList.filter { it.isNotEmpty() }.toSet(),
@@ -360,6 +393,14 @@ class HostRequests(
             RequestResult.Malformed("SetTaskDensity asks for ${Integer.toUnsignedString(densityDpi)} dpi")
         !reported(taskId) -> RequestResult.SizeRefused(taskId, "the host was never told about this task")
         else -> RequestResult.Density(taskId, densityDpi, forced)
+    }
+
+    // 0 gives the window its app's own density again.
+    private fun overlayDensity(overlayId: Int, densityDpi: Int): RequestResult = when {
+        densityDpi != 0 && (densityDpi < MIN_DENSITY || densityDpi > MAX_DENSITY) ->
+            RequestResult.Malformed("SetOverlayDensity asks for ${Integer.toUnsignedString(densityDpi)} dpi")
+        !overlayReported(overlayId) -> RequestResult.SizeRefused(overlayId, "the host was never told about this overlay")
+        else -> RequestResult.OverlayDensity(overlayId, densityDpi)
     }
 
     // The height is unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.

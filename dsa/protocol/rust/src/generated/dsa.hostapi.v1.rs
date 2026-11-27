@@ -153,6 +153,17 @@ pub struct SetTaskDensity {
     #[prost(bool, tag = "4")]
     pub forced: bool,
 }
+/// An app overlay window's window is on a monitor whose density differs from the one its app,
+/// set to System (forced) scaling, draws at: asks the caller's Android to draw that window alone
+/// at `density_dpi`, or at its app's own density again with 0 (the control protocol's
+/// SetOverlayDensity).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOverlayDensity {
+    #[prost(int32, tag = "1")]
+    pub overlay_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
+}
 /// The monitor the window of the next task opens on: asks the caller's Android to start the
 /// tasks it starts from now on at that monitor's density and size, so an app's first frame is
 /// already right and it is never relaunched right after it opens (see the control protocol's
@@ -1532,6 +1543,10 @@ pub struct OverlayWindow {
     /// Whether the window takes pointer input; the pointer passes through one that does not.
     #[prost(bool, tag = "3")]
     pub touchable: bool,
+    /// The density the app draws this window at once it took the one the window manager asked
+    /// for it (SetOverlayDensity); 0 while it draws it as the rest of its process.
+    #[prost(uint32, tag = "4")]
+    pub density_dpi: u32,
 }
 /// The task ended.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3395,7 +3410,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715, 740"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 49, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715, 740"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -3427,6 +3442,8 @@ pub mod request {
         ResizeTask(super::ResizeTask),
         #[prost(message, tag = "13")]
         SetTaskDensity(super::SetTaskDensity),
+        #[prost(message, tag = "49")]
+        SetOverlayDensity(super::SetOverlayDensity),
         #[prost(message, tag = "14")]
         GetMemory(super::GetMemory),
         #[prost(message, tag = "15")]

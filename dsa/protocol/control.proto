@@ -208,7 +208,8 @@ message TaskUpdated {
 // the overlay's ID as `task_id`, the positions relative to the top left corner of `bounds`.
 // It never sends CloseTask, ResizeTask, SetTaskDensity, SetTaskCaption or SetTaskFullScreen
 // for one, and the agent ignores them: how an overlay moves, changes size and closes is its
-// app's.
+// app's. The one thing it asks of an overlay is a density (SetOverlayDensity), and only for an
+// app set to System (forced) scaling.
 //
 // An overlay whose `bounds` cover the whole display (a screen filter, a dimmer) is reported
 // the same way. The host opens no window for it, because that window would cover the user's
@@ -226,6 +227,11 @@ message OverlayWindow {
   // Whether the window takes pointer input (its app did not set FLAG_NOT_TOUCHABLE). The
   // pointer passes through the host's window of one that does not.
   bool touchable = 3;
+  // The density the app draws this window at, in dots per inch, when the host gave the window
+  // one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+  // window's size on the guest's display has changed since. 0 while the app draws it as the
+  // rest of its process, as every overlay the host gave no density.
+  uint32 density_dpi = 4;
 }
 
 // Host to guest: the apps whose tasks start below the title bar, as the user chose for each
@@ -368,6 +374,24 @@ message SetTaskDensity {
   uint32 density_dpi = 2;
   bool recreate = 3;
   bool forced = 4;
+}
+
+// Host to guest: the window of an app overlay window (see OverlayWindow) is on a monitor whose
+// density differs from the one its app draws at; the app is to draw that window alone at
+// `density_dpi` (130 at a scale of 100%). 0 has the app draw it at its own density again, when
+// the window is back on a monitor of that density.
+//
+// The host asks it only for an app the user set to System (forced) scaling, whose process draws
+// at the density of the monitor its task's window is on, overlays included: such an overlay on
+// another monitor would otherwise be shown stretched. The other windows of the app's process,
+// its tasks among them, keep their density. The agent gives the window the density through the
+// framework (the window manager's shell command dsa-overlay-density, which converts that
+// window's views in the app's process); an image whose framework lacks that change ignores it.
+// Once the app has laid the window out again, the agent reports the overlay with
+// OverlayWindow.density_dpi set, and the host shows it 1:1 on that monitor from then on.
+message SetOverlayDensity {
+  int32 overlay_id = 1;
+  uint32 density_dpi = 2;
 }
 
 // Host to guest: the monitor the window of the next task opens on, so that the task starts at
@@ -3556,6 +3580,7 @@ message Envelope {
     ResizeTask resize_task = 11;
     SetTaskDensity set_task_density = 12;
     PointerEvent pointer_event = 13;
+    SetOverlayDensity set_overlay_density = 14;
     AppInfo app_info = 15;
     KeyEvent key_event = 16;
     ImeComposition ime_composition = 17;

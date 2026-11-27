@@ -107,6 +107,18 @@ std::map<std::string, v1::Envelope> Cases() {
     density->set_forced(true);
   }
   {
+    v1::SetOverlayDensity* density = cases["set_overlay_density"].mutable_set_overlay_density();
+    density->set_overlay_id(0x40000001);
+    density->set_density_dpi(262);
+  }
+  cases["set_overlay_density_back"].mutable_set_overlay_density()->set_overlay_id(0x40000001);
+  {
+    v1::TaskUpdated* task = cases["task_updated_overlay_density"].mutable_task_updated();
+    task->set_task_id(0x40000001);
+    task->mutable_overlay()->set_window_type(2038);
+    task->mutable_overlay()->set_density_dpi(262);
+  }
+  {
     v1::TaskUpdated* task = cases["task_updated_forced_density"].mutable_task_updated();
     task->set_task_id(42);
     task->set_forced_density_available(true);

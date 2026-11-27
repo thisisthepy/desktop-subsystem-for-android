@@ -110,6 +110,10 @@ pub struct OverlayWindow {
     pub focusable: bool,
     /// Whether the window takes pointer input.
     pub touchable: bool,
+    /// The density the app draws the window at once it took the one the window manager asked
+    /// for it ([`TaskRequest::SetOverlayDensity`]), in dots per inch; 0 while the app draws it
+    /// as the rest of its process.
+    pub density_dpi: u32,
 }
 
 /// The first ID the guest gives an app overlay window. Android's task IDs stay far below it.
@@ -466,6 +470,10 @@ pub enum TaskRequest {
         density_dpi: u32,
         forced: bool,
     },
+    /// The window of an app overlay window is on a monitor whose density differs from the one
+    /// its app (set to System (forced) scaling) draws at: the app draws that window alone at
+    /// this density, or at its own again with 0.
+    SetOverlayDensity { overlay_id: i32, density_dpi: u32 },
     /// The task's window draws its title bar over the top `height` pixels of the task: the
     /// task gets a top system bar inset of that height. 0 removes it. `start_width` and
     /// `end_width` are how far the window's icon and its caption buttons reach into the band
@@ -551,6 +559,14 @@ impl TaskRequest {
                 density_dpi,
                 forced: true,
             } => format!("draw task {task_id} at {density_dpi} dpi without a relaunch"),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi: 0,
+            } => format!("draw overlay {overlay_id} at its app's density again"),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            } => format!("draw overlay {overlay_id} at {density_dpi} dpi"),
             TaskRequest::SetCaption {
                 task_id, height, ..
             } => format!("give task {task_id} a title bar inset of {height} pixels"),
@@ -622,6 +638,10 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                 (
                     TaskRequest::SetDensity { task_id: a, .. },
                     TaskRequest::SetDensity { task_id: b, .. },
+                ) => a == b,
+                (
+                    TaskRequest::SetOverlayDensity { overlay_id: a, .. },
+                    TaskRequest::SetOverlayDensity { overlay_id: b, .. },
                 ) => a == b,
                 (
                     TaskRequest::SetCaption { task_id: a, .. },

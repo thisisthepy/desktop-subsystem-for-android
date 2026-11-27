@@ -370,6 +370,28 @@ class FakeActions : TaskActions {
         keepFocusLists += packages
         return keepFocusTaken
     }
+
+    /** Whether the framework can give an overlay window a density, and how often that was asked. */
+    var overlayDensity = false
+    var overlayDensityAsked = 0
+
+    /** Each density given to an overlay window, in order: the window's name and the density. */
+    val overlayDensities = mutableListOf<Pair<String, Int>>()
+
+    /** The densities the framework says it gave windows before, by window name. */
+    val overlayDensitiesBefore = mutableMapOf<String, Int>()
+
+    override fun overlayDensitySupported(): Boolean {
+        overlayDensityAsked++
+        return overlayDensity
+    }
+
+    override fun setOverlayDensity(window: String, densityDpi: Int): Boolean {
+        overlayDensities += window to densityDpi
+        return true
+    }
+
+    override fun overlayDensity(window: String): Int = overlayDensitiesBefore[window] ?: 0
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {

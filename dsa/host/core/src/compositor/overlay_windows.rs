@@ -43,6 +43,14 @@
 //! its task was given, which its process draws its overlays at too, wherever they are. The
 //! window's size, its plane, the pointer inside it and a drag across monitors all take that
 //! one scale.
+//!
+//! **Its density**, for an app set to System (forced) scaling: on a monitor whose density
+//! differs from its task's, the window manager asks the guest to draw that window alone at the
+//! monitor's density, once the user's drag ends there (or the window opens there, or the task
+//! takes another density), and at the task's again back on a monitor of the task's density
+//! ([`super::task_windows::overlay_density_wanted`]). Until the guest says the app has drawn it
+//! so, the window scales the overlay as above; then it shows it 1:1, sharp. The window host
+//! only says when a drag of the user's begins and ends.
 
 use std::path::{Path, PathBuf};
 

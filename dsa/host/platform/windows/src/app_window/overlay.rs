@@ -26,7 +26,9 @@
 //!   display, and the app keeps hearing the pointer as the press found it. When the press
 //!   ends the app's plane is put where the drag left the window and remembered for the app in
 //!   the user's DSA folder (`apps\<package>.overlay.json`); the next time, the overlay's
-//!   window opens on that monitor.
+//!   window opens on that monitor. The window tells the window manager when such a drag
+//!   begins and ends (`FromHost::Dragging`), which asks Android for the overlay's density on
+//!   the monitor the drag ended on, for an app set to System (forced) scaling.
 //!
 //! Such a window is an ordinary window of the user's desktop: Windows shows none of them on
 //! the lock screen or the secure desktop, and it takes no input outside its own rectangle.
@@ -613,10 +615,18 @@ unsafe fn press_moved(
         return false;
     };
     let slop = dip_to_px(PUSH_SLOP_DIP, GetDpiForWindow(hwnd).max(96)) as i32;
+    let carried = press.drag.carried();
     press
         .drag
         .pointer_moved(at, client_origin(hwnd), data.shown_scale.get(), slop);
     data.press.set(Some(press));
+    if !carried && press.drag.carried() {
+        // The window manager asks for the overlay's density only once the drag ends.
+        (data.report)(FromHost::Dragging {
+            task_id: data.task_id,
+            dragging: true,
+        });
+    }
     press.drag.carried()
 }
 
@@ -634,6 +644,18 @@ unsafe fn end_press(hwnd: HWND, data: &OverlayData, pointer_id: Option<u32>) {
         place(hwnd);
         return;
     }
+    settle_drag(hwnd, data);
+    // The drag is over, on the monitor it ended on: the window manager may ask Android to draw
+    // the overlay at that monitor's density now.
+    (data.report)(FromHost::Dragging {
+        task_id: data.task_id,
+        dragging: false,
+    });
+}
+
+/// Puts the app's plane where a drag that ended left the window, brought into reach on the
+/// monitor it is most on, and remembers it for the app.
+unsafe fn settle_drag(hwnd: HWND, data: &OverlayData) {
     let Some(guest) = data.guest.get() else {
         return;
     };

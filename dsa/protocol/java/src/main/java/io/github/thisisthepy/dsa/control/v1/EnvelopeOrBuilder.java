@@ -151,6 +151,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent();
 
   /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   * @return Whether the setOverlayDensity field is set.
+   */
+  boolean hasSetOverlayDensity();
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   * @return The setOverlayDensity.
+   */
+  io.github.thisisthepy.dsa.control.v1.SetOverlayDensity getSetOverlayDensity();
+
+  /**
    * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
    * @return Whether the appInfo field is set.
    */

@@ -1603,6 +1603,7 @@ fn task_to_wire(task: Task) -> types::Task {
             window_type: overlay.window_type,
             focusable: overlay.focusable,
             touchable: overlay.touchable,
+            density_dpi: overlay.density_dpi,
         }),
         below_title_bar: task.below_title_bar,
     }
@@ -1664,6 +1665,7 @@ fn task_from_wire(task: types::Task) -> Task {
             window_type: overlay.window_type,
             focusable: overlay.focusable,
             touchable: overlay.touchable,
+            density_dpi: overlay.density_dpi,
         }),
         below_title_bar: task.below_title_bar,
     }
@@ -5579,6 +5581,13 @@ impl HostApiService {
                     forced: density.forced,
                 },
             ),
+            Some(request::Body::SetOverlayDensity(density)) => self.request(
+                peer,
+                TaskRequest::SetOverlayDensity {
+                    overlay_id: density.overlay_id,
+                    density_dpi: density.density_dpi,
+                },
+            ),
             // The message stays in the protocol so that its field number is never reused, but
             // the guest no longer takes a monitor for the tasks it starts: a task starts at
             // Android's own density and size, and its window gives it its monitor's density
@@ -5706,6 +5715,7 @@ impl HostApiService {
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
+                        | request::Body::SetOverlayDensity(_)
                         | request::Body::LaunchPlacement(_)
                         | request::Body::SetCaptionCompat(_)
                         | request::Body::SetTaskCaption(_)
@@ -8345,6 +8355,19 @@ impl HostApiClient {
         }))
     }
 
+    /// Asks the caller's Android to draw an app overlay window alone at `density_dpi`, the
+    /// density of the monitor its window is on, or at its app's own density again with 0.
+    pub fn set_overlay_density(
+        &mut self,
+        overlay_id: i32,
+        density_dpi: u32,
+    ) -> Result<(), ClientError> {
+        self.done(request::Body::SetOverlayDensity(types::SetOverlayDensity {
+            overlay_id,
+            density_dpi,
+        }))
+    }
+
     /// Tells the caller's Android which apps start below the title bar, and which keep their
     /// focus while another app's window has it.
     pub fn set_caption_compat(
@@ -8416,6 +8439,10 @@ impl HostApiClient {
                 density_dpi,
                 forced,
             } => self.set_task_density(*task_id, *density_dpi, *forced),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            } => self.set_overlay_density(*overlay_id, *density_dpi),
             TaskRequest::SetCaption {
                 task_id,
                 height,
