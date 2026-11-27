@@ -1698,6 +1698,72 @@ pub struct CommittedMemory {
     pub gpu_non_local_kb: Option<u64>,
 }
 
+/// A host process's committed memory split finer than [`CommittedMemory`], for a process whose
+/// memory at rest nobody has broken down yet (the graphics renderer's), in KiB: what its thread
+/// stacks hold, and what the modules it loaded (the graphics driver above all) keep in the
+/// writable parts of their images, which the commit counts as the process's own.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FloorMemory {
+    /// All committed private memory, from the platform's counters.
+    pub private_kb: Option<u64>,
+    /// Committed private pages found by walking the address space.
+    pub walked_private_kb: u64,
+    /// Of those: the default heap, where the process's own allocations and most libraries' go.
+    pub process_heap_kb: u64,
+    /// How many other heaps there are (their pages are among what was allocated directly).
+    pub other_heaps: u32,
+    /// Of those: write-combined or uncached pages, which only GPU drivers map.
+    pub gpu_mapped_kb: u64,
+    /// Of those: thread stacks, and how many threads have one.
+    pub stacks_kb: u64,
+    pub stacks: u32,
+    /// Of those: the rest, allocated straight from the system.
+    pub direct_kb: u64,
+    /// The largest private allocations that are not stacks, largest first.
+    pub largest_private_kb: Vec<u64>,
+    /// Committed writable pages of loaded modules' images (their data, and the copy-on-write
+    /// pages the system charges as the process's), and the modules that hold the most, by file
+    /// name, largest first.
+    pub module_data_kb: u64,
+    pub largest_modules: Vec<(String, u64)>,
+}
+
+/// The part of a log line that breaks `f` down by owner, in MiB.
+pub fn floor_line(f: &FloorMemory) -> String {
+    let tenths = |kb: u64| format!("{:.1}", kb as f64 / 1024.0);
+    let largest: Vec<String> = f.largest_private_kb.iter().map(|kb| tenths(*kb)).collect();
+    let modules: Vec<String> = f
+        .largest_modules
+        .iter()
+        .map(|(name, kb)| format!("{name} {}", tenths(*kb)))
+        .collect();
+    format!(
+        "private {} MiB ({} found in private pages); default heap {}; {} other heaps among what \
+         was allocated directly; GPU-mapped {}; thread stacks {} in {}; allocated directly {} \
+         (largest allocations {} MiB); module data {} ({} MiB)",
+        f.private_kb
+            .map_or("?".to_string(), |kb| mib(kb).to_string()),
+        mib(f.walked_private_kb),
+        mib(f.process_heap_kb),
+        f.other_heaps,
+        mib(f.gpu_mapped_kb),
+        mib(f.stacks_kb),
+        f.stacks,
+        mib(f.direct_kb),
+        if largest.is_empty() {
+            "none".to_string()
+        } else {
+            largest.join(", ")
+        },
+        mib(f.module_data_kb),
+        if modules.is_empty() {
+            "none".to_string()
+        } else {
+            modules.join(", ")
+        },
+    )
+}
+
 /// The log line that breaks a host process's committed memory down by owner, in MiB.
 pub fn committed_line(c: &CommittedMemory) -> String {
     let show = |kb: Option<u64>| kb.map_or("?".to_string(), |kb| mib(kb).to_string());

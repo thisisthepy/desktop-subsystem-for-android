@@ -176,6 +176,16 @@ impl<D: Removable> Recovering<D> {
     /// made again and `op` runs once more, on the new ones. Returns what `op` made and the
     /// generation it was made on.
     pub fn with<R, E: Code>(&self, op: impl Fn(&D) -> Result<R, E>) -> Result<(R, u64), E> {
+        self.with_held(|devices| op(devices))
+    }
+
+    /// [`with`](Self::with), with `op` given the devices themselves, so what it makes can hold
+    /// them: devices something made on them still holds are never let go of
+    /// ([`park`](Self::park)).
+    pub fn with_held<R, E: Code>(
+        &self,
+        op: impl Fn(&Arc<D>) -> Result<R, E>,
+    ) -> Result<(R, u64), E> {
         let (devices, generation) = self.current().map_err(E::not_made)?;
         match op(&devices) {
             Ok(made) => Ok((made, generation)),
@@ -354,6 +364,27 @@ mod tests {
         assert_eq!(gpu.with(shared_texture), Ok((2, 2)));
         assert_eq!(made.load(Ordering::SeqCst), 2);
         // Made again after being let go of is not a GPU reset.
+        assert_eq!(gpu.resets(), 0);
+    }
+
+    #[test]
+    fn nfr1_window_manager_releases_its_device_only_once_nothing_made_on_it_is_alive() {
+        let (gpu, _, made) = devices();
+        // A texture made on the devices holds them, as a window's swapchains do.
+        let (texture, generation) = gpu
+            .with_held(|devices| shared_texture(devices).map(|_| Arc::clone(devices)))
+            .unwrap();
+        assert_eq!(generation, 1);
+        assert!(!gpu.park(), "a live texture keeps its devices");
+        assert!(gpu.is_made());
+        // The last window closed and its texture went: the devices go.
+        drop(texture);
+        assert!(gpu.park());
+        assert!(!gpu.is_made());
+        // The next window's first frame makes them again, as a new generation, and that is
+        // not a GPU reset.
+        assert_eq!(gpu.with(shared_texture), Ok((2, 2)));
+        assert_eq!(made.load(Ordering::SeqCst), 2);
         assert_eq!(gpu.resets(), 0);
     }
 

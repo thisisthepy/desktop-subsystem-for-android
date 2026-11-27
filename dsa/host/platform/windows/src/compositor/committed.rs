@@ -15,11 +15,14 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use dsa_host_core::memory::CommittedMemory;
+use dsa_host_core::memory::{CommittedMemory, FloorMemory};
 use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows_sys::Win32::System::Memory::{
     GetProcessHeap, GetProcessHeaps, HeapCompact, HeapSummary, VirtualQuery, HEAP_SUMMARY,
-    MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_PRIVATE, PAGE_NOCACHE, PAGE_WRITECOMBINE,
+    MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_IMAGE, MEM_PRIVATE, PAGE_EXECUTE_READWRITE,
+    PAGE_EXECUTE_WRITECOPY, PAGE_GUARD, PAGE_NOCACHE, PAGE_READWRITE, PAGE_WRITECOMBINE,
+    PAGE_WRITECOPY,
 };
 
 /// How many of the largest private allocations a breakdown names.
@@ -174,9 +177,129 @@ pub fn breakdown(private_kb: Option<u64>, gpu: (Option<u64>, Option<u64>)) -> Co
     }
 }
 
+/// How many of the modules whose image data holds the most a floor names.
+const LARGEST_MODULES: usize = 5;
+
+/// Whether a page's protection lets it be written: the image pages of that kind are charged to
+/// the process's commit, copied or not.
+fn writable(protect: u32) -> bool {
+    protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)
+        != 0
+}
+
+/// The file name of the module loaded at `base`, or `None` when it is gone.
+fn module_name(base: usize) -> Option<String> {
+    let mut buffer = [0u16; 520];
+    // SAFETY: a module's base address is its handle; a base no module has any more is refused.
+    let length = unsafe {
+        GetModuleFileNameW(
+            base as *mut core::ffi::c_void,
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+        )
+    } as usize;
+    if length == 0 {
+        return None;
+    }
+    let path = String::from_utf16_lossy(&buffer[..length.min(buffer.len())]);
+    Some(path.rsplit(['\\', '/']).next().unwrap_or(&path).to_string())
+}
+
+/// This process's committed memory, split finer than [`breakdown`]: its thread stacks (each
+/// thread's stack is the one private allocation with a guard page in it) and the writable
+/// pages of the modules it loaded, by module. For the graphics renderer, whose memory at rest
+/// is mostly the Vulkan driver's and gfxstream's. `private_kb` comes from the caller.
+pub fn floor(private_kb: Option<u64>) -> FloorMemory {
+    let all = heaps();
+    let process_heap = all.first().map_or(0, |heap| heap_committed(*heap));
+    let mut total = 0u64;
+    let mut gpu = 0u64;
+    // Each private allocation's committed bytes, and whether it has a guard page.
+    let mut allocations: HashMap<usize, (u64, bool)> = HashMap::new();
+    let mut images: HashMap<usize, u64> = HashMap::new();
+    let mut address = 0usize;
+    loop {
+        // SAFETY: a query of this process's own address space into a local of the size given.
+        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<MEMORY_BASIC_INFORMATION>();
+        let got = unsafe { VirtualQuery(address as *const _, &mut info, size) };
+        if got == 0 || info.RegionSize == 0 {
+            break;
+        }
+        if info.State == MEM_COMMIT {
+            let bytes = info.RegionSize as u64;
+            if info.Type == MEM_PRIVATE {
+                total += bytes;
+                if info.Protect & (PAGE_WRITECOMBINE | PAGE_NOCACHE) != 0 {
+                    gpu += bytes;
+                }
+                let entry = allocations.entry(info.AllocationBase as usize).or_default();
+                entry.0 += bytes;
+                if info.Protect & PAGE_GUARD != 0 {
+                    entry.1 = true;
+                }
+            } else if info.Type == MEM_IMAGE && writable(info.Protect) {
+                *images.entry(info.AllocationBase as usize).or_default() += bytes;
+            }
+        }
+        match (info.BaseAddress as usize).checked_add(info.RegionSize) {
+            Some(next) if next > address => address = next,
+            _ => break,
+        }
+    }
+    let (mut stacks_bytes, mut stacks) = (0u64, 0u32);
+    let mut largest = Vec::new();
+    for (bytes, guarded) in allocations.into_values() {
+        if guarded {
+            stacks_bytes += bytes;
+            stacks += 1;
+        } else {
+            largest.push(bytes);
+        }
+    }
+    largest.sort_unstable_by(|a, b| b.cmp(a));
+    largest.truncate(LARGEST);
+    let module_data: u64 = images.values().sum();
+    let mut modules: Vec<(usize, u64)> = images.into_iter().collect();
+    modules.sort_unstable_by_key(|module| std::cmp::Reverse(module.1));
+    modules.truncate(LARGEST_MODULES);
+    FloorMemory {
+        private_kb,
+        walked_private_kb: total / 1024,
+        process_heap_kb: process_heap / 1024,
+        other_heaps: all.len().saturating_sub(1) as u32,
+        gpu_mapped_kb: gpu / 1024,
+        stacks_kb: stacks_bytes / 1024,
+        stacks,
+        direct_kb: total.saturating_sub(process_heap + gpu + stacks_bytes) / 1024,
+        largest_private_kb: largest.into_iter().map(|bytes| bytes / 1024).collect(),
+        module_data_kb: module_data / 1024,
+        largest_modules: modules
+            .into_iter()
+            .map(|(base, bytes)| {
+                (
+                    module_name(base).unwrap_or_else(|| "?".to_string()),
+                    bytes / 1024,
+                )
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr1_a_floor_finds_this_threads_stack_and_this_programs_data() {
+        // A thread of its own, with a stack that has a guard page.
+        let floor = std::thread::spawn(|| floor(None)).join().unwrap();
+        assert!(floor.stacks >= 2, "{floor:?}");
+        assert!(floor.stacks_kb > 0, "{floor:?}");
+        assert!(floor.module_data_kb > 0, "{floor:?}");
+        assert!(!floor.largest_modules.is_empty(), "{floor:?}");
+        assert!(floor.walked_private_kb >= floor.direct_kb, "{floor:?}");
+    }
 
     #[test]
     fn nfr2_a_breakdown_finds_a_large_private_allocation_and_the_heaps() {

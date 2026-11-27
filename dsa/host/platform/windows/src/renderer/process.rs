@@ -99,6 +99,15 @@ impl RemoteSink {
         }
     }
 
+    /// How many displays (task windows) hold a texture of the window manager's now.
+    pub fn windows(&self) -> usize {
+        self.held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .displays()
+            .len()
+    }
+
     /// No window shows `display_id` now: its textures' handles go.
     pub fn forget(&self, display_id: u32) {
         let released = self
@@ -200,6 +209,25 @@ fn save_color_buffers(adapter: &GfxstreamAdapter) -> Result<(), String> {
 fn memory(adapter: &GfxstreamAdapter) -> RendererProcessMemory {
     let (working_set_kb, private_kb) = own_memory_kb();
     RendererProcessMemory::of_this_process(working_set_kb, private_kb, adapter.counted_memory())
+}
+
+/// The log line that says whose this renderer's memory is: its GPU memory by the device it is
+/// on, and its committed memory by owner (heaps, the driver's write-combined pools, thread
+/// stacks, the loaded modules' data), headed by whether a guest process or a task window is
+/// there. With neither, it is what the renderer costs at rest.
+fn memory_by_owner(
+    adapter: &GfxstreamAdapter,
+    sink: &RemoteSink,
+    held: &RendererProcessMemory,
+) -> String {
+    let floor = crate::compositor::committed::floor(held.held.private_kb);
+    let guest_processes = held.counted.map_or(0, |counted| counted.guest_processes);
+    dsa_host_core::renderer::renderer_memory_line(
+        adapter.counted_owners().as_ref(),
+        &floor,
+        guest_processes,
+        sink.windows(),
+    )
 }
 
 /// No task window is shown: gives back the memory the renderer is not using. The guest's
@@ -415,6 +443,16 @@ pub fn run(args: &[String]) -> ! {
         ));
     }
 
+    // Starting left freed memory committed in the heap: the Vulkan probe's instance and
+    // drivers, which it unloaded, and what gfxstream and the driver used while they made the
+    // device and compiled its pipelines. It goes back now, rather than at the window manager's
+    // first idle give-back, and the log says what the renderer holds at rest, by owner.
+    crate::compositor::committed::compact_heaps();
+    link.note(&format!(
+        "started; {}",
+        memory_by_owner(&adapter, &sink, &memory(&adapter))
+    ));
+
     let vm: VmIdSlot = Arc::default();
     let mut served = ServedVm::new();
     for (kind, port) in [
@@ -542,12 +580,15 @@ fn serve_window_manager(
                     continue;
                 }
                 if served.told(told) {
-                    let (_, private_kb) = own_memory_kb();
+                    let held = memory(adapter);
                     link.note(&format!(
                         "the VM this renderer served is gone; it ends so that the window \
                          manager starts a fresh one for the next VM, without the {} MiB of \
-                         private memory this one holds",
-                        private_kb.map_or("?".to_string(), |kb| (kb / 1024).to_string())
+                         private memory this one holds; {}",
+                        held.held
+                            .private_kb
+                            .map_or("?".to_string(), |kb| (kb / 1024).to_string()),
+                        memory_by_owner(adapter, sink, &held)
                     ));
                     return WindowManagerLeft::VmGone;
                 }
@@ -578,12 +619,11 @@ fn serve_window_manager(
                     // five minutes), and a video's uploads left their buffers' worth there.
                     crate::compositor::committed::compact_heaps();
                 }
-                let report = memory(adapter).to_report(asked.request);
-                link.send(Body::MemoryReport(report));
-                // Whose the GPU memory is, for the window manager's log beside the report.
-                if let Some(owners) = adapter.counted_owners() {
-                    link.note(&dsa_host_core::renderer::renderer_owners_line(&owners));
-                }
+                let held = memory(adapter);
+                link.send(Body::MemoryReport(held.to_report(asked.request)));
+                // Whose the GPU memory is and whose the committed memory is, for the window
+                // manager's log beside the report.
+                link.note(&memory_by_owner(adapter, sink, &held));
                 // Every color buffer, for the memory snapshot and the diagnostics archive.
                 if let Err(why) = save_color_buffers(adapter) {
                     link.note(&format!("could not save the color buffer list: {why}"));

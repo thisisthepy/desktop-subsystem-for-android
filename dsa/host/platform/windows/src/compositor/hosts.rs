@@ -34,6 +34,7 @@ use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::idle_device::IdleDevice;
 use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
 use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::shown_windows::{CoverWatch, ShownWindows};
@@ -911,6 +912,10 @@ pub struct ManagerSetup {
     pub stop: Arc<AtomicBool>,
     /// Told whether any window is shown, for the trim of idle memory.
     pub idle: Arc<Mutex<IdleTrim>>,
+    /// Told how many task windows and window programs exist, which says when the task
+    /// windows' Direct3D device goes and when it is made ahead of a window. None when there is
+    /// no device.
+    pub device: Option<Arc<Mutex<IdleDevice>>>,
     /// Told, on each change, whether a task window is the active window, for Windows' touch
     /// gestures. None when nothing follows that.
     pub fronts: Option<Sender<bool>>,
@@ -998,6 +1003,7 @@ pub fn manage(setup: ManagerSetup) {
             manager.tick();
         }
         manager.publish();
+        manager.note_windows();
     }
     let actions = manager.hosts.reset();
     manager.carry_out(actions);
@@ -1011,6 +1017,52 @@ pub fn manage(setup: ManagerSetup) {
 impl Manager {
     fn log(&self, message: &str) {
         note(self.setup.logger.as_deref(), message);
+    }
+
+    /// Tells the device's idle rule how many windows exist (the tasks with a window and the
+    /// window programs connected, which may show a splash before their task has one), and has
+    /// the device made ahead of the first frame of a window that appears while it is gone: on
+    /// a thread of its own, so the manager goes on meanwhile, while the window program makes
+    /// its window. Its first call for a surface, or the renderer's first frame, waits for that
+    /// device rather than making another.
+    fn note_windows(&self) {
+        let Some(device) = &self.setup.device else {
+            return;
+        };
+        let windows = self.remotes.len() + self.links.len();
+        let appeared = device
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .windows_open(windows, Instant::now());
+        if !appeared {
+            return;
+        }
+        let Some(gpu) = self.setup.gpu.clone() else {
+            return;
+        };
+        if gpu.is_made() {
+            return;
+        }
+        let logger = self.setup.logger.clone();
+        let spawned = thread::Builder::new()
+            .name("dsa-wm-device".into())
+            .spawn(move || {
+                if let Err(why) = gpu.prepare() {
+                    note(
+                        logger.as_deref(),
+                        &format!(
+                            "could not make the task windows' Direct3D device ahead of a \
+                             window: {why}; the window's first frame tries again"
+                        ),
+                    );
+                }
+            });
+        if let Err(why) = spawned {
+            self.log(&format!(
+                "could not start making the task windows' Direct3D device ahead of a window: \
+                 {why}; the window's first frame makes it"
+            ));
+        }
     }
 
     /// Tells the task rules the DPI of the monitor each new task's window opens on, before

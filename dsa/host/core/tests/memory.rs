@@ -1189,6 +1189,47 @@ fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
 }
 
 #[test]
+fn nfr1_the_renderers_idle_memory_is_logged_by_owner() {
+    use dsa_host_core::memory::FloorMemory;
+    use dsa_host_core::renderer::{renderer_memory_line, RendererOwners};
+    let floor = FloorMemory {
+        private_kb: Some(84 * MIB),
+        walked_private_kb: 70 * MIB,
+        process_heap_kb: 30 * MIB,
+        other_heaps: 3,
+        gpu_mapped_kb: 20 * MIB,
+        stacks_kb: 2 * MIB,
+        stacks: 17,
+        direct_kb: 18 * MIB,
+        largest_private_kb: vec![16 * MIB, 5 * MIB / 2],
+        module_data_kb: 14 * MIB,
+        largest_modules: vec![
+            ("igvk64.dll".into(), 11 * MIB),
+            ("gfxstream_backend.dll".into(), 3 * MIB / 2),
+        ],
+    };
+    let line = renderer_memory_line(None, &floor, 0, 0);
+    assert_eq!(
+        line,
+        "graphics renderer committed memory by owner, idle, with no guest process and no task \
+         window: private 84 MiB (70 found in private pages); default heap 30; 3 other heaps \
+         among what was allocated directly; GPU-mapped 20; thread stacks 2 in 17; allocated \
+         directly 18 (largest allocations 16.0, 2.5 MiB); module data 14 (igvk64.dll 11.0, \
+         gfxstream_backend.dll 1.5 MiB)"
+    );
+    // With guests or windows the same breakdown follows whose the GPU memory is.
+    let busy = renderer_memory_line(Some(&RendererOwners::default()), &floor, 4, 1);
+    assert!(busy.starts_with("graphics renderer by owner: "), "{busy}");
+    assert!(
+        busy.contains("; graphics renderer committed memory by owner, with 4 guest processes and 1 task windows: private 84 MiB"),
+        "{busy}"
+    );
+    let unknown = renderer_memory_line(None, &FloorMemory::default(), 0, 0);
+    assert!(unknown.contains("private ? MiB"), "{unknown}");
+    assert!(unknown.contains("(largest allocations none MiB); module data 0 (none MiB)"));
+}
+
+#[test]
 fn nfr5_the_renderers_memory_is_logged_under_its_own_process() {
     use dsa_host_core::memory::{HeldMemory, RendererMemory};
     use dsa_host_core::renderer::{renderer_line, RendererProcessMemory};

@@ -4,8 +4,21 @@
 //! the task's frame into it on the GPU. The window manager then copies each frame from there
 //! into the window's swapchain (`surfaces`), so the app window programs make no Direct3D
 //! device of their own. A GPU reset removes the devices, and [`Gpu`] makes new ones.
+//!
+//! Once no task window has existed for a while ([`IdleDevice`]), the devices are let go of
+//! ([`Gpu::release_idle`]): every texture, swapchain and frame copy made on them holds them,
+//! so they go only when all of those have, and the driver frees what it kept for them. The
+//! next window has them made again, ahead of its first frame when it can
+//! ([`Gpu::prepare`]), and the log says how long that took.
+//!
+//! [`IdleDevice`]: dsa_host_core::compositor::idle_device::IdleDevice
 
+use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use dsa_host_core::compositor::idle_device::remade_line;
 
 use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, E_FAIL, HANDLE, HMODULE, LUID};
@@ -26,7 +39,35 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_SHARED_RESOURCE_WRITE,
 };
 
-use super::device_recovery::{Recovering, Removable};
+use super::device_recovery::{MakeDevices, Recovering, Removable};
+
+thread_local! {
+    /// Set on a thread that makes the devices ahead of a window's first frame
+    /// ([`Gpu::prepare`]), so the log can say which it was.
+    static AHEAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Where a line about the devices goes.
+type Log = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// `make`, timed: when the devices are made again after [`Gpu::release_idle`] let them go,
+/// `log` is told how long it took.
+fn timed(
+    make: impl Fn() -> Result<Devices, String> + Send + Sync + 'static,
+    released: Arc<AtomicBool>,
+    log: Option<Log>,
+) -> MakeDevices<Devices> {
+    Box::new(move || {
+        let started = Instant::now();
+        let made = make()?;
+        if released.swap(false, Ordering::SeqCst) {
+            if let Some(log) = &log {
+                log(&remade_line(started.elapsed(), AHEAD.with(Cell::get)));
+            }
+        }
+        Ok(made)
+    })
+}
 
 fn failed(what: &str, error: windows::core::Error) -> String {
     format!("{what}: {error}")
@@ -59,14 +100,22 @@ impl Removable for Devices {
 /// The devices a process shows or shares frames with, made again after a GPU reset.
 pub struct Gpu {
     devices: Recovering<Devices>,
+    /// Set when the devices were let go of while no window existed; the next make says how
+    /// long it took.
+    released: Arc<AtomicBool>,
 }
 
 impl Gpu {
     /// Creates the devices on the GPU `luid` names (the renderer's), else on the default
     /// GPU, else on the software rasteriser. A GPU reset makes them again the same way.
     pub fn new(luid: Option<[u8; 8]>) -> Result<Arc<Gpu>, String> {
-        let devices = Recovering::new(Box::new(move || Devices::new(luid)))?;
-        Ok(Arc::new(Gpu { devices }))
+        let released = Arc::new(AtomicBool::new(false));
+        let devices = Recovering::new(timed(
+            move || Devices::new(luid),
+            Arc::clone(&released),
+            None,
+        ))?;
+        Ok(Arc::new(Gpu { devices, released }))
     }
 
     /// Makes no devices until a window or a frame needs them, and then on the GPU `luid` names
@@ -77,15 +126,22 @@ impl Gpu {
         luid: Box<dyn Fn() -> Option<[u8; 8]> + Send + Sync>,
         log: Box<dyn Fn(&str) + Send + Sync>,
     ) -> Arc<Gpu> {
-        let devices = Recovering::lazy(Box::new(move || {
-            let wanted = luid();
-            let devices = Devices::new(wanted)?;
-            if wanted.is_some() && !devices.on_renderer_gpu {
-                log("the renderer's GPU was not found; task windows may stay empty");
-            }
-            Ok(devices)
-        }));
-        Arc::new(Gpu { devices })
+        let log: Log = Arc::from(log);
+        let said = Arc::clone(&log);
+        let released = Arc::new(AtomicBool::new(false));
+        let devices = Recovering::lazy(timed(
+            move || {
+                let wanted = luid();
+                let devices = Devices::new(wanted)?;
+                if wanted.is_some() && !devices.on_renderer_gpu {
+                    said("the renderer's GPU was not found; task windows may stay empty");
+                }
+                Ok(devices)
+            },
+            Arc::clone(&released),
+            Some(log),
+        ));
+        Arc::new(Gpu { devices, released })
     }
 
     /// Whether the device is on the GPU the renderer named; frames cannot cross GPUs. `None`
@@ -113,6 +169,34 @@ impl Gpu {
     /// Whether devices are made now.
     pub fn is_made(&self) -> bool {
         self.devices.is_made()
+    }
+
+    /// Lets go of the devices because no task window exists: the context's work is flushed
+    /// first, so the resources the windows released are destroyed with the devices, and the
+    /// driver frees the memory it kept for them (its command buffers, its pools mapped
+    /// write-combined, the runtime's allocations). True when they went; while anything made
+    /// on them (a texture, a swapchain, a frame copy) is still alive, they stay. The next
+    /// window or frame makes them again, and the log says how long that took.
+    pub fn release_idle(&self) -> bool {
+        self.trim();
+        let released = self.devices.park();
+        if released {
+            self.released.store(true, Ordering::SeqCst);
+        }
+        released
+    }
+
+    /// Makes the devices now when none are made, on the calling thread: for a window that is
+    /// about to appear, so its first frame finds them ready. A window that asks meanwhile waits
+    /// for these rather than making others.
+    pub fn prepare(&self) -> Result<(), String> {
+        if self.devices.is_made() {
+            return Ok(());
+        }
+        AHEAD.with(|ahead| ahead.set(true));
+        let made = self.devices.current().map(|_| ());
+        AHEAD.with(|ahead| ahead.set(false));
+        made
     }
 
     /// How many GPU resets had the devices made again; devices let go of while unused and
@@ -153,11 +237,16 @@ impl Gpu {
     /// A texture the renderer can open by its shared handle and copy a frame into. Made on new
     /// devices when a GPU reset removed the current ones.
     pub fn shared_texture(&self, width: u32, height: u32) -> Result<SharedTexture, String> {
-        let (mut texture, generation) = self
+        let ((mut texture, devices), generation) = self
             .devices
-            .with(|devices| devices.shared_texture(width, height))
+            .with_held(|devices| {
+                devices
+                    .shared_texture(width, height)
+                    .map(|texture| (texture, Arc::clone(devices)))
+            })
             .map_err(|e| failed("creating a shared texture for a task window", e))?;
         texture.generation = generation;
+        texture._devices = Some(devices);
         Ok(texture)
     }
 }
@@ -305,6 +394,7 @@ impl Devices {
                 handle,
                 size: (width, height),
                 generation: 0,
+                _devices: None,
             })
         }
     }
@@ -319,6 +409,9 @@ pub struct SharedTexture {
     size: (u32, u32),
     /// The generation of the devices it was made on: after a GPU reset it is made again.
     generation: u64,
+    /// The devices it was made on, held so they are not let go of while no window exists
+    /// but this texture does; dropped after the texture.
+    _devices: Option<Arc<Devices>>,
 }
 
 // SAFETY: a Direct3D 11 resource may be used from any thread; the handle is a kernel handle.

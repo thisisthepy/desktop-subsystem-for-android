@@ -44,7 +44,7 @@ use dsa_protocol::renderer::{
 use dsa_transport::{Connection, FrameSender, TransportError};
 
 use crate::android_presence::SharedPresence;
-use crate::memory::{mib, HeldMemory, RendererMemory};
+use crate::memory::{floor_line, mib, FloorMemory, HeldMemory, RendererMemory};
 
 /// The renderer's program name, without the platform's extension.
 pub const RENDERER_PROGRAM: &str = "dsa-gfx";
@@ -390,6 +390,32 @@ pub fn renderer_owners_line(owners: &RendererOwners) -> String {
         owners.guest_devices,
         kinds(&owners.guests),
     )
+}
+
+/// The renderer's memory log line: whose its GPU memory is (`owners`, when it can count it),
+/// then its committed memory by owner (`floor`), headed by whether it is idle. With no guest
+/// process connected and no task window it holds only what it starts with (its Vulkan instance
+/// and device, gfxstream's own state, the driver's data, its threads), so that part of the line
+/// says what the renderer costs at rest.
+pub fn renderer_memory_line(
+    owners: Option<&RendererOwners>,
+    floor: &FloorMemory,
+    guest_processes: i32,
+    windows: usize,
+) -> String {
+    let state = if guest_processes <= 0 && windows == 0 {
+        "idle, with no guest process and no task window".to_string()
+    } else {
+        format!("with {guest_processes} guest processes and {windows} task windows")
+    };
+    let committed = format!(
+        "graphics renderer committed memory by owner, {state}: {}",
+        floor_line(floor)
+    );
+    match owners {
+        Some(owners) => format!("{}; {committed}", renderer_owners_line(owners)),
+        None => committed,
+    }
 }
 
 /// The log line that says what the renderer process holds, beside the window manager's own

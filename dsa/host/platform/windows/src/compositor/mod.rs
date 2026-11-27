@@ -79,6 +79,7 @@ use dsa_host_core::android_presence::SharedPresence;
 use dsa_host_core::app_audio::{self, AppStream, AppVolumes};
 use dsa_host_core::audio::{serve_port as serve_audio_port, AudioDevice, AUDIO_PORT};
 use dsa_host_core::compositor::frame_stall::{restart_in_background, SharedConnector, Stall};
+use dsa_host_core::compositor::idle_device::IdleDevice;
 use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::{
     GraphicsRenderer, GraphicsStreamKind, StreamTracker, GRAPHICS_COMMAND_PORT,
@@ -1493,6 +1494,11 @@ impl Compositor {
         let fronts = gestures_thread.as_ref().map(|_| fronts_tx);
         let drawn = DrawnFrames::new();
         let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
+        // Whether any task window exists, which says when the task windows' device goes.
+        let device = gpu
+            .as_ref()
+            .map(|_| Arc::new(Mutex::new(IdleDevice::new(Instant::now()))));
+        let trim_device = device.clone();
         let trim_gpu = gpu.clone();
         let gpu_for_hosts = gpu.clone();
         let trim_renderer = self.presenter.clone();
@@ -1507,6 +1513,7 @@ impl Compositor {
             listing: Arc::clone(&self.windows),
             stop: Arc::clone(&manager_stop),
             idle: Arc::clone(&idle),
+            device,
             fronts,
             renderer_generation: self.presenter.clone().map(|presenter| {
                 Box::new(move || presenter.device_generation()) as Box<dyn Fn() -> u64 + Send>
@@ -1591,6 +1598,7 @@ impl Compositor {
                         gpu: trim_gpu,
                         renderer: trim_renderer,
                         presence: trim_presence,
+                        device: trim_device,
                     },
                     quiet_for,
                     trim_let_go,
