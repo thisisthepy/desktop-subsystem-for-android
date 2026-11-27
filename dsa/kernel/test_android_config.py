@@ -27,7 +27,8 @@ def fragment_lines(path):
 class AndroidKernelConfigTests(unittest.TestCase):
     def test_nfr5_the_debug_fragment_has_the_memory_checks_and_only_an_opt_in_merges_it(self):
         debug = fragment_lines(DEBUG_CONFIG)
-        for option in ["CONFIG_DEBUG_VM=y", "CONFIG_KFENCE=y", "CONFIG_PAGE_OWNER=y", "CONFIG_DEBUG_LIST=y"]:
+        for option in ["CONFIG_DEBUG_VM=y", "CONFIG_KFENCE=y", "CONFIG_PAGE_OWNER=y", "CONFIG_DEBUG_LIST=y",
+                       "CONFIG_KASAN=y", "CONFIG_KASAN_GENERIC=y", "CONFIG_KASAN_VMALLOC=y"]:
             self.assertIn(option, debug)
         # The shipped kernel's fragments carry none of it.
         for shipped in [CONFIG, ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
