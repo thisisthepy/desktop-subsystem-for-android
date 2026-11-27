@@ -23,11 +23,14 @@ import io.github.thisisthepy.dsa.agent.Scheduler
  * Each app that goes out of sight is logged once for that spell (`<package> is out of the user's
  * sight`), so a log shows the host's word arrived before any trim.
  *
- * Never trimmed: an app playing audio (a player of it is started: its decoder and buffers are
- * in use; a paused player, which video apps and games keep for as long as they run, is not
- * playing) or running a
- * foreground service, which is doing work the user asked for; such an app is looked at again
- * every [RECHECK_MILLIS] while it stays hidden. The agent itself is never trimmed.
+ * An app playing audio (a player of it is started: its decoder and buffers are in use; a paused
+ * player, which video apps and games keep for as long as they run, is not playing) or running a
+ * foreground service is doing work the user asked for. It is sent TRIM_MEMORY_UI_HIDDEN all the
+ * same, which only lets go of what it holds to draw, but neither TRIM_MEMORY_BACKGROUND nor the
+ * compaction, which would page its decoder and buffers out and could break up the sound. An app
+ * whose state cannot be looked up counts as busy. A busy app is looked at again every
+ * [RECHECK_MILLIS] while it stays hidden, and once it is no longer busy it is sent the background
+ * level and compacted at that look. The agent itself is never trimmed.
  *
  * Requests go one at a time through [AppMemoryPort.requestTrim]: the next is sent once the
  * last is carried out, or after [REQUEST_TIMEOUT_MILLIS]. When the activity manager does not
@@ -115,8 +118,8 @@ class HiddenApps(
             hidden[packageName] = Hidden(now)
             val why = if (!screenOn) "no task window is shown" else "the host says none of its windows can be seen"
             log.info(
-                "$packageName is out of the user's sight ($why); it is trimmed after ${HIDDEN_AFTER_MILLIS / 1000} s " +
-                    "unless it plays audio or runs a foreground service",
+                "$packageName is out of the user's sight ($why); it is trimmed after ${HIDDEN_AFTER_MILLIS / 1000} s, " +
+                    "and compacted after ${BACKGROUND_AFTER_MILLIS / 1000} s unless it plays audio or runs a foreground service",
             )
             scheduler.postDelayed(HIDDEN_AFTER_MILLIS) { check() }
             scheduler.postDelayed(BACKGROUND_AFTER_MILLIS) { check() }
@@ -179,9 +182,16 @@ class HiddenApps(
                 state.step < 1 && hiddenFor >= HIDDEN_AFTER_MILLIS -> 1
                 else -> continue
             }
-            val busy = busy(packageName)
+            // A busy app still lets its drawing caches go, but its process is not compacted.
+            val busy = if (due == 2) busy(packageName) else null
             if (busy != null) {
-                if (state.keptFor != busy) log.info("left hidden $packageName untrimmed: $busy")
+                if (state.step < 1) {
+                    queue += Request(packageName, "HIDDEN", false, "hidden ${hiddenFor / 1000} s")
+                    state.step = 1
+                }
+                if (state.keptFor != busy) {
+                    log.info("kept hidden $packageName from TRIM_MEMORY_BACKGROUND and its compaction: $busy")
+                }
                 state.keptFor = busy
                 recheck = true
                 continue
