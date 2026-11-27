@@ -90,6 +90,15 @@ Vulkan drivers map their host-visible memory from): once init writes where both 
 `/dev/dsa_graphics_memory`, only the grants whose keys the host's renderer gave it, and the driver
 takes every mapping of a grant away before it tells the renderer the grant is free.
 
+gralloc's buffers are dumb buffers of the vkms card: shmem objects that a CPU writes through a
+mapping which inserts the pages by PFN, so the writes never mark a page dirty. minigbm unmaps a
+buffer at every unlock, and once no mapping holds an object upstream puts its pages clean, which
+reclaim treats as holes of the file: it drops them instead of swapping them out, and the next
+mapping reads zeros. A video picture the codec HAL had written showed green bands when the working
+set trim's `memory.reclaim` ran before the hwcomposer copied it up.
+`patches/drm-shmem-mapped-pages-put-dirty.patch` marks the pages of an object that a mapping or a
+vmap has reached dirty when they are put, so reclaim moves them to zram with their data.
+
 Android mounts each APEX package as a read-only ext4 image, about 75 of them with Google Play.
 Upstream ext4 gives every mount a workqueue for converting unwritten extents, and with it a
 rescuer thread (`ext4-rsv-conversion`) that stays for the life of the mount, though a read-only

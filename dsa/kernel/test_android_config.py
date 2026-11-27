@@ -987,6 +987,29 @@ class AndroidKernelConfigTests(unittest.TestCase):
                 if re.match(rf"^(# )?{name}[= ]", other):
                     self.assertEqual(other, line, name)
 
+    def test_pr4_a_cpu_written_gralloc_buffer_keeps_its_data_through_a_memory_reclaim(self):
+        # gralloc's buffers are vkms dumb buffers, shmem GEM objects a CPU writes through a
+        # PFN mapping, which never marks a page dirty. minigbm unmaps a buffer at every unlock,
+        # so between the video decoder's write and the hwcomposer's copy up no mapping holds
+        # the pages, and upstream puts them clean: the working set trim's memory.reclaim then
+        # dropped them as holes, and the hwcomposer read zeros (green) where the picture was.
+        self.assertIn("CONFIG_DRM_VKMS=y", CONFIG.read_text())
+        patch = (PATCHES / "drm-shmem-mapped-pages-put-dirty.patch").read_text()
+        self.assertIn("+++ b/drivers/gpu/drm/drm_gem_shmem_helper.c", patch)
+        mmap = patch[patch.index("drm_gem_shmem_mmap(struct drm_gem_shmem_object"):]
+        # Set under the reservation lock: the flags are bitfields beside map_wc and others.
+        locked = mmap[:mmap.index(" \tdma_resv_unlock(shmem->base.resv);")]
+        self.assertIn(" \tret = drm_gem_shmem_get_pages_locked(shmem);", locked)
+        self.assertIn("+\t\tshmem->pages_mark_dirty_on_put = true;", locked)
+        self.assertIn("+\t\tshmem->pages_mark_accessed_on_put = true;", locked)
+        # The kernel's own mapping (vmap) writes the pages without dirtying them too.
+        vmap = patch[patch.index("drm_gem_shmem_vmap_locked(struct drm_gem_shmem_object"):
+                     patch.index("drm_gem_shmem_mmap(struct drm_gem_shmem_object")]
+        self.assertIn("+\t\tshmem->pages_mark_dirty_on_put = true;", vmap)
+        # The patch only adds lines: the put itself is upstream's, which honours the flags.
+        self.assertFalse([line for line in patch.splitlines()
+                          if line.startswith("-") and not line.startswith("---")])
+
     def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.
         for patch in PATCHES.glob("*.patch"):
