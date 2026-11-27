@@ -20,7 +20,6 @@ import android.graphics.Color
 import android.graphics.HardwareRenderer
 import android.graphics.PixelFormat
 import android.graphics.PorterDuff
-import android.graphics.Rect
 import android.graphics.RenderNode
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -40,7 +39,6 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewParent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.AdapterView
 import android.widget.AnalogClock
@@ -56,8 +54,6 @@ import io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.widgets.FrameGate
 import io.github.thisisthepy.dsa.agent.widgets.PreviewKinds
-import io.github.thisisthepy.dsa.agent.widgets.WidgetDraw
-import io.github.thisisthepy.dsa.agent.widgets.WidgetDrawMode
 import io.github.thisisthepy.dsa.agent.widgets.WidgetFit
 import io.github.thisisthepy.dsa.agent.widgets.WidgetInfo
 import io.github.thisisthepy.dsa.agent.widgets.WidgetManager
@@ -83,13 +79,10 @@ import kotlin.math.roundToInt
  * Each placed widget's view (an AppWidgetHostView, which shows the RemoteViews its app sends)
  * lives in a window of its own: a presentation on a private virtual display of the widget's
  * size, which only the agent can show anything on. Being in a window is what makes the
- * widget's views run, as a clock's ticking and a list's adapter need. The window is drawn in
- * software and draws none of the widget ([CaptureRoot]), and the widget's image does not come
- * from that display: the agent draws the view in software onto a bitmap of its own
- * ([Renderer]), so its process holds no GPU device, context or color buffers for the widgets.
- * Software drawing clips a view to its outline as the GPU does ([SoftwareOutlines]). Only a
- * widget whose views hold a bitmap that lives on the GPU, which software cannot draw, is drawn
- * with the GPU, and only until its app sends new views ([WidgetDrawMode]). That drawing
+ * widget's views run, as a clock's ticking and a list's adapter need. The widget's image does
+ * not come from that display, though: the agent records the view into a render node and draws
+ * it with a hardware renderer of its own into an image reader ([Renderer]), or in software
+ * when the GPU's image comes back with nothing in it. That drawing
  * does not depend on the guest's screen, so a widget keeps drawing while the guest's screen is
  * off and the device dozes, at the low rate a clock needs, without waking anything else.
  *
@@ -105,7 +98,7 @@ import kotlin.math.roundToInt
  * listener". Those views live in the agent's process, so each start makes them again for
  * every placed widget, and a widget's view is made before anything else about its drawing,
  * so a window or display that fails to open never leaves the widget deaf. When the window
- * cannot be opened, the widget is drawn without one ([Renderer]).
+ * cannot be opened, the widget is drawn without one, in software ([Renderer]).
  *
  * The widget's views are also its accessibility nodes ([WidgetNodes]): while the host watches
  * a widget for a screen reader, its views are read on the main thread as the accessibility
@@ -117,11 +110,8 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
     private val manager = AppWidgetManager.getInstance(context)
     private val host = object : AppWidgetHost(context, HOST_ID) {
         override fun onCreateView(context: Context, appWidgetId: Int, appWidget: AppWidgetProviderInfo?): AppWidgetHostView =
-            WidgetView(context) { renderers[appWidgetId]?.viewsReplaced() }
+            WidgetView(context) { renderers[appWidgetId]?.requestCapture() }
     }
-
-    /** The outline clips of every widget's views drawn in software. Main thread only. */
-    private val outlines = SoftwareOutlines()
     private val displays = context.getSystemService(DisplayManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private val encoder: Handler by lazy { Handler(HandlerThread("dsa-widget-frames").apply { start() }.looper) }
@@ -638,17 +628,7 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
     }
 
     /**
-     * The root of a widget's window: it hears when any view in it needs drawing again, and
-     * only [drawPicture] draws the views in it.
-     *
-     * The window draws in software, and its drawing is never shown, so it draws none of the
-     * widget: the widget would otherwise be drawn twice for each picture, and a bitmap that
-     * lives on the GPU, which software cannot draw, would end the agent's process from inside
-     * the window's drawing.
-     *
-     * In a window drawn in software a view's change reaches its parents through
-     * [invalidateChildInParent]; [onDescendantInvalidated] is called only in a window drawn
-     * with the GPU. Both are heard.
+     * The root of a widget's window: it hears when any view in it needs drawing again.
      *
      * FrameLayout's constructor calls requestLayout() before this class's own fields are set,
      * so the callback is read through a field that is still null at that point.
@@ -656,32 +636,9 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
     internal class CaptureRoot(context: Context, invalidated: () -> Unit) : FrameLayout(context) {
         private val listener: (() -> Unit)? = invalidated
 
-        /** Whether [drawPicture] is drawing. False until set, also while the constructor runs. */
-        private var picturing = false
-
-        /** Draws the widget's views onto [canvas], for the widget's picture. */
-        fun drawPicture(canvas: Canvas) {
-            picturing = true
-            try {
-                draw(canvas)
-            } finally {
-                picturing = false
-            }
-        }
-
-        override fun dispatchDraw(canvas: Canvas) {
-            if (picturing) super.dispatchDraw(canvas)
-        }
-
         override fun onDescendantInvalidated(child: View, target: View) {
             super.onDescendantInvalidated(child, target)
             listener?.invoke()
-        }
-
-        @Deprecated("Deprecated in Java")
-        override fun invalidateChildInParent(location: IntArray?, dirty: Rect?): ViewParent? {
-            listener?.invoke()
-            return super.invalidateChildInParent(location, dirty)
         }
 
         override fun invalidate() {
@@ -780,13 +737,8 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
 
     /**
      * One widget's drawing, of the [view] already registered for it. Lives on the main thread.
-     * The view runs in a window of its own when one opens; without one it is drawn again each
-     * time its app sends new views, and a clock at each tick.
-     *
-     * Each picture is drawn in software onto a bitmap ([drawInSoftware]). Only when the views
-     * hold a bitmap that lives on the GPU, which software cannot draw, does the widget get a
-     * GPU renderer of its own ([GpuFrame]), kept until its app sends new views that software
-     * can draw ([WidgetDrawMode]).
+     * The view runs in a window of its own when one opens; without one it is drawn in
+     * software, again each time its app sends new views, and a clock at each tick.
      *
      * The view is laid out in [layoutWidth] by [layoutHeight] pixels and drawn shrunk by
      * [scale] into the widget's image: the widget's own size at a scale of 1, and a larger room
@@ -806,10 +758,21 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         private val root = CaptureRoot(densityContext(size.densityDpi)) { requestCapture() }.also {
             it.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
-        private val mode = WidgetDrawMode()
-
-        /** The GPU's renderer of this widget, only while software cannot draw its views. */
-        private var gpu: GpuFrame? = null
+        private val captureReader = ImageReader.newInstance(
+            width,
+            height,
+            PixelFormat.RGBA_8888,
+            2,
+            HardwareBuffer.USAGE_CPU_READ_OFTEN or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE,
+        )
+        private val node = RenderNode("dsa-widget-$id").also { it.setPosition(0, 0, width, height) }
+        private val renderer = HardwareRenderer().also {
+            // A hardware renderer draws opaque unless told otherwise, and then the alpha it
+            // leaves in the buffer means nothing: the host would show the widget see-through.
+            it.isOpaque = false
+            it.setSurface(captureReader.surface)
+            it.setContentRoot(node)
+        }
 
         // Opened last, so nothing after it can fail and leave the window open.
         private val window: WidgetWindow? = openWindow(id, layoutWidth, layoutHeight, size.densityDpi, root)
@@ -817,8 +780,12 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         /** Whether this renderer asked to be replaced by one that shrinks the widget further. */
         private var refitting = false
 
-        /** Whether the agent itself is changing the views, which asks for no new picture. */
-        private var quiet = false
+        /**
+         * Whether this widget is drawn without the GPU: set when the GPU's image of it came
+         * back with nothing in it, which a widget never draws.
+         */
+        @Volatile
+        private var software = window == null
         private var captureScheduled = false
         private var tickScheduled = false
         private var closed = false
@@ -826,7 +793,70 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
 
         init {
             tellSize(id, view, size)
+            captureReader.setOnImageAvailableListener({ reader ->
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                val pixels = try {
+                    readBack(image)
+                } catch (e: Exception) {
+                    log.warn("reading the image of widget $id failed", e)
+                    null
+                } finally {
+                    image.close()
+                }
+                if (pixels == null) return@setOnImageAvailableListener
+                if (isClear(pixels)) {
+                    pixels.recycle()
+                    // Either the widget shows nothing yet (its app has not sent its views),
+                    // or the GPU's drawing did not reach this image. A drawing in software
+                    // tells which; only the second makes the widget draw in software.
+                    main.post { checkClearImage() }
+                    return@setOnImageAvailableListener
+                }
+                send(pixels)
+            }, encoder)
             requestCapture()
+        }
+
+        /**
+         * The GPU's image, read back through the GPU: the image wrapped as a hardware bitmap
+         * and copied, which the renderer does with a GPU read. Mapping the buffer for the
+         * CPU instead shows nothing on a guest whose graphics driver keeps the buffer's
+         * contents on the host, and the widget then looked empty.
+         */
+        private fun readBack(image: android.media.Image): Bitmap? {
+            val buffer = image.hardwareBuffer
+            if (buffer != null) {
+                try {
+                    val wrapped = Bitmap.wrapHardwareBuffer(buffer, null)
+                    if (wrapped != null) {
+                        val copy = wrapped.copy(Bitmap.Config.ARGB_8888, false)
+                        wrapped.recycle()
+                        if (copy != null) return copy
+                    }
+                } finally {
+                    buffer.close()
+                }
+            }
+            val plane = image.planes[0]
+            val stride = plane.rowStride / plane.pixelStride
+            val full = Bitmap.createBitmap(stride, height, Bitmap.Config.ARGB_8888)
+            full.copyPixelsFromBuffer(plane.buffer)
+            if (stride == width) return full
+            return Bitmap.createBitmap(full, 0, 0, width, height).also { full.recycle() }
+        }
+
+        /** The GPU's image came back clear: a drawing in software says whether it should have. */
+        private fun checkClearImage() {
+            if (closed || software) return
+            val drawn = drawInSoftware() ?: return
+            if (isClear(drawn)) {
+                // The widget shows nothing yet; the host keeps what it showed before.
+                drawn.recycle()
+                return
+            }
+            software = true
+            log.warn("the GPU's image of widget $id came back empty though the widget shows something; drawing it in software from now on")
+            encoder.post { send(drawn) }
         }
 
         /** Sends [pixels] as the widget's image, once, and frees them. */
@@ -845,14 +875,8 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         /** The widget's views as accessibility nodes, in pixels of its image. Main thread. */
         fun nodes(): List<NodeHandle> = listOf(viewNode(view, 0, 0, scale, intArrayOf(0)))
 
-        /** The widget's app sent new views: they are drawn, in software if software can. */
-        fun viewsReplaced() {
-            mode.viewsReplaced()
-            requestCapture()
-        }
-
         fun requestCapture() {
-            if (closed || captureScheduled || quiet) return
+            if (closed || captureScheduled) return
             // A watched widget's tree is read again once its views have changed.
             nodesChanged?.invoke(id)
             captureScheduled = true
@@ -860,16 +884,6 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
                 captureScheduled = false
                 capture()
             }, gate.delay(SystemClock.uptimeMillis()))
-        }
-
-        /** Runs [work], which changes the views for the agent's own drawing, without asking for a picture. */
-        private inline fun quietly(work: () -> Unit) {
-            quiet = true
-            try {
-                work()
-            } finally {
-                quiet = false
-            }
         }
 
         private fun capture() {
@@ -883,9 +897,24 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
                 return
             }
             if (!whole) return
-            when (mode.next()) {
-                WidgetDraw.SOFTWARE -> captureInSoftware()
-                WidgetDraw.GPU -> captureWithGpu()
+            if (software) {
+                captureInSoftware()
+                scheduleTick()
+                return
+            }
+            try {
+                val canvas = node.beginRecording(width, height)
+                try {
+                    canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+                    if (scale < 1f) canvas.scale(scale, scale)
+                    root.draw(canvas)
+                } finally {
+                    node.endRecording()
+                }
+                renderer.createRenderRequest().syncAndDraw()
+            } catch (e: Exception) {
+                log.warn("drawing widget $id with the GPU failed; drawing it in software", e)
+                captureInSoftware()
             }
             scheduleTick()
         }
@@ -939,187 +968,32 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             return false
         }
 
-        /**
-         * Draws the widget in software and sends its image; with the GPU instead when its
-         * views hold a bitmap that lives on the GPU.
-         */
+        /** Draws the widget without the GPU, for a view the hardware renderer cannot take. */
         private fun captureInSoftware() {
-            when (val drawn = drawInSoftware()) {
-                is Drawn.Picture -> {
-                    mode.drewInSoftware()
-                    gpu?.let {
-                        it.close()
-                        gpu = null
-                        log.info("widget $id draws in software again")
-                    }
-                    val bitmap = drawn.bitmap
-                    if (isClear(bitmap)) {
-                        // Nothing to show yet, or the app's views went: the host keeps the last image.
-                        bitmap.recycle()
-                    } else {
-                        encoder.post { send(bitmap) }
-                    }
-                }
-                Drawn.NeedsGpu -> {
-                    if (!mode.holdsGpu) {
-                        log.info("widget $id shows a bitmap that lives on the GPU; drawing it with the GPU until its app sends new views")
-                    }
-                    mode.needsGpu()
-                    captureWithGpu()
-                }
-                Drawn.Failed -> {}
+            val bitmap = drawInSoftware() ?: return
+            if (isClear(bitmap)) {
+                // Nothing to show yet, or the app's views went: the host keeps the last image.
+                bitmap.recycle()
+                return
             }
+            encoder.post { send(bitmap) }
         }
 
         /**
          * The widget drawn in software onto a bitmap with an alpha channel that starts fully
          * transparent, so what the widget leaves undrawn stays see-through on the desktop.
          */
-        private fun drawInSoftware(): Drawn {
-            try {
-                quietly { outlines.prepare(root) }
-            } catch (e: Exception) {
-                log.warn("clipping the views of widget $id to their outlines failed", e)
-            }
-            val bitmap = try {
-                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            } catch (e: Exception) {
-                log.warn("drawing widget $id failed", e)
-                return Drawn.Failed
-            }
-            return try {
-                bitmap.setHasAlpha(true)
-                bitmap.eraseColor(Color.TRANSPARENT)
-                val canvas = Canvas(bitmap)
-                if (scale < 1f) canvas.scale(scale, scale)
-                root.drawPicture(canvas)
-                Drawn.Picture(bitmap)
-            } catch (e: IllegalArgumentException) {
-                bitmap.recycle()
-                // "Software rendering doesn't support hardware bitmaps".
-                if (e.message?.contains("hardware bitmap", ignoreCase = true) == true) {
-                    Drawn.NeedsGpu
-                } else {
-                    log.warn("drawing widget $id failed", e)
-                    Drawn.Failed
-                }
-            } catch (e: Exception) {
-                bitmap.recycle()
-                log.warn("drawing widget $id failed", e)
-                Drawn.Failed
-            }
-        }
-
-        /** Draws the widget with its GPU renderer, made when it has none. */
-        private fun captureWithGpu() {
-            // A software layer cannot hold a bitmap that lives on the GPU.
-            try {
-                quietly { outlines.release(root) }
-            } catch (e: Exception) {
-                log.warn("unclipping the views of widget $id failed", e)
-            }
-            val frame = gpu ?: try {
-                GpuFrame().also { gpu = it }
-            } catch (e: Exception) {
-                log.warn("widget $id cannot be drawn with the GPU either", e)
-                return
-            }
-            try {
-                frame.draw()
-            } catch (e: Exception) {
-                log.warn("drawing widget $id with the GPU failed", e)
-            }
-        }
-
-        /**
-         * The GPU's renderer of the widget: its views recorded into a render node and drawn into
-         * an image reader, whose image is read back and sent. It holds the framework renderer's
-         * GPU context while it lives; once closed, the framework lets the context go when no
-         * other renderer of the agent's needs it.
-         */
-        private inner class GpuFrame {
-            private val reader = ImageReader.newInstance(
-                width,
-                height,
-                PixelFormat.RGBA_8888,
-                2,
-                HardwareBuffer.USAGE_CPU_READ_OFTEN or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE,
-            )
-            private val node = RenderNode("dsa-widget-$id").also { it.setPosition(0, 0, width, height) }
-            private val renderer = HardwareRenderer().also {
-                // A hardware renderer draws opaque unless told otherwise, and then the alpha it
-                // leaves in the buffer means nothing: the host would show the widget see-through.
-                it.isOpaque = false
-                it.setSurface(reader.surface)
-                it.setContentRoot(node)
-            }
-
-            init {
-                reader.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    val pixels = try {
-                        readBack(image)
-                    } catch (e: Exception) {
-                        log.warn("reading the image of widget $id failed", e)
-                        null
-                    } finally {
-                        image.close()
-                    }
-                    if (pixels == null) return@setOnImageAvailableListener
-                    if (isClear(pixels)) {
-                        // Nothing drawn, or the GPU's drawing did not reach this image: the
-                        // host keeps the last image.
-                        pixels.recycle()
-                        return@setOnImageAvailableListener
-                    }
-                    send(pixels)
-                }, encoder)
-            }
-
-            fun draw() {
-                val canvas = node.beginRecording(width, height)
-                try {
-                    canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-                    if (scale < 1f) canvas.scale(scale, scale)
-                    root.drawPicture(canvas)
-                } finally {
-                    node.endRecording()
-                }
-                renderer.createRenderRequest().syncAndDraw()
-            }
-
-            /**
-             * The GPU's image, read back through the GPU: the image wrapped as a hardware bitmap
-             * and copied, which the renderer does with a GPU read. Mapping the buffer for the
-             * CPU instead shows nothing on a guest whose graphics driver keeps the buffer's
-             * contents on the host.
-             */
-            private fun readBack(image: android.media.Image): Bitmap? {
-                val buffer = image.hardwareBuffer
-                if (buffer != null) {
-                    try {
-                        val wrapped = Bitmap.wrapHardwareBuffer(buffer, null)
-                        if (wrapped != null) {
-                            val copy = wrapped.copy(Bitmap.Config.ARGB_8888, false)
-                            wrapped.recycle()
-                            if (copy != null) return copy
-                        }
-                    } finally {
-                        buffer.close()
-                    }
-                }
-                val plane = image.planes[0]
-                val stride = plane.rowStride / plane.pixelStride
-                val full = Bitmap.createBitmap(stride, height, Bitmap.Config.ARGB_8888)
-                full.copyPixelsFromBuffer(plane.buffer)
-                if (stride == width) return full
-                return Bitmap.createBitmap(full, 0, 0, width, height).also { full.recycle() }
-            }
-
-            fun close() {
-                renderer.destroy()
-                encoder.post { reader.close() }
-            }
+        private fun drawInSoftware(): Bitmap? = try {
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            bitmap.setHasAlpha(true)
+            bitmap.eraseColor(Color.TRANSPARENT)
+            val canvas = Canvas(bitmap)
+            if (scale < 1f) canvas.scale(scale, scale)
+            root.draw(canvas)
+            bitmap
+        } catch (e: Exception) {
+            log.warn("drawing widget $id failed", e)
+            null
         }
 
         /** Draws a clock again at its next second or minute, whatever its own ticking does. */
@@ -1164,20 +1038,9 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             closed = true
             window?.close(log, id)
             root.removeAllViews()
-            gpu?.close()
-            gpu = null
+            renderer.destroy()
+            encoder.post { captureReader.close() }
         }
-    }
-
-    /** What one software drawing of a widget came to. */
-    private sealed class Drawn {
-        class Picture(val bitmap: Bitmap) : Drawn()
-
-        /** The views hold a bitmap that lives on the GPU, which software cannot draw. */
-        object NeedsGpu : Drawn()
-
-        /** Drawing failed, and the reason was logged. */
-        object Failed : Drawn()
     }
 
     /** Whether [bitmap] shows nothing: every pixel's alpha is zero. */

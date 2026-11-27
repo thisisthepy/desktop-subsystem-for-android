@@ -159,12 +159,9 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   (`ReconfigureWidget`) runs its setup again the same way for the same widget ID; the answer
   (`WidgetReconfigured`) says whether the user finished it, and a finished one describes and
   draws the widget anew. Each widget's view lives in a presentation on a private virtual
-  display of the widget's size, which keeps its views running, and is drawn by the agent in
-  software into PNG frames (`WidgetFrame`), only when it changes, at most ten times a second,
-  and at most once a second while the guest dozes. The agent's process holds no GPU device for
-  its widgets: a view that clips to its outline is clipped in software as the GPU would, and
-  only a widget whose views hold a bitmap that lives on the GPU is drawn with the GPU, until
-  its app sends new views. That drawing does not use
+  display of the widget's size, which keeps its views running, and is drawn by the agent's
+  own hardware renderer into PNG frames (`WidgetFrame`), only when it changes, at most ten
+  times a second, and at most once a second while the guest dozes. That drawing does not use
   the guest's display, so it goes on while the screen is off. A clock is drawn again at each
   minute (or second) even when nothing asks. A size from the host (`ResizeWidget`) redraws
   the widget at that size and tells its app the size in dp through the widget's options
