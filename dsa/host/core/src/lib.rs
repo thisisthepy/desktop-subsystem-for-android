@@ -185,6 +185,7 @@ pub mod vhdx;
 pub mod video;
 pub mod video_keyframe;
 pub mod video_layout;
+pub mod video_restore;
 pub mod video_slots;
 pub mod widevine;
 pub mod widget_windows;

@@ -492,10 +492,6 @@ impl VideoDecoder for FreeingDecoder {
         Ok(Vec::new())
     }
     fn flush(&mut self) {}
-    fn idle(&mut self) -> Option<String> {
-        self.events.lock().unwrap().push("idle".into());
-        Some("its staging texture (16.9 MiB)".into())
-    }
     fn release(&mut self) -> Option<String> {
         self.events.lock().unwrap().push("released".into());
         Some("its 3840x2880 NV12 staging texture (15.8 MiB)".into())
@@ -520,6 +516,7 @@ impl VideoDecoders for FreeingDecoders {
         .capabilities()
     }
     fn open(&self, _: Codec, _: u32, _: u32) -> Result<Box<dyn VideoDecoder>, String> {
+        self.events.lock().unwrap().push("opened".into());
         Ok(Box::new(FreeingDecoder {
             events: Arc::clone(&self.events),
         }))
@@ -581,7 +578,7 @@ fn nfr1_a_stream_that_ends_releases_its_decoder_before_the_platform_hears_and_lo
     assert_eq!(host.join().unwrap(), VideoEnd::Closed);
     assert_eq!(
         *events.lock().unwrap(),
-        ["released", "dropped", "decoder closed"]
+        ["opened", "released", "dropped", "decoder closed"]
     );
     let lines = lines.lock().unwrap();
     let ended: Vec<_> = lines.iter().filter(|l| l.contains("ended")).collect();
@@ -606,25 +603,45 @@ fn nfr1_an_idle_stream_gives_back_its_buffers_once_and_plays_on_after() {
     let (mut guest, host, events, lines) = connect_freeing(idle_after);
     send(guest.as_mut(), packet(1, &[1]));
     frame(next(guest.as_mut()));
-    // Paused: told once, not again every interval while nothing comes.
+    // Paused: the whole decoder goes once, not again every interval while nothing comes.
     thread::sleep(idle_after * 5);
-    assert_eq!(*events.lock().unwrap(), ["idle"]);
+    assert_eq!(
+        *events.lock().unwrap(),
+        ["opened", "released", "dropped", "decoder closed"]
+    );
     assert!(
         lines
             .lock()
             .unwrap()
             .iter()
-            .any(|l| l.contains("no packet for") && l.contains("its staging texture")),
+            .any(|l| l.contains("no packet for")
+                && l.contains("released its decoder")
+                && l.contains("its 3840x2880 NV12 staging texture")),
         "{:?}",
         lines.lock().unwrap()
     );
-    // Playing again: the stream goes on, and a second pause is a second idle.
+    // Playing again: a decoder opens again and the stream goes on, and a second pause lets it
+    // go again.
     send(guest.as_mut(), packet(2, &[7]));
     assert_eq!(frame(next(guest.as_mut())).nv12, vec![7; 6]);
     thread::sleep(idle_after * 5);
-    assert_eq!(*events.lock().unwrap(), ["idle", "idle"]);
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "opened",
+            "released",
+            "dropped",
+            "decoder closed",
+            "opened",
+            "released",
+            "dropped",
+            "decoder closed"
+        ]
+    );
     guest.close();
     assert_eq!(host.join().unwrap(), VideoEnd::Closed);
+    // The stream's end lets go of nothing more: its decoder went while it was idle.
+    assert_eq!(events.lock().unwrap().len(), 8);
 }
 
 #[test]

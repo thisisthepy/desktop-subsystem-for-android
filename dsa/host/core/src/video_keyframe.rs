@@ -65,6 +65,7 @@ pub struct KeyframeGate {
     skipped: u32,
     av1_reduced: bool,
     size: Option<Size>,
+    last: Access,
 }
 
 impl KeyframeGate {
@@ -77,7 +78,13 @@ impl KeyframeGate {
             skipped: 0,
             av1_reduced: false,
             size: None,
+            last: Access::Unknown,
         }
+    }
+
+    /// What the packet last given to [`admit`](Self::admit) is to a decoder that starts at it.
+    pub fn last_access(&self) -> Access {
+        self.last
     }
 
     /// The decoder lost its references (a flush, a packet it failed on, the end of the
@@ -114,6 +121,7 @@ impl KeyframeGate {
             Codec::Vp9 => vp9_access(data),
             Codec::Av1 => av1_access(data, &mut self.av1_reduced),
         };
+        self.last = access;
         // A new picture size is a new sequence: only a key frame starts it. VP9's intra-only
         // frames and an AV1 sequence header out of place carry one too.
         if let Some(size) = stream_frame_size(self.codec, data) {

@@ -1110,20 +1110,12 @@ mod system {
             self.slots = Some(slots);
         }
 
-        /// A paused stream lets go of its staging texture (the next picture makes it again,
-        /// once, which costs well under a millisecond) and the driver's spare memory. The
-        /// transform keeps its surfaces: they hold the pictures the next packets refer to, and
-        /// a stream made again would wait for a key frame.
-        fn idle(&mut self) -> Option<String> {
-            let staging = self.drop_staging()?;
-            self.platform.trim();
-            (self.let_go)();
-            Some(format!("{staging} and the GPU driver's spare memory"))
-        }
-
         /// Shuts the transform down (its surfaces and sample pool go with it), lets go of the
         /// staging texture, then trims the device the decoders share, so what this stream's
-        /// pictures took goes back now rather than when the last video closes.
+        /// pictures took goes back now rather than when the last video closes. The core calls
+        /// it when the stream ends and when it has had no packet for a while (a paused video, a
+        /// feed's preview that is never fed again); in the second case it opens a decoder again
+        /// with the next packet and gives it what it needs to go on.
         fn release(&mut self) -> Option<String> {
             let staging = self.drop_staging();
             let transform = self.decoder.take()?;

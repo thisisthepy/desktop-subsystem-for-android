@@ -28,6 +28,13 @@
 //! maps no region, or another one, sends every picture in its message, and the reason is
 //! logged once.
 //!
+//! A stream that gets no packet for [`IDLE_AFTER`] (a paused video, or a feed's preview that
+//! decoded a picture and was never fed again) lets its whole decoder go
+//! ([`VideoDecoder::release`]), and the platform hears it ([`VideoDecoders::decoder_closed`]).
+//! The connection stays open. The next packet opens a decoder again, and
+//! [`crate::video_restore`] makes it stand where the old one stood, or else start at the next
+//! key frame, so the guest never sees a picture decoded without its references.
+//!
 //! Nothing here names a host operating system API. The platform supplies the decoder through
 //! [`VideoDecoders`].
 
@@ -49,6 +56,7 @@ use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 use crate::video_keyframe::{Admit, KeyframeGate, MAX_SKIPPED};
 use crate::video_layout::nv12_holds_no_picture;
+use crate::video_restore::Restore;
 use crate::video_slots::{PictureSlots, Slot, StreamSlots, SLOTS_PER_STREAM};
 
 /// The vsock port the guest's codec HAL connects to.
@@ -190,16 +198,10 @@ pub trait VideoDecoder: Send {
     fn use_slots(&mut self, slots: Arc<StreamSlots>) {
         let _ = slots;
     }
-    /// No packet has come for a while ([`IDLE_AFTER`]): the video is paused, or its app
-    /// stopped without releasing the codec. The decoder lets go of what its next picture can
-    /// make again (buffers sized for the stream's pictures, the spare memory its device keeps)
-    /// and says what that was, for the log; `None` when it let go of nothing. The stream goes
-    /// on as before when the next packet comes.
-    fn idle(&mut self) -> Option<String> {
-        None
-    }
-    /// The stream has ended and the decoder is about to be dropped: it lets go of everything it
-    /// holds now, in the order its platform needs, and says what that was, for the log.
+    /// The decoder is about to be dropped: the stream has ended, or it has had no packet for
+    /// [`IDLE_AFTER`] and a new decoder is opened when the next one comes. It lets go of
+    /// everything it holds now, in the order its platform needs, and says what that was, for
+    /// the log.
     fn release(&mut self) -> Option<String> {
         None
     }
@@ -232,10 +234,11 @@ pub trait VideoDecoders: Send + Sync {
     fn decoder_closed(&self) {}
 }
 
-/// How long a stream goes without a packet before its decoder is told it is idle
-/// ([`VideoDecoder::idle`]). Long enough that a stream that is only slow (a live stream
-/// buffering) keeps its buffers, short enough that a paused video or an app that stopped
-/// without releasing its codec gives its memory back before anyone looks.
+/// How long a stream goes without a packet before its decoder is released and dropped, to be
+/// opened again with the next packet ([`crate::video_restore`]). Long enough that a stream
+/// that is only slow (a live stream buffering) keeps its decoder, short enough that a paused
+/// video, or an app that stopped feeding its codec without releasing it, gives its memory back
+/// before anyone looks.
 pub const IDLE_AFTER: Duration = Duration::from_secs(10);
 
 /// The log line for a stream that ended: its format and largest picture, how many pictures it
@@ -341,6 +344,11 @@ impl Pending {
 
     fn take(&mut self, id: u64) -> Option<(u64, i64)> {
         self.packets.remove(&id)
+    }
+
+    /// Whether the picture of packet `id` has yet to go to the guest.
+    fn waits_for(&self, id: u64) -> bool {
+        self.packets.contains_key(&id)
     }
 
     /// Forgets every packet; ids go on from where they were, so a late picture of an old
@@ -815,8 +823,9 @@ pub fn serve_connection_logged(
     serve_connection_idle(connection, decoders, build, log, IDLE_AFTER)
 }
 
-/// As [`serve_connection_logged`], with the decoder told it is idle once no packet has come
-/// for `idle_after` ([`IDLE_AFTER`] in the host). When the stream ends its decoder is released
+/// As [`serve_connection_logged`], with the decoder released and dropped once no packet has
+/// come for `idle_after` ([`IDLE_AFTER`] in the host), and opened again with the next packet
+/// ([`crate::video_restore`]). When the stream ends its decoder is released
 /// ([`VideoDecoder::release`]) and dropped, the platform hears it
 /// ([`VideoDecoders::decoder_closed`]), and one line says what was let go.
 pub fn serve_connection_idle(
@@ -919,24 +928,41 @@ pub fn serve_connection_idle(
 
     let stats = Arc::new(Mutex::new(StreamStats::default()));
     let mut outgoing = Outgoing::start(connection.as_ref(), Arc::clone(&stats));
+    let reopen = Reopen {
+        decoders,
+        codec,
+        width: open.width,
+        height: open.height,
+        slots: slots.as_ref(),
+    };
+    let mut decoder = Some(decoder);
     let end = run_stream(
         connection.as_mut(),
-        decoder.as_mut(),
-        codec,
+        &mut decoder,
+        &reopen,
         &mut outgoing,
-        slots.as_deref(),
         log,
         idle_after,
     );
     outgoing.finish(connection.as_mut());
     // Everything the stream held goes now: the pictures that waited with the connection, then
     // the decoder's own buffers, then the stream's slots, which all come back (the decoder
-    // holds them too), then what its platform kept for it.
+    // holds them too), then what its platform kept for it. A decoder released while the
+    // stream was idle went then, and its platform heard it then.
     drop(outgoing);
-    let freed = decoder.release();
-    drop(decoder);
-    drop(slots);
-    decoders.decoder_closed();
+    let freed = match decoder.take() {
+        Some(mut decoder) => {
+            let freed = decoder.release();
+            drop(decoder);
+            drop(slots);
+            decoders.decoder_closed();
+            freed
+        }
+        None => {
+            drop(slots);
+            Some("its decoder had already gone while the stream was idle".to_string())
+        }
+    };
     let (largest, pictures) = {
         let stats = stats.lock().unwrap_or_else(|e| e.into_inner());
         (stats.largest(), stats.total_handed_on())
@@ -1008,21 +1034,201 @@ pub const SLOT_WAIT: Duration = Duration::from_millis(200);
 /// sometimes two (a decoder that held one back).
 const FREE_SLOTS_BEFORE_A_PACKET: usize = 2;
 
-/// Packets in and pictures out, until the guest closes the connection or it fails.
+/// What a stream needs to open its decoder again after it was released while idle.
+struct Reopen<'a> {
+    decoders: &'a dyn VideoDecoders,
+    codec: Codec,
+    width: u32,
+    height: u32,
+    slots: Option<&'a Arc<StreamSlots>>,
+}
+
+/// What a stream keeps of its decoder's state, beside the decoder.
+struct StreamState {
+    pending: Pending,
+    gate: KeyframeGate,
+    restore: Restore,
+}
+
+/// Gives the stream's decoder up after no packet came for `idle_after`: when the packets kept
+/// cannot make a new decoder stand where this one does, the pictures it still holds go to the
+/// guest first (a drain), and the stream decodes again from its next key frame. Then the
+/// decoder lets go of everything ([`VideoDecoder::release`]), is dropped, and the platform hears
+/// it. One line says what went and how the stream goes on.
+fn release_idle(
+    connection: &mut dyn Connection,
+    mut decoder: Box<dyn VideoDecoder>,
+    reopen: &Reopen,
+    state: &mut StreamState,
+    outgoing: &mut Outgoing,
+    log: &dyn Fn(&str),
+    idle_after: Duration,
+) -> Result<(), TransportError> {
+    let slots = reopen.slots.map(Arc::as_ref);
+    let restorable = state.restore.can_restore();
+    let mut result = Ok(());
+    if !restorable {
+        // A new decoder could not make these pictures again: they go now.
+        match decoder.drain() {
+            Ok(pictures) => {
+                outgoing
+                    .stats()
+                    .drained(Instant::now(), pictures.len() as u32);
+                result = send_pictures(connection, outgoing, &mut state.pending, slots, pictures);
+            }
+            Err(why) => log(&format!(
+                "video: the idle {} stream's decoder did not give up the pictures it held: {why}",
+                reopen.codec.name()
+            )),
+        }
+        state.pending.clear();
+        state.gate.rearm();
+        state.restore.lost();
+    }
+    let freed = decoder.release();
+    drop(decoder);
+    reopen.decoders.decoder_closed();
+    let freed = freed.map(|f| format!(" ({f})")).unwrap_or_default();
+    let next = if restorable {
+        format!(
+            "the next packet opens it again where it stood, from the {} packets ({:.1} KiB) kept \
+             since the last key frame",
+            state.restore.kept_packets(),
+            state.restore.held_bytes() as f64 / 1024.0
+        )
+    } else {
+        "the next packet opens it again, and it decodes from the next key frame".to_string()
+    };
+    log(&format!(
+        "video: the {} stream has had no packet for {idle_after:?}; released its decoder{freed}; \
+         {next}",
+        reopen.codec.name(),
+    ));
+    result
+}
+
+/// Opens the stream's decoder again after it was released while idle, and gives it the packets
+/// kept since the last key frame, so it stands where the old one stood. Their pictures went to
+/// the guest before and are not sent again; one the old decoder still held back goes now. When
+/// the packets cannot restore it (none were kept, or the new decoder failed on one), the stream
+/// decodes from its next key frame. An error says why no decoder opened.
+fn reopen_decoder(
+    connection: &mut dyn Connection,
+    reopen: &Reopen,
+    state: &mut StreamState,
+    outgoing: &mut Outgoing,
+    log: &dyn Fn(&str),
+) -> Result<Result<Box<dyn VideoDecoder>, String>, TransportError> {
+    let started = Instant::now();
+    let name = reopen.codec.name();
+    let mut decoder = match reopen
+        .decoders
+        .open(reopen.codec, reopen.width, reopen.height)
+    {
+        Ok(decoder) => decoder,
+        Err(why) => {
+            // Nothing the stream kept is of use to a decoder opened later.
+            state.gate.rearm();
+            state.restore.lost();
+            log(&format!(
+                "video: the {name} stream's decoder did not open again: {why}"
+            ));
+            return Ok(Err(why));
+        }
+    };
+    let slots = reopen.slots.map(Arc::as_ref);
+    if let Some(slots) = reopen.slots {
+        decoder.use_slots(Arc::clone(slots));
+    }
+    if !state.restore.can_restore() {
+        // The gate has waited for a key frame since the decoder was released, or since what
+        // was kept was lost. The new decoder is given the parameter sets that key frame needs,
+        // which the guest sent only once.
+        for packet in state.restore.config_packets() {
+            if let Err(why) = decoder.decode(packet) {
+                log(&format!(
+                    "video: the {name} stream's decoder opened again did not take its codec \
+                     configuration: {why}"
+                ));
+                break;
+            }
+        }
+        let _ = decoder.take_report();
+        log(&format!(
+            "video: the {name} stream has a packet again; opened its decoder again in {:.1} ms, \
+             decoding from the next key frame",
+            started.elapsed().as_secs_f64() * 1000.0
+        ));
+        return Ok(Ok(decoder));
+    }
+    let packets = state.restore.packets();
+    let count = packets.len();
+    let mut failed = None;
+    for packet in packets {
+        match decoder.decode(packet) {
+            Ok(pictures) => {
+                let (waited, shown): (Vec<Picture>, Vec<Picture>) = pictures
+                    .into_iter()
+                    .partition(|picture| state.pending.waits_for(picture.id));
+                // The guest has these already.
+                for picture in shown {
+                    if let (Some(slot), Some(slots)) = (picture.slot, slots) {
+                        slots.give_back(slot.number);
+                    }
+                }
+                send_pictures(connection, outgoing, &mut state.pending, slots, waited)?;
+            }
+            Err(why) => {
+                failed = Some(why);
+                break;
+            }
+        }
+    }
+    // What the decoder did to restore the stream is not the stream's own.
+    let _ = decoder.take_report();
+    let took = started.elapsed().as_secs_f64() * 1000.0;
+    match failed {
+        None => log(&format!(
+            "video: the {name} stream has a packet again; opened its decoder again where it \
+             stood, from {count} packets kept since the last key frame, in {took:.1} ms"
+        )),
+        Some(why) => {
+            // The decoder holds nothing it can be trusted with: it starts again from a key
+            // frame, and the pictures the old one held are not coming.
+            decoder.flush();
+            state.pending.clear();
+            state.gate.rearm();
+            state.restore.lost();
+            log(&format!(
+                "video: the {name} stream has a packet again; its decoder opened again in \
+                 {took:.1} ms but failed on a packet kept to restore it ({why}), so it decodes \
+                 from the next key frame"
+            ));
+        }
+    }
+    Ok(Ok(decoder))
+}
+
+/// Packets in and pictures out, until the guest closes the connection or it fails. `decoder`
+/// is `None` while the stream is idle and its decoder released.
 fn run_stream(
     connection: &mut dyn Connection,
-    decoder: &mut dyn VideoDecoder,
-    codec: Codec,
+    decoder: &mut Option<Box<dyn VideoDecoder>>,
+    reopen: &Reopen,
     outgoing: &mut Outgoing,
-    slots: Option<&StreamSlots>,
     log: &dyn Fn(&str),
     idle_after: Duration,
 ) -> VideoEnd {
-    let mut pending = Pending::default();
-    let mut gate = KeyframeGate::new(codec);
+    let codec = reopen.codec;
+    let slots = reopen.slots.map(Arc::as_ref);
+    let mut state = StreamState {
+        pending: Pending::default(),
+        gate: KeyframeGate::new(codec),
+        restore: Restore::new(),
+    };
     // Messages that came while the stream waited for slots, to be taken in order.
     let mut backlog: VecDeque<Vec<u8>> = VecDeque::new();
-    // The decoder was told the stream is idle, and nothing has come since.
+    // The stream went idle, and nothing has come since.
     let mut idle = false;
     loop {
         let received = match backlog.pop_front() {
@@ -1036,12 +1242,15 @@ fn run_stream(
             }
             Err(TransportError::Timeout) if !idle => {
                 idle = true;
-                if let Some(freed) = decoder.idle() {
-                    log(&format!(
-                        "video: the {} stream has had no packet for {idle_after:?}; let go of \
-                         {freed}",
-                        codec.name(),
-                    ));
+                if let Some(held) = decoder.take() {
+                    let released = release_idle(
+                        connection, held, reopen, &mut state, outgoing, log, idle_after,
+                    );
+                    if let Err(error) = released {
+                        return VideoEnd::Failed(format!(
+                            "a message to the guest did not go out: {error}"
+                        ));
+                    }
                 }
                 continue;
             }
@@ -1075,7 +1284,8 @@ fn run_stream(
                     }
                 }
                 let mut result = Ok(());
-                let admit = if packet.data.is_empty() {
+                let gate = &mut state.gate;
+                let mut admit = if packet.data.is_empty() {
                     Admit::Decode
                 } else if packet.codec_config {
                     gate.configuration(&packet.data);
@@ -1083,6 +1293,61 @@ fn run_stream(
                 } else {
                     gate.admit(&packet.data)
                 };
+                // A decoder released while the stream was idle opens again for a packet it is
+                // to decode, or for the end of a stream whose held pictures it can make again.
+                let wanted = if packet.data.is_empty() {
+                    packet.end_of_stream && state.restore.can_restore()
+                } else {
+                    admit != Admit::Skip
+                };
+                if decoder.is_none() && wanted {
+                    match reopen_decoder(connection, reopen, &mut state, outgoing, log) {
+                        Ok(Ok(opened)) => *decoder = Some(opened),
+                        Ok(Err(why)) => {
+                            // This packet is not decoded; the next one tries again.
+                            let error = VideoError {
+                                error: format!(
+                                    "the {} decoder did not open again: {why}",
+                                    codec.name()
+                                ),
+                            };
+                            let mut sent = outgoing.send(connection, Body::VideoError(error));
+                            if sent.is_ok() && packet.end_of_stream {
+                                // The end of the stream still reaches the guest.
+                                state.pending.clear();
+                                let end = VideoFrame {
+                                    frame_index: packet.frame_index,
+                                    timestamp_us: packet.timestamp_us,
+                                    end_of_stream: true,
+                                    ..VideoFrame::default()
+                                };
+                                sent = outgoing.send(connection, Body::VideoFrame(end));
+                            }
+                            if let Err(error) = sent {
+                                return VideoEnd::Failed(format!(
+                                    "a message to the guest did not go out: {error}"
+                                ));
+                            }
+                            continue;
+                        }
+                        Err(error) => {
+                            return VideoEnd::Failed(format!(
+                                "a message to the guest did not go out: {error}"
+                            ))
+                        }
+                    }
+                    // A decoder that could not be restored waits for a key frame, this packet
+                    // included.
+                    if state.gate.waiting() && !packet.codec_config && !packet.data.is_empty() {
+                        admit = state.gate.admit(&packet.data);
+                    }
+                }
+                let access = state.gate.last_access();
+                let StreamState {
+                    pending,
+                    gate,
+                    restore,
+                } = &mut state;
                 if admit == Admit::GaveUp {
                     log(&format!(
                         "video: {} stream: no key frame came in {MAX_SKIPPED} packets; decoding \
@@ -1091,6 +1356,8 @@ fn run_stream(
                     ));
                 }
                 if admit == Admit::Skip {
+                    // The decoder waits for a key frame: nothing it holds can be restored.
+                    restore.lost();
                     // The packet's work in the guest ends with no picture, rather than waiting
                     // for one that never comes.
                     outgoing.stats().before_keyframe(Instant::now());
@@ -1100,30 +1367,39 @@ fn run_stream(
                         ..VideoFrame::default()
                     };
                     result = outgoing.send(connection, Body::VideoFrame(none)).map(drop);
-                } else if !packet.data.is_empty() {
+                } else if let (false, Some(active)) = (packet.data.is_empty(), decoder.as_mut()) {
                     let id = pending.add(packet.frame_index, packet.timestamp_us);
-                    let started = Instant::now();
-                    let decoded = decoder.decode(Packet {
+                    let given = Packet {
                         id,
                         data: packet.data,
                         codec_config: packet.codec_config,
                         timestamp_us: packet.timestamp_us,
-                    });
+                    };
+                    // Kept, so a decoder opened again after an idle spell stands where this one
+                    // will.
+                    if given.codec_config {
+                        restore.configuration(&given);
+                    } else {
+                        restore.decoded(&given, access);
+                    }
+                    let started = Instant::now();
+                    let decoded = active.decode(given);
                     let took = started.elapsed();
                     {
                         let mut stats = outgoing.stats();
                         let count = decoded.as_ref().map_or(0, |p| p.len() as u32);
                         stats.decoded(Instant::now(), took, count);
-                        stats.decoder(decoder.take_report());
+                        stats.decoder(active.take_report());
                     }
                     result = match decoded {
                         Ok(pictures) => {
-                            send_pictures(connection, outgoing, &mut pending, slots, pictures)
+                            send_pictures(connection, outgoing, pending, slots, pictures)
                         }
                         Err(why) => {
                             // What the decoder failed on may be a picture the next ones refer
                             // to: they would decode into garbage.
                             gate.rearm();
+                            restore.lost();
                             outgoing
                                 .send(connection, Body::VideoError(VideoError { error: why }))
                                 .map(drop)
@@ -1133,18 +1409,23 @@ fn run_stream(
                 if result.is_ok() && packet.end_of_stream {
                     // A drained decoder starts again from a key frame.
                     gate.rearm();
-                    result = match decoder.drain() {
-                        Ok(pictures) => {
-                            outgoing
-                                .stats()
-                                .drained(Instant::now(), pictures.len() as u32);
-                            send_pictures(connection, outgoing, &mut pending, slots, pictures)
-                        }
-                        Err(why) => outgoing
-                            .send(connection, Body::VideoError(VideoError { error: why }))
-                            .map(drop),
-                    };
-                    outgoing.stats().decoder(decoder.take_report());
+                    restore.lost();
+                    // A decoder released while idle held nothing it could not make again, or
+                    // it was opened again above.
+                    if let Some(active) = decoder.as_mut() {
+                        result = match active.drain() {
+                            Ok(pictures) => {
+                                outgoing
+                                    .stats()
+                                    .drained(Instant::now(), pictures.len() as u32);
+                                send_pictures(connection, outgoing, pending, slots, pictures)
+                            }
+                            Err(why) => outgoing
+                                .send(connection, Body::VideoError(VideoError { error: why }))
+                                .map(drop),
+                        };
+                        outgoing.stats().decoder(active.take_report());
+                    }
                 }
                 if result.is_ok() && packet.end_of_stream {
                     pending.clear();
@@ -1159,9 +1440,14 @@ fn run_stream(
                 result
             }
             Some(Body::VideoFlush(_)) => {
-                decoder.flush();
-                pending.clear();
-                gate.rearm();
+                // A decoder released while idle holds nothing to flush; it opens again for the
+                // next packet it decodes.
+                if let Some(active) = decoder.as_mut() {
+                    active.flush();
+                }
+                state.pending.clear();
+                state.gate.rearm();
+                state.restore.lost();
                 outgoing
                     .send(connection, Body::VideoFlushed(VideoFlushed {}))
                     .map(drop)
