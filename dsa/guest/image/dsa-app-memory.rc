@@ -9,7 +9,8 @@
 # is when it goes to the background: TRIM_MEMORY_UI_HIDDEN first, TRIM_MEMORY_BACKGROUND later,
 # and then the activity manager's full compaction of its process, which pages its memory out to
 # zram. The request is "<number> <HIDDEN|BACKGROUND> <compact: 0 or 1> <process>", and the
-# answer (vendor.dsa.app.trim.done) is the request's number once it is carried out.
+# answer (vendor.dsa.app.trim.done) is "<number> <result>" once it is carried out: sent,
+# refused with the activity manager's reason, or invalid.
 #
 # app-compile.sh: an app the user opens is compiled with the speed filter while the guest is
 # idle, so its code is clean pages of its .oat file, which the kernel drops under pressure and

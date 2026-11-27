@@ -8055,16 +8055,107 @@ class AppMemoryTests(unittest.TestCase):
     def test_nfr1_a_hidden_app_is_trimmed_then_compacted_once(self):
         state = self._run(self.TRIM, "7 HIDDEN 0 com.spotify.music", {"am": self.AM})
         self.assertEqual((state / "calls").read_text().splitlines(), ["send-trim-memory com.spotify.music HIDDEN"])
-        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7")
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
         state = self._run(self.TRIM, "8 BACKGROUND 1 com.spotify.music", {"am": self.AM})
         self.assertEqual((state / "calls").read_text().splitlines(),
                          ["send-trim-memory com.spotify.music BACKGROUND", "compact full com.spotify.music"])
-        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "8")
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "8 sent")
         # A level or a process name it does not take is answered but never passed on.
         for request in ["9 COMPLETE 1 com.spotify.music", "9 HIDDEN 1 com.x;reboot"]:
             state = self._run(self.TRIM, request, {"am": self.AM})
             self.assertFalse((state / "calls").exists(), request)
-            self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "9")
+            self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "9 invalid")
+
+    # The activity manager's answer when setProcessMemoryTrimLevel refuses a process in the
+    # foreground, as ShellCommand prints an exception, and its exit status.
+    REFUSED = ('#!/bin/sh\necho "$*" >> "{s}/calls"\n'
+               'if [ "$1" = send-trim-memory ]; then\n'
+               "    echo\n"
+               "    echo \"Exception occurred while executing 'send-trim-memory':\" >&2\n"
+               '    echo "java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process" >&2\n'
+               '    printf "\\tat com.android.server.am.ActivityManagerService.setProcessMemoryTrimLevel(ActivityManagerService.java:3761)\\n" >&2\n'
+               '    printf "\\tat android.os.Binder.shellCommand(Binder.java:1151)\\n" >&2\n'
+               "    exit 255\n"
+               "fi\n"
+               'echo "Finished full compaction for 4242"\n')
+
+    @staticmethod
+    def _activity(supported, answer="", status=0):
+        """`cmd` with the activity manager's dsa-hidden-trim (DSA's framework) when `supported`,
+        whose send answers `answer` on its error output with `status`; without it, the command
+        is unknown, as on a framework without DSA's change."""
+        if not supported:
+            return ('#!/bin/sh\necho "cmd $*" >> "{s}/calls"\n'
+                    'echo "Unknown command: $2"\nexit 255\n')
+        return ('#!/bin/sh\n'
+                'if [ "$1 $2" = "activity dsa-hidden-trim" ] && [ $# = 2 ]; then echo supported; exit 0; fi\n'
+                'echo "cmd $*" >> "{s}/calls"\n'
+                f'printf "%s" "{answer}" >&2\nexit {status}\n')
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_a_hidden_app_receives_ui_hidden_through_the_frameworks_hidden_trim(self):
+        # With DSA's framework the trim goes to the activity manager's dsa-hidden-trim, which
+        # sends it although Android shows the app's task; send-trim-memory is not asked.
+        state = self._run(self.TRIM, "7 HIDDEN 0 com.android.deskclock",
+                          {"am": self.AM, "cmd": self._activity(True)})
+        self.assertEqual((state / "calls").read_text().splitlines(),
+                         ["cmd activity dsa-hidden-trim send com.android.deskclock HIDDEN"])
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
+        self.assertIn("sent com.android.deskclock the memory trim HIDDEN (dsa-hidden-trim)",
+                      (state / "log").read_text())
+        state = self._run(self.TRIM, "8 BACKGROUND 1 com.android.deskclock",
+                          {"am": self.AM, "cmd": self._activity(True)})
+        self.assertEqual((state / "calls").read_text().splitlines(),
+                         ["cmd activity dsa-hidden-trim send com.android.deskclock BACKGROUND",
+                          "compact full com.android.deskclock"])
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "8 sent")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_a_framework_without_hidden_trim_gets_send_trim_memory_as_before(self):
+        state = self._run(self.TRIM, "7 HIDDEN 0 com.android.deskclock",
+                          {"am": self.AM, "cmd": self._activity(False)})
+        calls = (state / "calls").read_text().splitlines()
+        self.assertEqual(calls[-1], "send-trim-memory com.android.deskclock HIDDEN")
+        self.assertNotIn("cmd activity dsa-hidden-trim send com.android.deskclock HIDDEN", calls)
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
+        self.assertIn("(send-trim-memory)", (state / "log").read_text())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_hidden_trim_reports_the_frameworks_refusal(self):
+        # The activity manager's own words reach the log and the answer, not a guess; the
+        # compaction that follows still runs, and its answer is logged too.
+        state = self._run(self.TRIM, "7 BACKGROUND 1 com.android.deskclock",
+                          {"am": self.REFUSED, "cmd": self._activity(False)})
+        log = (state / "log").read_text()
+        self.assertIn("the activity manager did not send com.android.deskclock the memory trim BACKGROUND "
+                      "(send-trim-memory, exit status 255): ", log)
+        self.assertIn("java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process",
+                      log)
+        # The stack frames say nothing the exception's line does not.
+        self.assertNotIn("Binder.shellCommand", log)
+        self.assertIn("compacted com.android.deskclock: Finished full compaction for 4242", log)
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(),
+                         "7 refused Unable to set a background trim level on a foreground process")
+        # DSA's framework refuses an app the agent did not say the host hides, in one line.
+        state = self._run(self.TRIM, "8 HIDDEN 0 com.android.deskclock", {
+            "am": self.AM,
+            "cmd": self._activity(True, "Error: The host has not hidden the tasks of com.android.deskclock", 255),
+        })
+        self.assertIn("(dsa-hidden-trim, exit status 255): Error: The host has not hidden the tasks of "
+                      "com.android.deskclock", (state / "log").read_text())
+        done = (state / "prop.vendor.dsa.app.trim.done").read_text()
+        self.assertEqual(done, "8 refused The host has not hidden the tasks of com.android.deskclock")
+        # Android keeps a property's value under 92 bytes.
+        self.assertLess(len(f"{2**63} refused " + "x" * 64), 92)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_hidden_trim_reports_a_failed_compaction(self):
+        failing = '#!/bin/sh\nif [ "$1" = compact ]; then echo "Error: could not find process" >&2; exit 255; fi\n'
+        state = self._run(self.TRIM, "7 BACKGROUND 1 com.android.deskclock",
+                          {"am": failing, "cmd": self._activity(True)})
+        self.assertIn("could not compact com.android.deskclock (exit status 255): Error: could not find process",
+                      (state / "log").read_text())
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
 
     def _cmd(self, status):
         """The package manager, whose ART dump gives `status` (filter, reason) or nothing, and
