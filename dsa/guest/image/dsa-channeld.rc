@@ -98,19 +98,21 @@ on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
 # past the guest's working set (an app closed, or files were read), while the guest is not
 # under memory pressure, whether or not the host is short. vendor.dsa.memory.trim_size says
 # how many MiB: all of the excess at once. The kernel takes them from the
-# root cgroup, which every process's memory is charged under, coldest pages first, so the hot
-# pages of running apps and system_server stay. "swappiness=30" takes mostly page cache and a
-# little anonymous memory, the coldest of it, into zram: pages no process has touched since
-# the last trims, such as a background service's heap. The hot pages of the shown app stay on
-# the active list and are not taken. With "swappiness=0" the trim took files only, so the open
-# app's own working files went first while cold heap stayed resident. The root's file is
+# root cgroup, which every process's memory is charged under, coldest pages first.
+# vendor.dsa.memory.trim_swappiness says how: 0 while a window is shown, so the trim takes page
+# cache only, and 30 while none is, so it also takes a little of the coldest anonymous memory
+# into zram, such as a background service's heap. At 30 with a window shown the trim took the
+# shown app's own heap too (YouTube playing: the apps' memory 315 -> 133 MiB in one trim, back
+# within 20 s), because the guest has no memory cgroup per app to leave out. The shown app's
+# working files are spared by dsa-channeld instead: what of a trim is read back raises the
+# working set target and makes the next trim wait. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
 # open it. The pages it frees are scattered among pages in use. On a host that takes back only
 # whole free blocks (androidboot.dsa.memory_compaction=on), compaction then gathers them and they
 # go back to the host at once rather than whenever background compaction gets to them; a host
 # that takes back every free page gets them as they are, without moving any memory.
 on property:vendor.dsa.memory.trim=1
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=${vendor.dsa.memory.trim_swappiness:-0}"
 
 on property:vendor.dsa.memory.trim=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1

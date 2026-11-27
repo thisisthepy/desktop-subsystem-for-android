@@ -1187,3 +1187,313 @@ fn nfr1_with_one_app_shown_a_trim_brings_the_cache_down_to_256_mib() {
     );
     assert_eq!(reclaimer.trim_mib(), 448 - 256);
 }
+
+#[test]
+fn nfr1_trim_keeps_the_shown_apps_anonymous_memory() {
+    use dsa_guest_channeld::reclaim::{
+        HIDDEN_TRIM_SWAPPINESS, SHOWN_TRIM_SWAPPINESS, TRIM_SWAPPINESS_PROPERTY,
+    };
+    assert!(TRIM_SWAPPINESS_PROPERTY.starts_with("vendor."));
+    // The owner's PC, YouTube and FLO shown, YouTube playing: one trim at swappiness 30 took the
+    // apps' memory from 315 to 133 MiB, and it was back at 315 within 20 s. While a window is
+    // shown the trim takes page cache only; with none shown, a little cold anonymous memory too.
+    assert_eq!(SHOWN_TRIM_SWAPPINESS, 0);
+    assert_eq!(HIDDEN_TRIM_SWAPPINESS, 30);
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(reclaimer.trim_swappiness(), HIDDEN_TRIM_SWAPPINESS);
+    let cache = memory(1400, 800);
+    for (t, shown) in [(0, 2), (5, 1)] {
+        assert_eq!(
+            look(&mut reclaimer, t, 2, shown, 0, &cache),
+            Some(Reason::Gradual)
+        );
+        assert_eq!(
+            reclaimer.trim_swappiness(),
+            SHOWN_TRIM_SWAPPINESS,
+            "{shown} shown"
+        );
+    }
+    // Both minimized: no app on screen reads its memory back at once.
+    assert_eq!(
+        look(&mut reclaimer, 10, 2, 0, 0, &cache),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_swappiness(), HIDDEN_TRIM_SWAPPINESS);
+    // Until the host says which windows it shows, every task in use counts as shown.
+    let mut untold = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(
+        untold.decide_under(secs(0), 1, &cache, false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(untold.trim_swappiness(), SHOWN_TRIM_SWAPPINESS);
+    // An app closing while another opens trims page cache only, for the opening app's sake.
+    let mut opening = Reclaimer::new(ReclaimPolicy::default());
+    opening.tasks_seen(secs(0), 1, 1);
+    opening.decide_under(secs(0), 1, &memory(3000, 200), false);
+    opening.tasks_seen(secs(10), 2, 2);
+    opening.decide_under(secs(10), 2, &memory(2500, 200), false);
+    opening.tasks_seen(secs(15), 1, 1);
+    assert_eq!(
+        opening.app_closed(secs(15), 1, &memory(2400, 900)),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(opening.trim_swappiness(), SHOWN_TRIM_SWAPPINESS);
+}
+
+/// The owner's PC with YouTube and FLO shown, under the default policy: the target has risen to
+/// what two shown windows may keep (352 MiB), and a trim at 20 s takes the 448 MiB above it.
+/// Every look after reads back 8 MiB, too little to raise the target or to let it fall. Returns
+/// the refault count, in MiB.
+fn two_windows_trimmed(reclaimer: &mut Reclaimer) -> u64 {
+    assert_eq!(look(reclaimer, 0, 2, 2, 0, &memory(2000, 200)), None);
+    for (t, refaults) in [(5, 20), (10, 40), (15, 60)] {
+        look(reclaimer, t, 2, 2, refaults, &memory(2000, 200));
+    }
+    assert_eq!(reclaimer.working_set_target_kb(), 352 * MIB);
+    assert_eq!(
+        look(reclaimer, 20, 2, 2, 68, &memory(1400, 800)),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 800 - 352);
+    68
+}
+
+#[test]
+fn nfr1_trim_backs_off_while_trimmed_cache_refaults() {
+    // The owner's PC: a trim every 19 s, each taking some 450 MiB that was read straight back,
+    // so the cache went from 600 to 1050 MiB down to 190 to 430 and back above 600 within 20 s.
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let mut refaults = two_windows_trimmed(&mut reclaimer);
+    assert_eq!(reclaimer.trim_backoff(), Duration::ZERO);
+    // 300 MiB of it comes back on the next look: the two apps use it. The target rises to what
+    // the trim left plus what came back, past the allowance of two windows, and stays there.
+    refaults += 300;
+    assert_eq!(
+        look(&mut reclaimer, 25, 2, 2, refaults, &memory(1600, 500)),
+        None
+    );
+    assert_eq!(reclaimer.working_set_target_kb(), (352 + 300) * MIB);
+    assert_eq!(reclaimer.trim_backoff(), secs(60));
+    // The cache fills up again, but the next trim waits a minute after the last one, and the
+    // target does not fall back while the apps keep reading.
+    let full = memory(1400, 800);
+    for t in (30..80).step_by(5) {
+        refaults += 8;
+        assert_eq!(
+            look(&mut reclaimer, t, 2, 2, refaults, &full),
+            None,
+            "{t} s"
+        );
+        assert_eq!(reclaimer.working_set_target_kb(), 652 * MIB, "{t} s");
+    }
+    refaults += 8;
+    assert_eq!(
+        look(&mut reclaimer, 80, 2, 2, refaults, &full),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 800 - 652);
+    // That one comes back too: the target rises to the most any working set keeps, and the
+    // wait doubles.
+    refaults += 148;
+    assert_eq!(
+        look(&mut reclaimer, 85, 2, 2, refaults, &memory(1400, 700)),
+        None
+    );
+    assert_eq!(reclaimer.working_set_target_kb(), 768 * MIB);
+    assert_eq!(reclaimer.trim_backoff(), secs(120));
+    let fuller = memory(1300, 900);
+    for t in (90..200).step_by(5) {
+        refaults += 8;
+        assert_eq!(
+            look(&mut reclaimer, t, 2, 2, refaults, &fuller),
+            None,
+            "{t} s"
+        );
+    }
+    refaults += 8;
+    assert_eq!(
+        look(&mut reclaimer, 200, 2, 2, refaults, &fuller),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 900 - 768);
+    // However often trims come back, the wait stops at ten minutes.
+    let mut last = 200;
+    for _ in 0..8 {
+        refaults += 200;
+        reclaimer.refaults(refaults * MIB);
+        let t = last + reclaimer.trim_backoff().as_secs();
+        refaults += 8;
+        assert_eq!(
+            look(&mut reclaimer, t, 2, 2, refaults, &fuller),
+            Some(Reason::Gradual),
+            "{t} s"
+        );
+        last = t;
+    }
+    assert_eq!(reclaimer.trim_backoff(), secs(600));
+}
+
+#[test]
+fn nfr1_trim_backs_off_for_one_shown_app_while_it_starts() {
+    // The owner's PC, direct-mapped boot, only Settings open: a trim every 10 s in its first
+    // minute (365 -> 173 MiB, then 75 MiB more), the app's memory going to zram each time, and
+    // free page reporting at 1489 MiB a minute.
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(look(&mut reclaimer, 0, 0, 0, 0, &memory(3000, 100)), None);
+    let opened = memory(2600, 365);
+    for t in (5..35).step_by(5) {
+        assert_eq!(look(&mut reclaimer, t, 1, 1, 0, &opened), None, "{t} s");
+    }
+    assert!(reclaimer.launching());
+    assert_eq!(
+        look(&mut reclaimer, 35, 1, 1, 0, &opened),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 365 - 160);
+    assert_eq!(reclaimer.trim_swappiness(), 0);
+    // It reads back a quarter of that: a launch's reads do not raise the target, but the next
+    // trim waits a minute rather than taking the same files again.
+    let mut refaults = 60;
+    assert_eq!(
+        look(&mut reclaimer, 40, 1, 1, refaults, &memory(2700, 211)),
+        None
+    );
+    assert_eq!(reclaimer.working_set_target_kb(), 160 * MIB);
+    assert_eq!(reclaimer.trim_backoff(), secs(60));
+    let refilled = memory(2600, 300);
+    for t in (45..95).step_by(5) {
+        refaults += 8;
+        assert_eq!(
+            look(&mut reclaimer, t, 1, 1, refaults, &refilled),
+            None,
+            "{t} s"
+        );
+    }
+    refaults += 8;
+    assert_eq!(
+        look(&mut reclaimer, 95, 1, 1, refaults, &refilled),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 300 - 160);
+}
+
+#[test]
+fn nfr1_a_backed_off_trim_still_takes_cache_nobody_reads_back() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let mut refaults = two_windows_trimmed(&mut reclaimer);
+    refaults += 300;
+    look(&mut reclaimer, 25, 2, 2, refaults, &memory(1600, 500));
+    assert_eq!(reclaimer.trim_backoff(), secs(60));
+    // A minute later the cache is back at 800 MiB, this time with files read once.
+    let full = memory(1400, 800);
+    assert_eq!(
+        look(&mut reclaimer, 80, 2, 2, refaults, &full),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 800 - 652);
+    for t in (85..140).step_by(5) {
+        look(&mut reclaimer, t, 2, 2, refaults, &memory(1400, 700));
+    }
+    // The next trim finds that nothing of the last came back: the wait ends, and the target
+    // starts back down, so cold cache goes back on every look again.
+    assert_eq!(
+        look(&mut reclaimer, 140, 2, 2, refaults, &full),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_backoff(), Duration::ZERO);
+    assert_eq!(
+        look(&mut reclaimer, 145, 2, 2, refaults, &full),
+        Some(Reason::Gradual)
+    );
+    assert!(reclaimer.working_set_target_kb() < 652 * MIB);
+    // A window minimized: what its reads proved is no longer kept for it.
+    let mut minimized = Reclaimer::new(ReclaimPolicy::default());
+    let refaults = two_windows_trimmed(&mut minimized) + 300;
+    look(&mut minimized, 25, 2, 2, refaults, &memory(1600, 500));
+    assert_eq!(minimized.working_set_target_kb(), 652 * MIB);
+    minimized.tasks_seen(secs(30), 2, 1);
+    assert_eq!(minimized.working_set_target_kb(), (160 + 96 + 32) * MIB);
+    assert_eq!(minimized.trim_backoff(), Duration::ZERO);
+}
+
+#[test]
+fn nfr1_a_backed_off_trim_does_not_let_the_cache_grow_without_bound() {
+    let policy = ReclaimPolicy::default();
+    let mut reclaimer = Reclaimer::new(policy);
+    let mut refaults = two_windows_trimmed(&mut reclaimer);
+    refaults += 300;
+    look(&mut reclaimer, 25, 2, 2, refaults, &memory(1600, 500));
+    assert_eq!(reclaimer.trim_backoff(), secs(60));
+    // Inside the wait the cache passes the ceiling: the trim runs anyway, down to the target.
+    let ceiling = policy.backoff_ceiling_kb / MIB;
+    assert_eq!(ceiling, 1024);
+    refaults += 8;
+    assert_eq!(
+        look(
+            &mut reclaimer,
+            30,
+            2,
+            2,
+            refaults,
+            &memory(1000, ceiling - 1)
+        ),
+        None
+    );
+    refaults += 8;
+    assert_eq!(
+        look(
+            &mut reclaimer,
+            35,
+            2,
+            2,
+            refaults,
+            &memory(1000, ceiling + 76)
+        ),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), ceiling + 76 - 652);
+    // All of it comes back: still no more than the most any working set keeps.
+    refaults += 448;
+    look(&mut reclaimer, 40, 2, 2, refaults, &memory(1000, 600));
+    assert_eq!(reclaimer.working_set_target_kb(), policy.keep_cache_max_kb);
+    assert!(policy.backoff_ceiling_kb >= policy.keep_cache_max_kb + policy.min_trim_kb);
+}
+
+#[test]
+fn nfr1_the_trim_log_says_what_was_read_back_since_the_last_trim() {
+    use dsa_guest_channeld::reclaim::{trim_counters_line, VmCounters};
+    let first = VmCounters::parse(
+        "workingset_refault_anon 9\nworkingset_refault_file 25600\npgpgin 409600\n\
+         pgpgout 7\npswpin 256\npswpout 2560\n",
+        4,
+    );
+    assert_eq!(first.refault_file_kb, 100 * MIB);
+    assert_eq!(first.read_kb, 400 * MIB);
+    assert_eq!(first.swap_in_kb, MIB);
+    assert_eq!(first.swap_out_kb, 10 * MIB);
+    let second = VmCounters::parse(
+        "workingset_refault_file 140800\npgpgin 1024000\npswpin 1280\npswpout 48640\n",
+        4,
+    );
+    let line = trim_counters_line(Some(&first), &second);
+    assert!(line.starts_with("since the last trim:"), "{line}");
+    assert!(
+        line.contains("450 MiB of evicted page cache read back"),
+        "{line}"
+    );
+    assert!(line.contains("600 MiB read from block devices"), "{line}");
+    assert!(line.contains("4 MiB swapped in"), "{line}");
+    assert!(line.contains("180 MiB swapped out"), "{line}");
+    // The first trim counts from the boot.
+    let line = trim_counters_line(None, &first);
+    assert!(line.starts_with("since the boot:"), "{line}");
+    assert!(
+        line.contains("100 MiB of evicted page cache read back"),
+        "{line}"
+    );
+    // A line the kernel lacks counts as nothing.
+    assert_eq!(
+        VmCounters::parse("nr_free_pages 1\n", 4),
+        VmCounters::default()
+    );
+}

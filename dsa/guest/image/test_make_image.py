@@ -3314,7 +3314,9 @@ class GuestMemoryTests(unittest.TestCase):
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
             trigger = rc[rc.index("on property:vendor.dsa.memory.trim=1"):]
             self.assertIn("vendor.dsa.memory.trim_size u:object_r:dsa_memory_prop:s0 exact int", contexts)
-            self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"', trigger)
+            # The daemon says the swappiness: 0 while a window is shown, 30 while none is.
+            self.assertIn("vendor.dsa.memory.trim_swappiness u:object_r:dsa_memory_prop:s0 exact int", contexts)
+            self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=${vendor.dsa.memory.trim_swappiness:-0}"', trigger)
             self.assertNotIn("drop_caches", trigger)
             # What the trim freed is scattered: compacting gathers it into whole blocks that free
             # page reporting hands back now, not when background compaction gets to it.
@@ -3339,6 +3341,7 @@ class GuestMemoryTests(unittest.TestCase):
             + make_image.RECLAIM_STEP_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_SIZE_PROPERTY_CONTEXT + "\n"
+            + make_image.TRIM_SWAPPINESS_PROPERTY_CONTEXT + "\n"
             + "".join(context + "\n" for context in make_image.WRITEBACK_PROPERTY_CONTEXTS.values())
             + make_image.BOOT_PROPERTY_CONTEXT + "\n"
             + make_image.ADB_PROPERTY_CONTEXT + "\n"

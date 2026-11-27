@@ -462,10 +462,11 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            file_refaults_kb, memory_pressure, package_running, reclaim_outcome_line, MemInfo,
-            ReadFailures, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL,
-            EXIT_WAIT_LIMIT, OUTCOME_WAIT_LIMIT, RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY,
-            TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
+            file_refaults_kb, memory_pressure, package_running, reclaim_outcome_line,
+            trim_counters_line, MemInfo, ReadFailures, Reason, ReclaimPolicy, Reclaimer,
+            VmCounters, CHECK_INTERVAL, EXIT_POLL, EXIT_WAIT_LIMIT, OUTCOME_WAIT_LIMIT,
+            RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY, TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
+            TRIM_SWAPPINESS_PROPERTY,
         };
         // The command lines of the guest's processes, for whether a closed app's are gone.
         fn command_lines(failures: &mut ReadFailures) -> Vec<String> {
@@ -500,6 +501,9 @@ mod daemon {
         let mut closed = router.apps_closed();
         // The second zram device's size last asked for, so init is asked only on a change.
         let mut zram_extra_asked: Option<u64> = None;
+        // What /proc/vmstat counted at the last trim, so each trim's line says what was read
+        // back and swapped since.
+        let mut last_trim_counters: Option<VmCounters> = None;
         loop {
             let now_closed = router.wait_for_closed_app(closed, CHECK_INTERVAL);
             let app_closed = now_closed != closed;
@@ -572,9 +576,10 @@ mod daemon {
                     }
                 );
             }
+            let vmstat = vmstat.ok();
             if let Some(refaults) = vmstat
-                .ok()
-                .and_then(|text| file_refaults_kb(&text, page_kb))
+                .as_deref()
+                .and_then(|text| file_refaults_kb(text, page_kb))
             {
                 reclaimer.refaults(refaults);
             }
@@ -593,12 +598,30 @@ mod daemon {
             if let Some(reason) = reason {
                 let property = if reason == Reason::Gradual {
                     let size = reclaimer.trim_mib().to_string();
+                    let swappiness = reclaimer.trim_swappiness();
+                    let counters = vmstat
+                        .as_deref()
+                        .map(|text| VmCounters::parse(text, page_kb));
+                    let since = counters
+                        .map(|now| trim_counters_line(last_trim_counters.as_ref(), &now))
+                        .unwrap_or_else(|| "nothing read back is known".to_string());
+                    if counters.is_some() {
+                        last_trim_counters = counters;
+                    }
                     say!(
-                        "trimming {size} MiB of cold page cache (working set target {} MiB)",
-                        reclaimer.working_set_target_kb() / 1024
+                        "trimming {size} MiB of cold page cache (working set target {} MiB, \
+                         swappiness {swappiness}, wait between trims {} s); {since}",
+                        reclaimer.working_set_target_kb() / 1024,
+                        reclaimer.trim_backoff().as_secs()
                     );
                     if let Err(why) = set_property(TRIM_SIZE_PROPERTY, &size) {
                         say!("could not size the trim: {why}");
+                        continue;
+                    }
+                    if let Err(why) =
+                        set_property(TRIM_SWAPPINESS_PROPERTY, &swappiness.to_string())
+                    {
+                        say!("could not set the trim's swappiness: {why}");
                         continue;
                     }
                     TRIM_PROPERTY

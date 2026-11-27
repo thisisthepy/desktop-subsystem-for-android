@@ -5223,6 +5223,10 @@ TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bo
 # How many MiB the next gradual trim takes; the daemon sets it before the trim property.
 TRIM_SIZE_PROPERTY = "vendor.dsa.memory.trim_size"
 TRIM_SIZE_PROPERTY_CONTEXT = f"{TRIM_SIZE_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
+# The swappiness the next gradual trim passes to memory.reclaim (0 while a window is shown, so the
+# shown app's memory stays out of zram); the daemon sets it before the trim property.
+TRIM_SWAPPINESS_PROPERTY = "vendor.dsa.memory.trim_swappiness"
+TRIM_SWAPPINESS_PROPERTY_CONTEXT = f"{TRIM_SWAPPINESS_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
 # The zram writeback (dsa-channeld.rc): the daemon sets the budget of the run, in 4 KiB pages,
 # and then the property init acts on. init sets how long no app must be open before a
 # writeback and how long a page must go unused before it is written (dsa-memory.rc), from the
@@ -6493,6 +6497,8 @@ def update_vendor_property_contexts(text):
         lines.append(TRIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [TRIM_SIZE_PROPERTY] for line in lines):
         lines.append(TRIM_SIZE_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [TRIM_SWAPPINESS_PROPERTY] for line in lines):
+        lines.append(TRIM_SWAPPINESS_PROPERTY_CONTEXT)
     for name, context in WRITEBACK_PROPERTY_CONTEXTS.items():
         if not any(line.split()[:1] == [name] for line in lines):
             lines.append(context)
