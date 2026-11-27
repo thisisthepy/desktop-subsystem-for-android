@@ -289,12 +289,25 @@ bool leavesLastFrame(bool layerMissing, bool hasFrame) { return layerMissing && 
 
 bool reportAsksForFrame(bool boundsChanged) { return boundsChanged; }
 
-uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int next) {
-    if (!posted || !onHost) {
+uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int lastPosted) {
+    if (!posted || !onHost || lastPosted < 0 || lastPosted > 1) {
         return 0;
     }
-    // Each post flips `next`, so the last one composed is the other target.
-    return targets[(next ^ 1) & 1];
+    return targets[lastPosted];
+}
+
+int composeTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs) {
+    if (hostGuards && nowMs >= secondUntilMs) {
+        return lastPosted == 1 ? 1 : 0;
+    }
+    return lastPosted == 0 ? 1 : 0;
+}
+
+int idleTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs) {
+    if (!hostGuards || nowMs < secondUntilMs || lastPosted < 0 || lastPosted > 1) {
+        return -1;
+    }
+    return lastPosted ^ 1;
 }
 
 bool leavesLastFrameUndrawn(const std::vector<LayerFill>& layers, bool hasFrame) {

@@ -114,6 +114,8 @@ git -C $GfxstreamDir clean -fdx
 # the old size, and a window stays black.
 # Without 0045 a video layer whose ColorBuffer holds no finished upload is composed, and its
 # zeros show as a solid green frame.
+# Without 0046 a composition may write a ColorBuffer the presentation is still copying into a
+# task window, so the hwcomposer keeps two ColorBuffers of the task's size for every task.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -157,7 +159,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0042-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0043-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0044-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0045-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0045-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0046-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName

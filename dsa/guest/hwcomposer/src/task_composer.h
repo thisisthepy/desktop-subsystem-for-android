@@ -129,9 +129,15 @@ class TaskComposer {
         bool announced = false;
         // For an overlay: the log has said that the host composes it.
         bool composedLogged = false;
-        // Two ColorBuffers, so the host can show one while the next is composed.
+        // Up to two ColorBuffers: the first takes every frame while the host keeps up, and the
+        // second is there so the host can copy one while the next is composed when it does not
+        // (composeTargetSlot).
         uint32_t targets[2] = {0, 0};
-        int next = 0;
+        // The target the last frame was composed into; -1 for none.
+        int lastPosted = -1;
+        // Steady clock milliseconds until which frames go into the two in turn, after the host
+        // was found still copying the first; 0 for none.
+        int64_t secondUntilMs = 0;
         // Steady clock milliseconds since the task has had no layer (minimized, or its app
         // hidden); 0 while it has one.
         int64_t withoutLayersSinceMs = 0;

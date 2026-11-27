@@ -93,7 +93,7 @@ class YuvPicturesPatchTests(unittest.TestCase):
                 self.assertTrue(line[:1] in (" ", "+", "-", "\\"), repr(line))
 
     def test_fr26_the_fetch_applies_0045_after_0044(self):
-        self.assertIn(" 0044 0045;", read(HOST / "fetch.sh"))
+        self.assertIn(" 0044 0045 ", read(HOST / "fetch.sh"))
         self.assertIn('-Filter "0045-*.patch"', read(HOST / "fetch.ps1"))
 
     def test_fr26_the_rules_have_their_own_test(self):

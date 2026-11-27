@@ -1,0 +1,80 @@
+Subject: Make a composition wait until its target has been copied into its window
+
+The hwcomposer composes each task's frame into a ColorBuffer of its own with
+rcComposeWithoutPost, then makes it the task display's current frame, and the renderer's
+presentation copies it into the task's window later, on a thread of its own. So the hwcomposer
+kept two ColorBuffers per task, each as large as the task can be, and composed into them in
+turn: writing the one the presentation was still reading would show half of one frame and half
+of the next, or the next frame at the size of the one before.
+
+The presentation now counts, for each ColorBuffer, the frames that wait for or are in their copy
+(dsa_gfx_display.cpp), and sets dsa_compose_target_guard (dsa_compose_guard.h). With it set:
+
+- rcComposeWithoutPost reads the target of a ComposeDevice_v2 request and waits, for at most
+  DSA_COMPOSE_GUARD_WAIT_MS, until none of its frames does. If one still does by then, nothing
+  is composed and it answers DSA_COMPOSE_TARGET_BUSY (-2), which a hwcomposer that does not know
+  it takes as a composition that failed, keeping its last frame.
+- rcGetGLString lists DSA_COMPOSE_GUARD_EXTENSION, and a hwcomposer that sees it composes every
+  frame of a task into one ColorBuffer, and into a second only for a while after the first was
+  busy.
+
+A task whose window keeps up then holds one ColorBuffer of its size instead of two: 24 MiB less
+for a task of 3072x2048.
+
+diff --git a/host/RenderControl.cpp b/host/RenderControl.cpp
+--- a/host/RenderControl.cpp
++++ b/host/RenderControl.cpp
+@@ -33,6 +33,7 @@
+ #include "SyncThread.h"
+ #include "aemu/base/Tracing.h"
+ #include "compressedTextureFormats/AstcCpuDecompressor.h"
++#include "dsa_compose_guard.h"
+ #include "dsa_graphics_memory.h"
+ #include "gfxstream/host/Tracing.h"
+ #include "host-common/logging.h"
+@@ -42,6 +43,9 @@
+ #include "vulkan/VkCommonOperations.h"
+ #include "vulkan/VkDecoderGlobalState.h"
+ 
++// DSA: set by the presentation (dsa_compose_guard.h); null while nothing tracks its copies.
++dsa_compose_guard_fn dsa_compose_target_guard = nullptr;
++
+ namespace gfxstream {
+ 
+ using android::base::AutoLock;
+@@ -564,6 +568,14 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
+         glStr += " ";
+     }
+ 
++    // DSA: a composition waits until its target's frame has been copied into its task window,
++    // so the hwcomposer may compose each frame of a task into the same ColorBuffer
++    // (dsa_compose_guard.h).
++    if (name == GL_EXTENSIONS && dsa_compose_target_guard) {
++        glStr += DSA_COMPOSE_GUARD_EXTENSION;
++        glStr += " ";
++    }
++
+     // DSA: the guest may map its host-visible memory from the graphics memory shared with it,
+     // and send gralloc buffers' CPU uploads and read backs through staging grants there
+     // (dsa_graphics_memory.h).
+@@ -1349,6 +1361,20 @@ static int rcComposeWithoutPost(uint32_t bufferSize, void* buffer) {
+     if (!fb) {
+         return -1;
+     }
++    // DSA: a ComposeDevice_v2 names its target after its version and display. A target whose
++    // frame still waits for or is in its copy into a window is not written: the guest composes
++    // into another ColorBuffer instead.
++    const dsa_compose_guard_fn guard = dsa_compose_target_guard;
++    if (guard && buffer && bufferSize >= 3 * sizeof(uint32_t)) {
++        uint32_t version = 0;
++        uint32_t target = 0;
++        memcpy(&version, buffer, sizeof(version));
++        memcpy(&target, static_cast<const uint8_t*>(buffer) + 2 * sizeof(uint32_t),
++               sizeof(target));
++        if (version == 2 && target != 0 && !guard(target, DSA_COMPOSE_GUARD_WAIT_MS)) {
++            return DSA_COMPOSE_TARGET_BUSY;
++        }
++    }
+     return fb->compose(bufferSize, buffer, false);
+ }
+ 

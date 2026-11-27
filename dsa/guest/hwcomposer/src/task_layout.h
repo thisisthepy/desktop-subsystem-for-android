@@ -194,8 +194,26 @@ bool reportAsksForFrame(bool boundsChanged);
 // again when it asks for the task's frame (RequestTaskFrame), so a still app's window shows it
 // without waiting for SurfaceFlinger. 0 when there is none to send: nothing was posted on this
 // connection, or the last post was the app's own buffer (an overlay shown uncomposed), which the
-// app may have drawn into since. `next` is the target the next frame is composed into.
-uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int next);
+// app may have drawn into since. `lastPosted` is the target the last frame was composed into
+// (-1 for none).
+uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int lastPosted);
+
+// How long a task keeps its second ColorBuffer after the host was last found still copying a
+// frame out of the first. A ColorBuffer is as large as the task can be (24 MiB for a task of
+// 3072x2048), so a task whose window keeps up holds one.
+constexpr int64_t kSecondTargetKeepMs = 2000;
+
+// Which of a task's two ColorBuffers its next frame is composed into, when its last frame was
+// composed into `lastPosted` (-1 for none). A host whose compositions wait until the target's
+// last frame has been copied into its window (`hostGuards`) takes every frame in the one the last
+// frame is in, and the two in turn only until `secondUntilMs` (steady clock), set when it was
+// found still copying one. Any other host gets the two in turn, so it can copy one while the
+// next is composed.
+int composeTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs);
+
+// The ColorBuffer a task lets go of at `nowMs`, or -1 for none: the one its last frame is not
+// in, once a host that waits for its window's copies has kept up since `secondUntilMs`.
+int idleTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs);
 
 // Whether a frame goes unsent because nothing in it shows what the app drew: no layer of the
 // task shows a buffer, or every one that does is fully transparent. That is the task as it

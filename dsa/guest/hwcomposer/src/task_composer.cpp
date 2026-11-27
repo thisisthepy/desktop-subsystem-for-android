@@ -19,6 +19,8 @@ namespace {
 
 // How long a layer's acquire fence may take before its buffer is composed anyway.
 constexpr int kFenceTimeoutMs = 3000;
+// How soon a frame both of whose ColorBuffers the host was still copying is composed again.
+constexpr int64_t kBusyRetryMs = 16;
 // The display a compose request names so that the host composes without showing anything.
 constexpr uint32_t kNoDisplay = 0;
 // The blend mode SurfaceFlinger's client target is composed with.
@@ -138,7 +140,7 @@ void TaskComposer::frameRequested(int32_t task) {
         if (it != mOutputs.end() && mHost.connected() && mHost.generation() == mGeneration) {
             Output& output = it->second;
             const uint32_t last =
-                lastPostedTarget(output.posted, output.onHost, output.targets, output.next);
+                lastPostedTarget(output.posted, output.onHost, output.targets, output.lastPosted);
             if (last != 0) {
                 // The host shows a display's frames in the window its task has now: the frame
                 // the window missed goes to it as it is, whatever SurfaceFlinger does next.
@@ -213,7 +215,8 @@ void TaskComposer::syncGenerationLocked() {
         output.announced = false;
         output.targets[0] = output.targets[1] = 0;
         output.buffers = BufferSize{};
-        output.next = 0;
+        output.lastPosted = -1;
+        output.secondUntilMs = 0;
     }
 }
 
@@ -280,6 +283,9 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
     {
         std::lock_guard<std::mutex> lock(mMutex);
         const int64_t now = steadyMs();
+        // When to compose again: a frame the host could not take yet, or a second ColorBuffer
+        // due to go.
+        std::optional<int64_t> retryAt;
         // Counted before the host is reached: a frame SurfaceFlinger composed itself while the
         // host was away holds its client target buffers just the same, and only the frame asked
         // for once the delay is up makes it free them.
@@ -428,7 +434,8 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                                 target = 0;
                             }
                             output.buffers = BufferSize{};
-                            output.next = 0;
+                            output.lastPosted = -1;
+                            output.secondUntilMs = 0;
                         }
                         mHost.post(output.display, own);
                         // Answered only once the host has taken the post, so it has read the
@@ -474,6 +481,7 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                     target = 0;
                 }
                 output.buffers = buffers;
+                output.lastPosted = -1;
             }
             if (!output.announced) {
                 // Before the first post, so the host knows whose frames these are.
@@ -481,15 +489,23 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                 output.announced = true;
             }
 
-            uint32_t& target = output.targets[output.next];
-            if (target == 0) {
-                const double createStart = traceMonoMs();
-                target = mHost.createColorBuffer(static_cast<uint32_t>(output.buffers.width),
-                                                 static_cast<uint32_t>(output.buffers.height));
-                logTrace(mTrace.colorBuffer(task.task, output.buffers.width, output.buffers.height,
-                                            "create", traceMonoMs() - createStart, traceMonoMs(),
-                                            traceWallMs()));
-            }
+            // The ColorBuffer in `slot`, made when the task has none there yet.
+            const auto targetIn = [&](int slot) -> uint32_t {
+                uint32_t& made = output.targets[slot];
+                if (made == 0) {
+                    const double createStart = traceMonoMs();
+                    made = mHost.createColorBuffer(static_cast<uint32_t>(output.buffers.width),
+                                                   static_cast<uint32_t>(output.buffers.height));
+                    logTrace(mTrace.colorBuffer(task.task, output.buffers.width,
+                                                output.buffers.height, "create",
+                                                traceMonoMs() - createStart, traceMonoMs(),
+                                                traceWallMs()));
+                }
+                return made;
+            };
+            const bool hostGuards = mHost.hostGuardsComposeTargets();
+            int slot = composeTargetSlot(hostGuards, output.lastPosted, output.secondUntilMs, now);
+            uint32_t target = targetIn(slot);
             if (target == 0) {
                 continue;
             }
@@ -606,10 +622,33 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
             // the host would make the target that display's frame before composing into
             // it, and the window would show each frame one late. The frame goes to the
             // task's display only once it is whole (post).
-            const std::vector<uint8_t> request =
-                buildComposeRequest(kNoDisplay, target, task.bounds, inputs);
             const double composeStart = traceMonoMs();
-            if (mHost.compose(request)) {
+            ComposeResult composed =
+                mHost.compose(buildComposeRequest(kNoDisplay, target, task.bounds, inputs));
+            if (composed == ComposeResult::TargetBusy) {
+                // The host was still copying the task's last frame out of this ColorBuffer into
+                // its window. The frame goes into the other one, and frames go into the two in
+                // turn for a while, as they did on every host before.
+                if (output.secondUntilMs == 0) {
+                    HWC_LOGI("task %d: the host was still copying its last frame; its frames go "
+                             "into two %lldx%lld ColorBuffers for %lld ms",
+                             task.task, static_cast<long long>(output.buffers.width),
+                             static_cast<long long>(output.buffers.height),
+                             static_cast<long long>(kSecondTargetKeepMs));
+                }
+                output.secondUntilMs = now + kSecondTargetKeepMs;
+                slot ^= 1;
+                target = targetIn(slot);
+                composed = target != 0 ? mHost.compose(buildComposeRequest(kNoDisplay, target,
+                                                                           task.bounds, inputs))
+                                       : ComposeResult::Failed;
+                if (composed == ComposeResult::TargetBusy) {
+                    // Both are still being copied: the frame is composed again shortly, so the
+                    // window does not keep an older one when the app goes still.
+                    retryAt = retryAt ? std::min(*retryAt, now + kBusyRetryMs) : now + kBusyRetryMs;
+                }
+            }
+            if (composed == ComposeResult::Composed) {
                 const double postStart = traceMonoMs();
                 mHost.post(output.display, target);
                 output.posted = true;
@@ -620,11 +659,38 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                                                   postStart - composeStart, posted - postStart)
                                        .c_str());
                 }
-                output.next ^= 1;
+                output.lastPosted = slot;
                 logTrace(mTrace.posted(task.task, width, height,
                                        decision == ResizeGate::Decision::PostSettled, traceMonoMs(),
                                        traceWallMs()));
             }
+        }
+
+        // A task whose host has kept up for a while lets go of the ColorBuffer its last frame is
+        // not in; one that still has it is asked for a frame when it is due to go, in case its
+        // app is still.
+        for (auto& [taskId, output] : mOutputs) {
+            if (output.targets[0] == 0 || output.targets[1] == 0) {
+                if (output.targets[0] == 0 && output.targets[1] == 0) {
+                    output.secondUntilMs = 0;
+                }
+                continue;
+            }
+            const int idle = idleTargetSlot(mHost.hostGuardsComposeTargets(), output.lastPosted,
+                                            output.secondUntilMs, now);
+            if (idle < 0) {
+                if (output.secondUntilMs > now) {
+                    retryAt = retryAt ? std::min(*retryAt, output.secondUntilMs)
+                                      : output.secondUntilMs;
+                }
+                continue;
+            }
+            mHost.closeColorBuffer(output.targets[idle]);
+            output.targets[idle] = 0;
+            output.secondUntilMs = 0;
+            HWC_LOGI("task %d: the host keeps up again; let go of its second %lldx%lld ColorBuffer",
+                     taskId, static_cast<long long>(output.buffers.width),
+                     static_cast<long long>(output.buffers.height));
         }
 
         // Drop this process's hold on buffers SurfaceFlinger can no longer show.
@@ -648,6 +714,9 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
             // SurfaceFlinger presents nothing more once the video is gone and the rest is
             // still, so a frame is asked for when the client target is due to go.
             releaseAt = releaseAt ? std::min(*releaseAt, *due) : *due;
+        }
+        if (retryAt) {
+            releaseAt = releaseAt ? std::min(*releaseAt, *retryAt) : *retryAt;
         }
 
         if (!mHost.connected()) {
@@ -705,7 +774,8 @@ std::optional<int64_t> TaskComposer::releaseTasksWithoutLayersLocked(const Layou
                  static_cast<long long>(output.buffers.width),
                  static_cast<long long>(output.buffers.height));
         output.buffers = BufferSize{};
-        output.next = 0;
+        output.lastPosted = -1;
+        output.secondUntilMs = 0;
     }
     return next;
 }

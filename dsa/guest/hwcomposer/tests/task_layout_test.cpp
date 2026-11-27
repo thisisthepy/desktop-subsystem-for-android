@@ -836,12 +836,54 @@ TEST(fr3_a_plain_report_asks_for_no_frame) {
 }
 
 TEST(fr3_a_frame_request_sends_the_tasks_last_frame) {
-    // Two frames were posted: the first from target 11, the second from 22, so the next is
-    // composed into 11 again. The last frame is the one in 22.
+    // The last frame was composed into the second target, 22.
     const uint32_t targets[2] = {11, 22};
-    EXPECT_EQ(lastPostedTarget(true, true, targets, 0), static_cast<uint32_t>(22));
-    // One frame posted, from 11: the next goes to 22.
-    EXPECT_EQ(lastPostedTarget(true, true, targets, 1), static_cast<uint32_t>(11));
+    EXPECT_EQ(lastPostedTarget(true, true, targets, 1), static_cast<uint32_t>(22));
+    // The last frame was composed into the first, 11.
+    EXPECT_EQ(lastPostedTarget(true, true, targets, 0), static_cast<uint32_t>(11));
+    // A task whose frames all go into one target has no second.
+    const uint32_t one[2] = {11, 0};
+    EXPECT_EQ(lastPostedTarget(true, true, one, 0), static_cast<uint32_t>(11));
+    // None composed since the targets were made again.
+    EXPECT_EQ(lastPostedTarget(true, true, targets, -1), static_cast<uint32_t>(0));
+}
+
+TEST(nfr1_a_task_composes_every_frame_into_one_buffer_while_the_host_keeps_up) {
+    // A host that waits for its window's copy before a composition: the first frame, and every
+    // one after, goes into the target the last one is in.
+    EXPECT_EQ(composeTargetSlot(true, -1, 0, 5000), 0);
+    EXPECT_EQ(composeTargetSlot(true, 0, 0, 5000), 0);
+    EXPECT_EQ(composeTargetSlot(true, 0, 0, 5016), 0);
+    // Back to one after a while in two: the one the last frame is in.
+    EXPECT_EQ(composeTargetSlot(true, 1, 3000, 3000), 1);
+}
+
+TEST(nfr1_a_host_that_does_not_wait_for_its_copies_gets_two_buffers_in_turn) {
+    // So it can copy one while the next is composed, as every host did before.
+    EXPECT_EQ(composeTargetSlot(false, -1, 0, 5000), 0);
+    EXPECT_EQ(composeTargetSlot(false, 0, 0, 5000), 1);
+    EXPECT_EQ(composeTargetSlot(false, 1, 0, 5016), 0);
+    EXPECT_EQ(idleTargetSlot(false, 0, 0, 9000), -1);
+    EXPECT_EQ(idleTargetSlot(false, 1, 0, 9000), -1);
+}
+
+TEST(nfr1_a_host_still_copying_brings_the_second_buffer_back_for_a_while) {
+    // Found busy at 1000: frames go into the two in turn until 1000 + kSecondTargetKeepMs.
+    const int64_t until = 1000 + kSecondTargetKeepMs;
+    EXPECT_EQ(composeTargetSlot(true, 0, until, 1016), 1);
+    EXPECT_EQ(composeTargetSlot(true, 1, until, 1032), 0);
+    EXPECT_EQ(idleTargetSlot(true, 0, until, 1032), -1);
+    EXPECT_EQ(kSecondTargetKeepMs, 2000);
+}
+
+TEST(nfr1_the_second_buffer_goes_once_the_host_has_kept_up) {
+    const int64_t until = 3000;
+    // The one the last frame is not in goes; the one it is in stays, so a frame request can
+    // send it again.
+    EXPECT_EQ(idleTargetSlot(true, 0, until, 3000), 1);
+    EXPECT_EQ(idleTargetSlot(true, 1, until, 3500), 0);
+    // Nothing composed yet: nothing to let go of.
+    EXPECT_EQ(idleTargetSlot(true, -1, until, 3500), -1);
 }
 
 TEST(fr3_a_frame_request_sends_nothing_old_when_there_is_no_frame) {

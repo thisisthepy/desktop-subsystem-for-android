@@ -43,6 +43,7 @@ pub mod surface_calls;
 pub mod task_watch;
 pub mod task_windows;
 pub mod visible_change;
+pub mod window_buffers;
 pub mod window_hosts;
 pub mod window_menu;
 pub mod window_mode;
