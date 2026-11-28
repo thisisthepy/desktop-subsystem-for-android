@@ -29,7 +29,7 @@ class IdleRelease(
         if (closed) return
         lastUsed = clock()
         released = false
-        if (!checkPending) wait(idleMillis)
+        if (!checkPending) checkAfter(idleMillis)
     }
 
     /** It is gone: nothing more is released. */
@@ -37,7 +37,7 @@ class IdleRelease(
         closed = true
     }
 
-    private fun wait(millis: Long) {
+    private fun checkAfter(millis: Long) {
         checkPending = true
         scheduler.postDelayed(millis) { check() }
     }
@@ -48,7 +48,7 @@ class IdleRelease(
         val idle = clock() - lastUsed
         if (idle < idleMillis) {
             // Used again since this check was posted: wait out the rest after that use.
-            wait(idleMillis - idle)
+            checkAfter(idleMillis - idle)
             return
         }
         released = true
