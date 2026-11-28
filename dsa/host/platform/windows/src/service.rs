@@ -1231,6 +1231,21 @@ where
             eprintln!("{build}: starting the memory log failed: {error}");
         }
     }
+    // While a user's Android has no app window open, its VM's working set is emptied every
+    // minute.
+    {
+        let androids = androids.clone();
+        let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));
+        if let Err(error) = thread::Builder::new()
+            .name("dsa-idle-vm-trim".into())
+            .spawn(move || {
+                let vm = crate::vm_working_set::WindowsVmWorkingSet::new();
+                dsa_host_core::idle_vm_trim::run(&*androids, &vm, &worker_build, &stop)
+            })
+        {
+            eprintln!("{build}: starting the idle VM trim failed: {error}");
+        }
+    }
     if config.direct_mapped_images {
         let androids = androids.clone();
         let (worker_build, stop, root) =

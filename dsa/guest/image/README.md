@@ -84,7 +84,10 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   system_server waits for the oemlock HAL forever. Bluetooth comes back as a host HAL.
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
   start a Bluetooth stack that has no controller to talk to, and the UWB feature, so nothing
-  waits for its removed HAL.
+  waits for its removed HAL. It withdraws AiSeal too (`android.software.aiseal`): AiSeal runs
+  AI apps that handle personal data in a protected VM, which the guest does not have, and its
+  service in system_server looked for that VM once a second for as long as the guest ran,
+  waking an idle guest every second.
 - Settings' sound screen loses its media output switcher and its cast volume group. Their
   controllers need the Bluetooth service, which system_server does not start without the
   Bluetooth features: SettingsLib's media manager is then built without its routing half, and

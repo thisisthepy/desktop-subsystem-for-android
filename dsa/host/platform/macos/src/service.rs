@@ -748,6 +748,7 @@ pub fn serve(
         }),
     )
     .with_beside("image-version");
+    let trimmed_vm = process.clone();
     let host_memory: Arc<dyn HostMemory> = Arc::new(MacHostMemory { vm: process });
     let logs_user = user.clone();
     let identity_shared = Arc::clone(&shared);
@@ -811,6 +812,21 @@ pub fn serve(
             .spawn(move || log_memory(&*androids, &*host_memory, &worker_build, &stop))
         {
             eprintln!("{build}: starting the memory log failed: {error}");
+        }
+    }
+    // The other hosts empty an idle VM's working set; this one cannot, and the log says why
+    // once.
+    {
+        let androids = androids.clone();
+        let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));
+        if let Err(error) = thread::Builder::new()
+            .name("dsa-idle-vm-trim".into())
+            .spawn(move || {
+                let vm = crate::vm_working_set::MacVmWorkingSet { vm: trimmed_vm };
+                dsa_host_core::idle_vm_trim::run(&*androids, &vm, &worker_build, &stop)
+            })
+        {
+            eprintln!("{build}: starting the idle VM trim failed: {error}");
         }
     }
     // Google Play, for a user who asks: downloaded from LiteGapps and made ready in the

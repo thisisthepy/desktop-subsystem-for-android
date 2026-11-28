@@ -3182,6 +3182,14 @@ class GuestMemoryTests(unittest.TestCase):
             xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
         self.assertIn('<unavailable-feature name="android.software.device_lock" />', xml)
 
+    def test_nfr1_aiseal_is_not_advertised_without_a_protected_vm(self):
+        # SystemServer starts AiSealSystemService only on a device that declares the feature.
+        # Its internal service runs in a protected VM the guest does not have, so the service
+        # looked for it once a second for the guest's whole life and woke the idle guest.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+        self.assertIn('<unavailable-feature name="android.software.aiseal" />', xml)
+
     def test_nfr1_cuttlefishs_host_monitoring_service_is_removed(self):
         self.assertIn("CuttlefishService", make_image.REMOVED_APPS)
 

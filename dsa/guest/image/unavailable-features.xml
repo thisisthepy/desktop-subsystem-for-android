@@ -15,7 +15,11 @@
      a station that joins one network and has no radio of its own: no Wi-Fi Direct, Wi-Fi
      Aware or round-trip timing, and no Thread radio (its HAL APEX is removed). Declared,
      system_server starts a service for each, with its own threads, state machine and Java
-     heap, that waits on a radio that is never there. -->
+     heap, that waits on a radio that is never there. AiSeal runs AI apps that handle personal
+     data in a protected VM, which a guest that is itself a VM does not have
+     (service.aiseal.protected_vm is 0); declared, system_server starts its service, which looks
+     for the VM's internal service once a second for as long as the guest runs, and so wakes the
+     idle guest every second. -->
 
 <permissions>
     <unavailable-feature name="android.hardware.uwb" />
@@ -46,4 +50,5 @@
     <unavailable-feature name="android.hardware.wifi.aware" />
     <unavailable-feature name="android.hardware.wifi.rtt" />
     <unavailable-feature name="android.hardware.thread_network" />
+    <unavailable-feature name="android.software.aiseal" />
 </permissions>

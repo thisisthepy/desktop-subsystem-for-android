@@ -852,6 +852,20 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
             eprintln!("{build}: starting the memory log failed: {error}");
         }
     }
+    // While a user's Android has no app window open, its VM's memory is paged out every minute.
+    {
+        let androids = androids.clone();
+        let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));
+        if let Err(error) = thread::Builder::new()
+            .name("dsa-idle-vm-trim".into())
+            .spawn(move || {
+                let vm = crate::vm_working_set::LinuxVmWorkingSet;
+                dsa_host_core::idle_vm_trim::run(&*androids, &vm, &worker_build, &stop)
+            })
+        {
+            eprintln!("{build}: starting the idle VM trim failed: {error}");
+        }
+    }
     let service = Arc::new(service);
     service.serve(Box::new(listener), stop);
     eprintln!("{build}: stopping every user's Android");

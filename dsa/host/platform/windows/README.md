@@ -848,6 +848,14 @@ What keeps the number small:
   does when no window has been shown for 30 seconds.
 - `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs
   how much it held. Memory it touches again comes back by itself.
+- While no app window is open (shown or minimized), the service empties the working set of the
+  VM's `vmmem` process every minute, starting a minute after the last window closed, so the
+  guest has freed what it can by itself first. Android keeps running; what it touches again
+  comes back by itself, and what it does not goes to the page file. A window that opens stops
+  it at once. The log has one `idle VM trim:` line for each trim, with the VM's private working
+  set before and after it, what came back by the next trim and how much Windows wrote to its
+  page file meanwhile (the system's `Pages Output` count, for all processes), and a summary
+  every five minutes with the average.
 
 ### Direct-mapped read-only disks
 

@@ -176,6 +176,13 @@ pub fn shared_working_set(pid: u32) -> Option<(u64, u64)> {
     system::shared_working_set(pid)
 }
 
+/// The private working set of the process `pid` (what Task Manager's Memory column shows), in
+/// KiB; `None` when it cannot be read, or where Windows does not count it.
+#[cfg(windows)]
+pub fn private_working_set_kb(pid: u32) -> Option<u64> {
+    system::private_working_set(pid)
+}
+
 /// The processes of the VM `vm_id` (its `vmmem` process), measured.
 #[cfg(windows)]
 pub fn vm_memory(vm_id: &str) -> std::io::Result<Vec<ProcessInfo>> {
@@ -393,6 +400,18 @@ mod system {
         let process = OwnedHandle(handle);
         let (working_set, _, own) = counters(&process)?;
         Some((working_set / 1024, working_set.saturating_sub(own?) / 1024))
+    }
+
+    /// The private working set of the process `pid`, in KiB.
+    pub fn private_working_set(pid: u32) -> Option<u64> {
+        // SAFETY: opening a process by ID for queries only; closed by OwnedHandle.
+        let handle: HANDLE = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            return None;
+        }
+        let process = OwnedHandle(handle);
+        let (_, _, own) = counters(&process)?;
+        Some(own? / 1024)
     }
 
     /// What the section `name` has committed, in KiB; 0 when it does not exist (the VM is

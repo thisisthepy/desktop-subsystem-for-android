@@ -85,6 +85,8 @@ pub mod security;
 #[cfg(target_os = "macos")]
 pub mod service;
 #[cfg(target_os = "macos")]
+pub mod vm_working_set;
+#[cfg(target_os = "macos")]
 pub mod vsock;
 #[cfg(target_os = "macos")]
 pub mod vz;

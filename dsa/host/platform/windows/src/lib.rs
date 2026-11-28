@@ -26,6 +26,8 @@
 //!   hints ask (the applying part on Windows only).
 //! - [`host_memory`]: the host's memory for each user's Android: its VM and its window
 //!   processes (the measuring part on Windows only).
+//! - [`vm_working_set`]: emptying the working set of an idle VM's `vmmem` process, and the
+//!   page file writes that cost (Windows only).
 //! - [`service`]: the local API and one VM per user behind it, as `dsa-hostd` serves them
 //!   (Windows only).
 //! - [`setup`]: running a downloaded setup file apart from the service, to update DSA
@@ -157,6 +159,8 @@ pub mod user_registry;
 pub mod video_decoder;
 pub mod vm;
 pub mod vm_listener;
+#[cfg(windows)]
+pub mod vm_working_set;
 pub mod vulkan_driver;
 #[cfg(windows)]
 pub mod window_manager;

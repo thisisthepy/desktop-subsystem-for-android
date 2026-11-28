@@ -63,6 +63,8 @@
 //! - [`gapps`]: Google Play for a user who asks for it, downloaded and laid over the guest's
 //!   system as an erofs image.
 //! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
+//! - [`idle_vm_trim`]: emptying the working set of a VM that has no app window open, every
+//!   minute, so what the idle guest does not touch leaves the host's RAM.
 //! - [`host_memory`]: the computer's physical memory, which Google Play sees as the device's.
 //! - [`window_manager`]: keeping a user's window manager running while their Android runs.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
@@ -142,6 +144,7 @@ pub mod host_facts;
 pub mod host_keys;
 pub mod host_memory;
 pub mod host_paths;
+pub mod idle_vm_trim;
 pub mod image_files;
 pub mod ime;
 pub mod input;

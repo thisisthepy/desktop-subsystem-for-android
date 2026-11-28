@@ -117,6 +117,9 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     features = z.read(features_xml).decode() if features_xml in names else ""
     if 'name="android.software.device_lock"' not in features:
         problems.append("the device lock feature is still declared, so its service and controller start")
+    if 'name="android.software.aiseal"' not in features:
+        problems.append("the AiSeal feature is still declared, so its service looks for a protected VM "
+                        "the guest does not have once a second and keeps the idle guest awake")
     props = z.read("SYSTEM/build.prop").decode()
     if "ro.debuggable=1" in props or "ro.build.type=userdebug" in props:
         problems.append("the system is still a debuggable build")

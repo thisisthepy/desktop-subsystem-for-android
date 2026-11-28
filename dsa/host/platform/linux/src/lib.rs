@@ -24,6 +24,8 @@
 //! - [`vsock`]: the host's end of the guest's control, log and file ports, each connection
 //!   routed to the session of the VM it comes from;
 //! - [`network`]: NAT through passt, or the host's LAN through a macvtap;
+//! - [`vm_working_set`]: paging out an idle VM's memory from crosvm, and the swap writes that
+//!   cost;
 //! - [`image`]: what a VM boots from an image folder, and each user's disk;
 //! - [`service`]: the system service behind `/run/dsa/host.sock`, one session per user
 //!   (`dsa-linux-hostd`);
@@ -83,6 +85,7 @@ pub mod shell;
 pub mod tpm2;
 #[cfg(target_os = "linux")]
 pub mod users;
+pub mod vm_working_set;
 #[cfg(target_os = "linux")]
 pub mod vsock;
 #[cfg(target_os = "linux")]
