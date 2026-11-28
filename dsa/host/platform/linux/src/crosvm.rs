@@ -82,6 +82,14 @@ impl GuestArch {
             GuestArch::Arm64 => ARM64_PCI_DEVICE.to_string(),
         }
     }
+
+    /// The same architecture as the host core names it.
+    pub fn core(self) -> dsa_host_core::image_files::GuestArch {
+        match self {
+            GuestArch::X86_64 => dsa_host_core::image_files::GuestArch::X86_64,
+            GuestArch::Arm64 => dsa_host_core::image_files::GuestArch::Arm64,
+        }
+    }
 }
 
 /// The VM's network adapter, and what it is connected to.
@@ -278,7 +286,7 @@ impl VmConfig {
             "panic=-1 sysrq_always_enabled=1 {} {} {}",
             dsa_host_core::memory::page_reporting_cmdline(self.page_reporting_order, 0),
             MEMORY_HOTPLUG_CMDLINE,
-            dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE
+            dsa_host_core::memory::guest_boot_memory_cmdline(self.arch.core())
         );
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
@@ -775,10 +783,19 @@ mod tests {
 
     #[test]
     fn nfr1_the_guest_kernel_sets_aside_as_little_at_boot_as_on_windows() {
+        let mut arm64 = config();
+        arm64.arch = GuestArch::Arm64;
+        // The x86_64 guest makes no bounce buffer; the arm64 guest keeps a small one, without
+        // which its kmalloc rounds every allocation up to 128 bytes.
+        for (vm, swiotlb) in [(config(), "swiotlb=noforce"), (arm64, "swiotlb=2048")] {
+            let cmdline = vm.full_kernel_cmdline();
+            let words: Vec<&str> = cmdline.split_whitespace().collect();
+            let found: Vec<&&str> = words.iter().filter(|w| w.starts_with("swiotlb=")).collect();
+            assert_eq!(found, [&swiotlb], "{cmdline}");
+        }
         let cmdline = config().full_kernel_cmdline();
         let words: Vec<&str> = cmdline.split_whitespace().collect();
         for word in [
-            "swiotlb=2048",
             "kfence.sample_interval=0",
             "dhash_entries=65536",
             "ihash_entries=32768",

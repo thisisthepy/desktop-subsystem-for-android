@@ -22,6 +22,7 @@ use dsa_protocol::control;
 use dsa_protocol::host_api::types;
 
 use crate::host_api::UserAndroids;
+use crate::image_files::GuestArch;
 use crate::session::SessionState;
 use crate::tasks::TaskEvent;
 
@@ -1140,18 +1141,31 @@ pub fn log_memory(
     }
 }
 
-/// Kernel command line settings that keep what the guest kernel sets aside at boot small, the
-/// same on every host. Each is memory the guest never gets back while it runs.
-/// - `swiotlb=2048`: the bounce buffer for devices that cannot reach all of memory, 4 MiB
-///   (2048 slabs of 2 KiB) instead of 64. The kernel makes it whenever memory may reach past
-///   4 GiB, which a hot-add range makes true, but the VM's disks and network adapter (VMBus on
-///   Hyper-V, virtio elsewhere) reach all of memory and bounce nothing.
+/// Kernel command line settings that keep what the guest kernel of `arch` sets aside at boot
+/// small, the same on every host. Each is memory the guest never gets back while it runs.
+/// - The bounce buffer (swiotlb) for devices that cannot reach all of memory, which the kernel
+///   makes whenever memory may reach past 4 GiB (a hot-add range makes that true), 64 MiB by
+///   default. No device of the VMs bounces: VMBus on Hyper-V and virtio under crosvm and
+///   Apple's Virtualization framework reach all of memory. An x86_64 guest makes none
+///   (`swiotlb=noforce`, 4 MiB less than before). An arm64 guest keeps 4 MiB
+///   (`swiotlb=2048`, 2048 slabs of 2 KiB): its kernel lets small allocations skip the
+///   128-byte cache line alignment only while a bounce buffer exists, so without one every
+///   kmalloc would round up to 128 bytes, which costs more slab than the buffer.
 /// - `kfence.sample_interval=0`: no KFENCE pool (2 MiB and its metadata) when the kernel has
 ///   KFENCE; nobody reads its reports in a user's VM.
 /// - `dhash_entries`, `ihash_entries`, `thash_entries`, `uhash_entries`: the dentry, inode,
 ///   TCP and UDP hash tables sized for a desktop guest's few files and connections, not
 ///   scaled to its memory (about 8 MiB for 3 GiB, down to under 1 MiB).
-pub const GUEST_BOOT_MEMORY_CMDLINE: &str = "swiotlb=2048 kfence.sample_interval=0 \
+pub fn guest_boot_memory_cmdline(arch: GuestArch) -> String {
+    let swiotlb = match arch {
+        GuestArch::X86_64 => "swiotlb=noforce",
+        GuestArch::Arm64 => "swiotlb=2048",
+    };
+    format!("{swiotlb} {GUEST_BOOT_MEMORY_WORDS}")
+}
+
+/// The settings of [`guest_boot_memory_cmdline`] that are the same for every architecture.
+const GUEST_BOOT_MEMORY_WORDS: &str = "kfence.sample_interval=0 \
      dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024";
 
 /// The kernel command line word that has the guest compact its memory after each reclaim

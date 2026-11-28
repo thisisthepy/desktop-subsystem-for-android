@@ -3181,6 +3181,17 @@ class GuestMemoryTests(unittest.TestCase):
         # exit runs flags_health_check too.
         self.assertTrue(make_image.removed("VENDOR/etc/init/seriallogging.rc"))
 
+    def test_nfr1_the_ota_daemon_dsa_never_uses_is_removed(self):
+        # The host updates Android by replacing the whole image (its image store and trial
+        # boot), and the system disk is read only, so update_engine never has an update to
+        # apply; it only held about 3.5 MiB for the guest's whole life.
+        self.assertTrue(make_image.removed("SYSTEM/etc/init/update_engine.rc"))
+        self.assertTrue(make_image.removed("SYSTEM/bin/update_engine"))
+        # The verifier and the rest of the A/B plumbing stay: first stage init and the boot
+        # control HAL still use the slot they describe.
+        self.assertFalse(make_image.removed("SYSTEM/bin/update_verifier"))
+        self.assertFalse(make_image.removed("SYSTEM/etc/init/update_verifier.rc"))
+
     def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()

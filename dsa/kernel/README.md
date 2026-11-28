@@ -55,6 +55,16 @@ a boot device, and the host names those two in such a boot. It also makes every 
 memory region read only (`ND_REGION_READONLY`), so its disk refuses writes, as the read-only
 SCSI disk does outside the mode: each one is a disk image the host maps read only.
 
+Hyper-V gives every persistent memory device of a VM one size, the controller's, which the host
+sets to fit the largest image. The add-on disk (about 370 MiB) then sat in a region as large as
+the system disk (about 2.4 GiB), and the guest kept page structs, 64 bytes for each 4 KiB, for
+the whole region: 32 MiB of memory it never gets back, for space no file is in.
+`patches/pmem-disk-image-size.patch` has the pmem driver map, on a read-only region, only the
+disk image the region holds: the GPT at its start says where the image ends (its backup header
+is the last sector), and the mapping is rounded up to the 2 MiB the kernel maps persistent
+memory in. A region without a valid GPT is mapped whole, as before. The console log says which
+it did, per namespace: `maps 370 MiB of its 2422 MiB region: the disk image its GPT describes`.
+
 Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
 seconds before each pass, and again after each pass that used up its budget, so a large
 free reached the host slice by slice over many seconds; `patches/page-reporting-no-delay.patch`
@@ -69,6 +79,17 @@ pages) takes reported neighbours back in with a page the guest touches again, an
 never offers those a second time. `patches/page-reporting-rereport.patch` adds
 `page_reporting.rereport`: writing 1 empties the per-CPU free lists and reports every free
 page again. The guest's idle reclaim writes it after it has compacted memory.
+
+The Hyper-V network adapter's driver (`hv_netvsc`) keeps a receive buffer the host copies
+incoming packets into, for as long as the adapter exists. Upstream sizes it at 16 MiB, for a
+server's adapter; `patches/hv-netvsc-desktop-buffers.patch` makes it 4 MiB, about 2400 packets
+of 1500 bytes in flight, or 32 ms of a 1 Gbps download. The send buffer keeps upstream's 1 MiB.
+The command line can give a new adapter another size (`hv_netvsc.recv_buffer_kb=16384` for
+upstream's), so throughput can be compared without another kernel, and the boot log says what
+the adapter holds, such as `receive buffer 4096 KiB (2427 sections of 1728 bytes), send buffer
+1020 KiB (170 sections of 6144 bytes), ring 516 KiB each way for each channel` (the host
+decides the receive sections; the number of channels is the count of `rx-*` queues in
+`/sys/class/net/<adapter>/queues`).
 
 zram writes pages that stay cold for long to a backing file on the guest's data disk
 (`CONFIG_ZRAM_WRITEBACK`), chosen by the time each page was last used
@@ -164,8 +185,13 @@ in probe order, which changes when the host attaches another disk.
   has 4 processors by default and one node), unmerged slab caches and per-CPU partial slab
   lists, the function tracer's per-function records, the virtual terminals and the
   framebuffer layer (with which vkms also kept an fbdev buffer nobody draws), and, on arm64,
-  KVM. Tracepoints, BTF, kallsyms and `/proc/slabinfo` stay, because atrace, perfetto, netd
-  and the memory measurement use them. `android.config` says why each one goes.
+  KVM. It also leaves out built-in features Android's userspace never asks for: System V IPC
+  and POSIX message queues (bionic has neither), `/dev/mem`, hibernation, kexec, IMA,
+  AppArmor (SELinux is the one major security module), nftables (netd uses the legacy
+  iptables tables), VXLAN, AF_XDP, the SCSI CD-ROM and generic SCSI drivers, and hugetlbfs
+  (ART uses transparent huge pages, which stay). Tracepoints, BTF, kallsyms and
+  `/proc/slabinfo` stay, because atrace, perfetto, netd and the memory measurement use them.
+  `android.config` says why each one goes.
 
 ## The pstore disk
 

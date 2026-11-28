@@ -88,6 +88,14 @@ impl GuestArch {
     pub fn boots_from_a_folder(self) -> bool {
         self == GuestArch::Arm64
     }
+
+    /// The same architecture as the host core names it.
+    pub fn core(self) -> dsa_host_core::image_files::GuestArch {
+        match self {
+            GuestArch::X86_64 => dsa_host_core::image_files::GuestArch::X86_64,
+            GuestArch::Arm64 => dsa_host_core::image_files::GuestArch::Arm64,
+        }
+    }
 }
 
 const PIPE_PREFIX: &str = r"\\.\pipe\";
@@ -252,10 +260,6 @@ impl NetworkAdapter {
         })
     }
 }
-
-/// Keeps what the guest kernel sets aside at boot small, as on every host
-/// ([`dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE`] says what each setting saves).
-pub const BOOT_MEMORY_CMDLINE: &str = dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE;
 
 /// The fault cluster for fine-grained memory, as a power of two of 4 KiB pages: 64 KiB. Free
 /// page reporting may report pieces smaller than it (order 0 reports every free 4 KiB page);
@@ -479,8 +483,12 @@ impl AndroidVmConfig {
             arch.console_cmdline(),
             dsa_host_core::memory::page_reporting_cmdline(self.page_reporting_order, fault_cluster)
         );
+        // What the guest kernel sets aside at boot, kept small as on every host
+        // (`guest_boot_memory_cmdline` says what each setting saves).
         cmdline.push(' ');
-        cmdline.push_str(BOOT_MEMORY_CMDLINE);
+        cmdline.push_str(&dsa_host_core::memory::guest_boot_memory_cmdline(
+            arch.core(),
+        ));
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
             cmdline.push_str(dsa_host_core::disk::pstore::KERNEL_CMDLINE);

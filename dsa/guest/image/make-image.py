@@ -523,6 +523,12 @@ SERVICES_PROFILE_INPUT = "services_profile"
 # it to the host only while someone reads it (`dsa logcat`).
 REMOVED_INIT_SCRIPTS = ["VENDOR/etc/init/seriallogging.rc"]
 
+# update_engine, the A/B update daemon: the host updates Android by replacing the whole image
+# (its image store downloads, checks and trial-boots each one), and the system disk is read
+# only, so the daemon never has an update to apply. It started at every boot and stayed, about
+# 3.5 MiB for the guest's whole life. Its init script goes with it, so init never starts it.
+REMOVED_SYSTEM_FILES = ["SYSTEM/etc/init/update_engine.rc", "SYSTEM/bin/update_engine"]
+
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
@@ -1024,6 +1030,7 @@ def removed(name, hwcomposer=False, power=False, gnss=False, sensors=False, came
     """Whether a target_files member belongs to an app, a HAL or a service the guest must not have."""
     return (
         name in REMOVED_INIT_SCRIPTS
+        or name in REMOVED_SYSTEM_FILES
         or name in REMOVED_VENDOR_FILES
         or any(f"/{app}/" in name for app in REMOVED_APPS)
         or any(

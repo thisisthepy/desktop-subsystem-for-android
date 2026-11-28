@@ -298,6 +298,30 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for option in ["CONFIG_EROFS_FS=y", "CONFIG_F2FS_FS=y"]:
             self.assertIn(option, lines)
 
+    def test_nfr1_kernel_features_android_never_asks_for_are_left_out(self):
+        # Built in by config-wsl on both architectures, resident for the VM's life, and never
+        # used: bionic has no System V IPC or message queues, the guest never hibernates or
+        # kexecs, loads no IMA policy, starts SELinux and not AppArmor, filters with legacy
+        # iptables, has no VXLAN, AF_XDP, CD-ROM or SCSI generic users, and maps no hugetlbfs.
+        lines = fragment_lines(CONFIG)
+        for option in ["SYSVIPC", "POSIX_MQUEUE", "DEVMEM", "HIBERNATION", "KEXEC_FILE", "IMA",
+                       "SECURITY_APPARMOR", "NF_TABLES", "VXLAN", "XDP_SOCKETS", "BLK_DEV_SR",
+                       "CHR_DEV_SG", "HUGETLBFS"]:
+            self.assertIn(f"# CONFIG_{option} is not set", lines)
+        # What Android does use from the same areas stays: wake locks need suspend (not
+        # hibernation), netd needs the legacy tables, and SELinux stays first among the LSMs.
+        for option in ["CONFIG_PM_WAKELOCKS=y", "CONFIG_IP_NF_IPTABLES_LEGACY=y",
+                       "CONFIG_IP6_NF_IPTABLES_LEGACY=y", "CONFIG_IP_NF_NAT=y",
+                       "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
+            self.assertIn(option, lines)
+        self.assertNotIn("# CONFIG_SUSPEND is not set", lines)
+        self.assertNotIn("# CONFIG_TRANSPARENT_HUGEPAGE is not set", lines)
+        # Every option named here is one both architectures have, so the merged configuration
+        # of each keeps the line; the debug fragment decides none of them.
+        debug = DEBUG_CONFIG.read_text()
+        for option in ["SYSVIPC", "HIBERNATION", "KEXEC_FILE", "HUGETLBFS", "NF_TABLES"]:
+            self.assertNotIn(f"CONFIG_{option}", debug)
+
     def test_nfr1_the_kernel_is_sized_for_a_small_vm_not_any_machine(self):
         # Processor and node counts bound static cpumasks and per-node arrays in every slab
         # cache; config-wsl's 512 CPUs and 1024 nodes cost memory a 4-processor VM never uses.
@@ -535,6 +559,64 @@ class AndroidKernelConfigTests(unittest.TestCase):
                     if not line.startswith(("diff --git ", "--- a/", "+++ b/"))]
             self.assertEqual(sum(1 for line in body if line[:1] in (" ", "-")), old, hunks[at])
             self.assertEqual(sum(1 for line in body if line[:1] in (" ", "+")), new, hunks[at])
+
+    def test_nfr1_a_persistent_memory_region_maps_only_the_disk_image_it_holds(self):
+        # Hyper-V sizes every persistent memory device of a VM like the largest one, so the
+        # 370 MiB add-on disk sat in a 2422 MiB region and the guest kept page structs for all
+        # of it (32 MiB for nothing). On a read-only region the pmem driver maps only the disk
+        # image the region's GPT describes, and says in the boot log what it mapped.
+        patch = (PATCHES / "pmem-disk-image-size.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("drivers/nvdimm/pmem.c", patch)
+        self.assertIn("+static u64 pmem_disk_image_bytes(struct nd_namespace_common *ndns,", patch)
+        self.assertIn("+\t\t     test_bit(ND_REGION_READONLY, &nd_region->flags);", patch)
+        self.assertIn("-\t\tpmem->pgmap.range.end = res->end;\n"
+                      "+\t\tpmem->pgmap.range.end = res->start + pmem->size - 1;", patch)
+        # The size comes only from a GPT header whose checksum holds and whose disk ends inside
+        # the region; the mapping can only shrink, and stays a whole number of sections.
+        self.assertIn("+\tif ((crc32_le(~0U, sector, header_size) ^ ~0U) != crc)", patch)
+        self.assertIn("+\tif (alternate < 2 || alternate >= namespace_bytes / SECTOR_SIZE)", patch)
+        self.assertIn("+\t\tu64 mapped = min_t(u64, ALIGN(image_bytes, memremap_compat_align()),", patch)
+        self.assertIn("+\tselect CRC32", patch)
+        # What the PC check reads from the console log.
+        self.assertIn('"maps %llu MiB of its %llu MiB region: the disk image its GPT describes\\n"', patch)
+        self.assertIn('"maps all %llu MiB of its region: no GPT tells the disk image\'s size\\n"', patch)
+        # It reads the read-only flag pmem-dax.patch adds, so it applies after it.
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("pmem-dax.patch"), names.index("pmem-disk-image-size.patch"))
+        self.assert_hunks_count_their_lines("pmem-disk-image-size.patch")
+
+    def assert_hunks_count_their_lines(self, name):
+        text = (PATCHES / name).read_text().replace("\r\n", "\n")
+        hunks = re.split(r"(?m)^(@@ -\d+,(\d+) \+\d+,(\d+) @@.*)$", text)
+        self.assertGreater(len(hunks), 1, name)
+        for at in range(1, len(hunks), 4):
+            old, new = int(hunks[at + 1]), int(hunks[at + 2])
+            body = [line for line in hunks[at + 3].strip("\n").split("\n")
+                    if not line.startswith(("diff --git ", "--- a/", "+++ b/"))]
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "-")), old,
+                             f"{name}: {hunks[at]}")
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "+")), new,
+                             f"{name}: {hunks[at]}")
+
+    def test_nfr1_the_network_adapter_keeps_a_desktop_sized_receive_buffer(self):
+        # hv_netvsc's receive buffer is guest memory (vmalloc) for as long as the adapter
+        # exists. Upstream's 16 MiB is a server's; a desktop VM behind the host's NAT keeps 4.
+        patch = (PATCHES / "hv-netvsc-desktop-buffers.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("-#define NETVSC_RECEIVE_BUFFER_DEFAULT\t\t(1024 * 1024 * 16)\n", patch)
+        self.assertIn("+#define NETVSC_RECEIVE_BUFFER_DEFAULT\t\t(1024 * 1024 * 4)\n", patch)
+        # The command line can give a new adapter another size (hv_netvsc.recv_buffer_kb), so
+        # throughput can be compared without another kernel; it stays within the host's limits.
+        self.assertIn("+module_param(recv_buffer_kb, uint, 0444);", patch)
+        self.assertIn("+\t\tdev_info->recv_sections = netvsc_default_rx_sections();", patch)
+        self.assertIn("+\treturn clamp_t(u64, sections, NETVSC_MIN_RX_SECTIONS,", patch)
+        # The boot log says what the adapter holds, for the measurement.
+        self.assertIn('+\tnetdev_info(ndev, "receive buffer %u KiB (%u sections of %u bytes), '
+                      'send buffer %u KiB (%u sections of %u bytes), ring %u KiB each way for '
+                      'each channel\\n",', patch)
+        # The send buffer keeps upstream's 1 MiB: the patch does not touch it.
+        self.assertNotIn("NETVSC_SEND_BUFFER_DEFAULT\t\t(1024 * 1024 *", patch)
+        self.assertIn("CONFIG_HYPERV_NET=y", fragment_lines(CONFIG))
+        self.assert_hunks_count_their_lines("hv-netvsc-desktop-buffers.patch")
 
     def test_fr1_binder_device_nodes_are_created_for_android_init(self):
         config = CONFIG.read_text()
