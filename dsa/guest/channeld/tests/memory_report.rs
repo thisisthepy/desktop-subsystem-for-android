@@ -132,13 +132,17 @@ fn nfr1_the_report_has_every_part_between_begin_and_end_and_says_what_it_could_n
         cgroup_stat: Some("nr_descendants 212\nnr_dying_descendants 37\n".into()),
         bufio_bytes: Some("41943040\n".into()),
         allocinfo: None,
+        slab_reclaim: Vec::new(),
     });
     assert_eq!(lines.first().map(String::as_str), Some("begin"));
     assert_eq!(lines.last().map(String::as_str), Some("end"));
     assert!(lines.contains(&"meminfo SUnreclaim 102400".to_string()));
     assert!(lines.contains(&"meminfo KernelStack 21552".to_string()));
     assert!(lines.iter().any(|l| l.starts_with("slab-total 3 ")));
-    assert!(lines.contains(&"slab task_struct 14944 1350 1400 9984".to_string()));
+    // Objects per slab and pages per slab follow; whether the cache is reclaimable is unknown
+    // when /sys/kernel/slab could not be read, and the report says so once.
+    assert!(lines.contains(&"slab task_struct 14944 1350 1400 9984 3 8 unknown".to_string()));
+    assert!(lines.iter().any(|l| l.starts_with("missing slab-reclaim ")));
     assert!(lines.contains(&"cgroups 212 37".to_string()));
     assert!(lines.contains(&"bufio 41943040".to_string()));
     assert!(lines.iter().any(|l| l.starts_with("missing vmalloc ")));
@@ -152,6 +156,69 @@ fn nfr1_the_report_has_every_part_between_begin_and_end_and_says_what_it_could_n
     assert!(without.iter().any(|l| l.starts_with("missing slab ")));
     // Every line is one record of the kernel log.
     assert!(lines.iter().all(|l| !l.contains('\n') && l.len() < 900));
+}
+
+/// Three caches of the dev.39 snapshot taken 10 minutes after a boot with no app open
+/// (`android/kernel-memory-report.txt`), in `/proc/slabinfo`'s own format: task_struct and
+/// kmalloc-4k in order 3 slabs of 8 objects, radix_tree_node in order 2 slabs of 28.
+const DEV39_SLABINFO: &str = "slabinfo - version: 2.1\n\
+# name            <active_objs> <num_objs> <objsize> <objperslab> <pagesperslab> : tunables <limit> <batchcount> <sharedfactor> : slabdata <active_slabs> <num_slabs> <sharedavail>\n\
+radix_tree_node     6591  11592    584   28    4 : tunables    0    0    0 : slabdata    414    414      0\n\
+task_struct          867   1360   4032    8    8 : tunables    0    0    0 : slabdata    170    170      0\n\
+kmalloc-4k           685   1320   4096    8    8 : tunables    0    0    0 : slabdata    165    165      0\n";
+
+#[test]
+fn nfr1_the_report_splits_the_slab_into_reclaimable_and_unreclaimable_caches() {
+    // The dev.39 report listed only the 40 largest caches and could not say which of them made
+    // up SUnreclaim (81 MiB with no app open): /proc/slabinfo has no reclaim flag. The flag is
+    // each cache's /sys/kernel/slab/<cache>/reclaim_account.
+    let caches = slab_caches(DEV39_SLABINFO);
+    let task = caches.iter().find(|c| c.name == "task_struct").unwrap();
+    assert_eq!(task.kib, 5440);
+    assert_eq!((task.objects_per_slab, task.pages_per_slab), (8, 8));
+    let lines = report(&Sources {
+        slabinfo: Some(DEV39_SLABINFO.into()),
+        slab_reclaim: vec![
+            ("radix_tree_node".into(), true),
+            ("task_struct".into(), false),
+            ("kmalloc-4k".into(), false),
+        ],
+        ..Sources::default()
+    });
+    assert!(
+        lines.contains(&"slab radix_tree_node 6624 6591 11592 584 28 4 reclaimable".to_string()),
+        "{lines:?}"
+    );
+    assert!(lines.contains(&"slab task_struct 5440 867 1360 4032 8 8 unreclaimable".to_string()));
+    assert!(lines.contains(&"slab kmalloc-4k 5280 685 1320 4096 8 8 unreclaimable".to_string()));
+    // The unreclaimable caches' sum, and what their slabs hold beyond the objects in use:
+    // 5440 - 867 * 4032 / 1024 and 5280 - 685 * 4096 / 1024.
+    assert!(
+        lines.contains(&"slab-unreclaimable 2 10720 4567".to_string()),
+        "{lines:?}"
+    );
+    assert!(!lines.iter().any(|l| l.starts_with("missing slab-reclaim ")));
+}
+
+#[test]
+fn nfr1_the_report_lists_every_slab_cache_not_only_the_largest() {
+    // dev.39 had 199 caches and the report named 40 of them; the other 159 held 9 MiB that no
+    // line explained. Every cache now has its line, largest first.
+    let mut slabinfo = String::from("slabinfo - version: 2.1\n");
+    for i in 0..60 {
+        slabinfo.push_str(&format!(
+            "cache-{i:02}   10   16   256   16    1 : tunables    0    0    0 : slabdata    {n}    {n}      0\n",
+            n = i + 1
+        ));
+    }
+    let lines = report(&Sources {
+        slabinfo: Some(slabinfo),
+        ..Sources::default()
+    });
+    let slabs: Vec<&String> = lines.iter().filter(|l| l.starts_with("slab ")).collect();
+    assert_eq!(slabs.len(), 60);
+    assert!(slabs[0].starts_with("slab cache-59 240 "), "{slabs:?}");
+    assert!(lines.iter().any(|l| l.starts_with("slab-total 60 ")));
 }
 
 const ALLOCINFO: &str = "allocinfo - version: 2.0\n\

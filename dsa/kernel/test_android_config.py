@@ -348,6 +348,26 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIsNotNone(default)
         self.assertLessEqual(int(default.group(1)), 64)
 
+    def test_nfr1_debugfs_creates_no_files_in_the_shipped_kernel(self):
+        # dev.39 with no app open held 2961 debugfs inodes (1904 KiB of debugfs_inode_cache,
+        # kernel-memory-report.txt) and a dentry for each, pinned for the VM's life: blk-mq's
+        # files for each of the 64 loop devices, binder's file for each process, and more. A
+        # user build mounts debugfs only while it boots (init-debug.rc) and reads nothing from
+        # it. With no access, debugfs_create_*() makes nothing and the file system is not
+        # registered; "disallow mount" would still make every file.
+        lines = fragment_lines(CONFIG)
+        self.assertIn("CONFIG_DEBUG_FS_ALLOW_NONE=y", lines)
+        self.assertIn("# CONFIG_DEBUG_FS_ALLOW_ALL is not set", lines)
+        self.assertNotIn("# CONFIG_DEBUG_FS is not set", lines)
+        for shipped in [ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
+            self.assertNotIn("DEBUG_FS_ALLOW", shipped.read_text(), shipped.name)
+        # Android's tracing reads tracefs at /sys/kernel/tracing, which does not need debugfs.
+        self.assertNotIn("# CONFIG_FTRACE is not set", lines)
+        # The debug kernel reads /sys/kernel/debug/page_owner, so it turns debugfs back on.
+        debug = fragment_lines(DEBUG_CONFIG)
+        self.assertIn("CONFIG_DEBUG_FS_ALLOW_ALL=y", debug)
+        self.assertIn("# CONFIG_DEBUG_FS_ALLOW_NONE is not set", debug)
+
     def test_nfr1_allocation_profiling_is_opt_in_and_the_report_can_read_it(self):
         profile = fragment_lines(PROFILE_CONFIG)
         self.assertIn("CONFIG_MEM_ALLOC_PROFILING=y", profile)

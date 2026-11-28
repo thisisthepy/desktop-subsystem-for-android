@@ -299,6 +299,9 @@
 (allow dsa_memory_report cgroup_v2 (file (read open getattr)))
 (allow dsa_memory_report sysfs (dir (search)))
 (allow dsa_memory_report sysfs (file (read open getattr)))
+; Each slab cache's reclaim_account under /sys/kernel/slab, so the report can say which caches
+; make up SUnreclaim. A merged cache's name there is a link to the directory its group shares.
+(allow dsa_memory_report sysfs (lnk_file (read getattr)))
 ; /proc/<pid>/io of every process, for what the processes that read and wrote the most did. The
 ; file is its owner's alone (0400), so root reads another user's with dac_read_search, and the
 ; kernel checks the read as a ptrace read of the process (sys_ptrace, then the file read on the

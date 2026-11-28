@@ -64,6 +64,11 @@ disk image the region holds: the GPT at its start says where the image ends (its
 is the last sector), and the mapping is rounded up to the 2 MiB the kernel maps persistent
 memory in. A region without a valid GPT is mapped whole, as before. The console log says which
 it did, per namespace: `maps 370 MiB of its 2422 MiB region: the disk image its GPT describes`.
+The system disk fills its region, so its page structs (about 38 MiB for 2.4 GiB) stay: fsdax
+in this kernel needs a page struct for every page it may map, and builds compound pages in
+them as it maps, so they can neither be left out nor shared. Keeping them on the device instead
+(a pfn info block, `map=dev`) would have the kernel write them into the image, which the host
+maps read only and every VM shares.
 
 Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
 seconds before each pass, and again after each pass that used up its budget, so a large
@@ -184,8 +189,9 @@ in probe order, which changes when the host attaches another disk.
   machine: room for 512 processors and 1024 NUMA nodes (`CONFIG_NR_CPUS=64`, no NUMA; the VM
   has 4 processors by default and one node), unmerged slab caches and per-CPU partial slab
   lists, the function tracer's per-function records, the virtual terminals and the
-  framebuffer layer (with which vkms also kept an fbdev buffer nobody draws), and, on arm64,
-  KVM. It also leaves out built-in features Android's userspace never asks for: System V IPC
+  framebuffer layer (with which vkms also kept an fbdev buffer nobody draws), debugfs's files
+  (`CONFIG_DEBUG_FS_ALLOW_NONE`: the kernel makes none, and a user build reads none; the debug
+  kernel turns them back on for `page_owner`), and, on arm64, KVM. It also leaves out built-in features Android's userspace never asks for: System V IPC
   and POSIX message queues (bionic has neither), `/dev/mem`, hibernation, kexec, IMA,
   AppArmor (SELinux is the one major security module), nftables (netd uses the legacy
   iptables tables), VXLAN, AF_XDP, the SCSI CD-ROM and generic SCSI drivers, and hugetlbfs

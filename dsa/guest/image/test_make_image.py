@@ -176,6 +176,13 @@ class ImageLayoutTests(unittest.TestCase):
                 ("sysfs", "dir"),
                 ("sysfs", "file"),
             ],
+            # Each slab cache's reclaim_account. A merged cache's entry is a link to its
+            # group's directory, so the link is read too.
+            "/sys/kernel/slab": [
+                ("sysfs", "dir"),
+                ("sysfs", "file"),
+                ("sysfs", "lnk_file"),
+            ],
         },
     }
     # The modes init runs the same binary in, each in a domain of its own.
