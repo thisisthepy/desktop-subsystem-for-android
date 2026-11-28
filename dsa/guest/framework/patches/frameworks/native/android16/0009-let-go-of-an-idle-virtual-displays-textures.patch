@@ -1,0 +1,94 @@
+Subject: SurfaceFlinger: let go of an idle virtual display's textures
+
+The DSA agent draws each desktop widget in a window on a virtual display of the widget's size,
+whose consumer is an ImageReader in the agent. SurfaceFlinger composes into the reader's buffers
+and keeps a texture for each of the last two (RenderSurface's texture cache) for as long as the
+display exists. A DSA build showed 11 such buffers held by SurfaceFlinger alone for three widget
+displays (580x337 2, 459x337 4, 604x278 5), 8.5 MiB, and the agent cannot free a buffer
+SurfaceFlinger still holds.
+
+When nothing has been composed into a virtual display for a second, RenderSurface now lets go of
+the textures it keeps for the display's buffers, as 0004 does for the client target of a
+physical display. The consumer then frees the buffers it holds no image of (the agent calls
+ImageReader.discardFreeBuffers when its widget is idle, which also makes SurfaceFlinger's
+producer forget them), and RenderEngine lets go of the GPU import (0008). The next frame
+composed into the display imports its buffer again. It logs one line each time:
+
+  <display>: nothing composed into the virtual display for N ms; the K textures of its buffers
+  are let go of
+
+The check runs when SurfaceFlinger presents a frame, as 0004's does. A display that composes
+continuously (screen recording, casting) dequeues a buffer each frame and is never idle that
+long, so it keeps its textures.
+
+Applies to frameworks/native at fcbde2bcff56ca1d7bec9cabf8bdca5e288bf103 (Android 16), after 0008.
+---
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/RenderSurface.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/RenderSurface.h
+index 202145e..c68f7a7 100644
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/RenderSurface.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/RenderSurface.h
+@@ -19,6 +19,7 @@
+ #include <android-base/unique_fd.h>
+ #include <compositionengine/RenderSurface.h>
+ #include <utils/StrongPointer.h>
++#include <utils/Timers.h>
+ 
+ #include <memory>
+ #include <vector>
+@@ -86,6 +87,15 @@ private:
+     ui::Size mSize;
+     const size_t mMaxTextureCacheSize;
+     bool mProtected{false};
++
++    // How long after the last frame composed into a virtual display the textures kept for its
++    // buffers are let go of: a second, as for the client target of a physical display. Each holds
++    // a buffer of the display's consumer, which the consumer can then free. A virtual display
++    // that shows something drawn rarely (a widget, a presentation) composes once a change and
++    // otherwise holds nothing; the next frame imports its buffer again.
++    static constexpr nsecs_t kReleaseIdleVirtualTexturesAfter = 1'000'000'000; // 1 s
++    // When a buffer was last dequeued to compose into (systemTime), 0 for none yet.
++    nsecs_t mLastClientCompositionTime = 0;
+ };
+ 
+ std::unique_ptr<compositionengine::RenderSurface> createRenderSurface(
+diff --git a/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp b/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp
+index 6d5b759..163c8a5 100644
+--- a/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp
++++ b/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp
+@@ -33,6 +33,9 @@
+ #include <system/window.h>
+ #include <ui/GraphicBuffer.h>
+ #include <ui/Rect.h>
++#include <utils/Timers.h>
++
++#include <cinttypes>
+ 
+ // TODO(b/129481165): remove the #pragma below and fix conversion issues
+ #pragma clang diagnostic push
+@@ -167,6 +170,7 @@ std::shared_ptr<renderengine::ExternalTexture> RenderSurface::dequeueBuffer(
+              mTexture->getBuffer()->getNativeBuffer()->handle);
+ 
+     sp<GraphicBuffer> newBuffer = GraphicBuffer::from(buffer);
++    mLastClientCompositionTime = systemTime(SYSTEM_TIME_MONOTONIC);
+ 
+     std::shared_ptr<renderengine::ExternalTexture> texture;
+ 
+@@ -253,6 +257,18 @@ void RenderSurface::onPresentDisplayCompleted() {
+         // The surface discarded its buffers; the textures kept for them are the last holders.
+         // The next client composition dequeues new buffers and makes new textures.
+         mTextureCache.clear();
++    } else if (mDisplay.isVirtual() && mTexture == nullptr && !mTextureCache.empty() &&
++               systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientCompositionTime >=
++                       kReleaseIdleVirtualTexturesAfter) {
++        // A virtual display's buffers belong to its consumer, which frees those it does not hold
++        // (an ImageReader's discardFreeBuffers); the textures kept here would hold them on. The
++        // next frame composed into the display imports its buffer again.
++        ALOGI("%s: nothing composed into the virtual display for %" PRId64
++              " ms; the %zu textures of its buffers are let go of",
++              mDisplay.getName().c_str(),
++              ns2ms(systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientCompositionTime),
++              mTextureCache.size());
++        mTextureCache.clear();
+     }
+ }
+ 

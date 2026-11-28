@@ -69,11 +69,13 @@ import android.widget.TextClock
 import android.widget.TextView
 import android.widget.ViewAnimator
 import io.github.thisisthepy.dsa.agent.Log
+import io.github.thisisthepy.dsa.agent.Scheduler
 import io.github.thisisthepy.dsa.agent.accessibility.AccessibilityExport
 import io.github.thisisthepy.dsa.agent.accessibility.NodeHandle
 import io.github.thisisthepy.dsa.agent.accessibility.NodeInfo
 import io.github.thisisthepy.dsa.agent.accessibility.RangeInfo
 import io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes
+import io.github.thisisthepy.dsa.agent.memory.IdleRelease
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.widgets.FrameGate
 import io.github.thisisthepy.dsa.agent.widgets.GpuNeed
@@ -152,6 +154,20 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
     }
     private val displays = context.getSystemService(DisplayManager::class.java)
     private val main = Handler(Looper.getMainLooper())
+
+    /** The main thread as a [Scheduler], for [IdleRelease]. */
+    private val mainScheduler = object : Scheduler {
+        override fun post(work: () -> Unit) {
+            main.post(work)
+        }
+
+        override fun postDelayed(delayMillis: Long, work: () -> Unit) {
+            main.postDelayed(work, delayMillis)
+        }
+    }
+
+    /** Whether the first discard of a widget window's free buffers was logged. Main thread only. */
+    private var loggedBufferRelease = false
     private val encoder: Handler by lazy { Handler(HandlerThread("dsa-widget-frames").apply { start() }.looper) }
     private val renderers = ConcurrentHashMap<Int, Renderer>()
 
@@ -1052,8 +1068,10 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         private val presentation: Presentation,
         private val display: VirtualDisplay,
         private val reader: ImageReader,
+        private val idleBuffers: IdleRelease,
     ) {
         fun close(log: Log, id: Int) {
+            idleBuffers.close()
             try {
                 presentation.dismiss()
             } catch (e: Exception) {
@@ -1061,6 +1079,28 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             }
             display.release()
             reader.close()
+        }
+    }
+
+    /**
+     * Gives back the buffers of a widget window's display that [reader] holds no image of. They
+     * stay with the reader between the widget's frames, and SurfaceFlinger, which composes into
+     * them, holds them as well; discarding them here makes SurfaceFlinger forget them too. The
+     * next frame allocates one again.
+     */
+    private fun discardFreeBuffers(id: Int, reader: ImageReader) {
+        try {
+            reader.discardFreeBuffers()
+        } catch (e: IllegalStateException) {
+            // The reader closed with its window.
+            return
+        }
+        if (!loggedBufferRelease) {
+            loggedBufferRelease = true
+            log.info(
+                "widget windows give back their display's free buffers once they draw nothing for " +
+                    "${WINDOW_BUFFERS_IDLE_MILLIS / 1000} s (first: widget $id)",
+            )
         }
     }
 
@@ -1073,12 +1113,21 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         var reader: ImageReader? = null
         var display: VirtualDisplay? = null
         var presentation: Presentation? = null
+        var idleBuffers: IdleRelease? = null
         return try {
-            reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2).also {
-                // The window's own drawing is not used; its buffers are given straight back.
-                it.setOnImageAvailableListener({ r -> r.acquireLatestImage()?.close() }, main)
+            val opened = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            reader = opened
+            val idle = IdleRelease(mainScheduler, SystemClock::uptimeMillis, WINDOW_BUFFERS_IDLE_MILLIS) {
+                discardFreeBuffers(id, opened)
             }
-            display = displays.createVirtualDisplay("dsa-widget-$id", width, height, densityDpi, reader.surface, 0)
+            idleBuffers = idle
+            // The window's own drawing is not used; its buffers are given straight back, and the
+            // free ones once the widget draws nothing for a while.
+            opened.setOnImageAvailableListener({ r ->
+                r.acquireLatestImage()?.close()
+                idle.used()
+            }, main)
+            display = displays.createVirtualDisplay("dsa-widget-$id", width, height, densityDpi, opened.surface, 0)
                 ?: error("Android made no display for the widget")
             presentation = Presentation(context, display.display)
             // A widget drawn with the GPU keeps the window it always had, whose views draw
@@ -1088,8 +1137,9 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             presentation.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             presentation.setContentView(root)
             presentation.show()
-            WidgetWindow(presentation, display, reader)
+            WidgetWindow(presentation, display, opened, idle)
         } catch (e: Exception) {
+            idleBuffers?.close()
             try {
                 presentation?.dismiss()
             } catch (ignored: Exception) {
@@ -1670,6 +1720,14 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
          * garbage collection, so the closed window's renderer is gone first.
          */
         const val GPU_RELEASE_DELAY_MILLIS = 2_000L
+
+        /**
+         * How long a widget window draws nothing before its display's free buffers are given
+         * back: longer than a clock that shows seconds waits between frames (and than the frame
+         * gate's second while the guest dozes), so such a widget keeps its buffers, while one
+         * that changes once a minute gives them back between changes.
+         */
+        const val WINDOW_BUFFERS_IDLE_MILLIS = 5_000L
 
         /** A list's edge effects, at its top and its bottom. */
         val EDGE_FIELDS = listOf("mEdgeGlowTop", "mEdgeGlowBottom")

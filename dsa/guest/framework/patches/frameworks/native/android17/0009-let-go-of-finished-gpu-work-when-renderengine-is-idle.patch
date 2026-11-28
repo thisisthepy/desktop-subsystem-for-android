@@ -1,0 +1,285 @@
+Subject: RenderEngine: let go of finished GPU work once the thread is idle
+
+SurfaceFlinger kept the buffers of a closed app after the app was gone. A DSA build measured
+22.7 MiB still held after the Clock app closed: its four window buffers, a buffer of its size
+that SurfaceFlinger made for the task snapshot taken as it closed, and one the agent held.
+
+A texture RenderEngine imports for a buffer (AutoBackendTexture) is deleted only when the last
+SkImage or SkSurface made from it goes, and Skia lets those go only once it knows the GPU work
+that used them has finished, which it learns when it submits again. Until then the texture
+keeps the buffer imported into SurfaceFlinger's GPU context and keeps a reference on the
+AHardwareBuffer, so the buffer outlives the layer, the client cache entry and the app. DSA's
+hardware composer composes every layer on the host, so RenderEngine draws only for screenshots,
+virtual displays and the odd client composition, and the next submit may be minutes away.
+
+The RenderEngine thread now waits a second after each stretch of work, and if nothing came
+meanwhile it calls RenderEngine::releaseIdleGpuResources. SkiaRenderEngine checks which GPU work
+has finished and submits once more, synchronously (SkiaGpuContext::releaseFinishedWork), which
+lets Skia drop what finished frames held and makes an OpenGL driver free what it deferred. The
+textures no cache holds any more are deleted then. When that let go of any, it logs one line:
+
+  RenderEngine idle: finished GPU work let go of N textures; M remain, K of them for buffers
+  SurfaceFlinger still holds
+
+The idle thread does nothing more after that until new work comes, so an idle desktop does not
+wake it. A thread that is busy (a frame each vsync) never waits the full second and is not
+slowed. Nothing changes after a GPU device loss: the textures go with the lost context.
+
+Applies to frameworks/native at ae266dcb706d083868578cfedce381ef44488a07 (Android 17), after 0008.
+---
+diff --git a/libs/renderengine/include/renderengine/RenderEngine.h b/libs/renderengine/include/renderengine/RenderEngine.h
+index aa78b39..46fc93c 100644
+--- a/libs/renderengine/include/renderengine/RenderEngine.h
++++ b/libs/renderengine/include/renderengine/RenderEngine.h
+@@ -338,6 +338,13 @@ protected:
+     // avoid any thread synchronization that may be required by directly calling postRenderCleanup.
+     virtual bool canSkipPostRenderCleanup() const = 0;
+ 
++    // Called on the RenderEngine thread once it has had nothing to do for a while. Lets go of the
++    // GPU work of frames that have finished, and with it of every texture only that work still
++    // held: the buffers of a layer that is gone, of a closed app or of a screenshot. The GPU
++    // backend learns that a frame finished only when it submits again, and with a hardware
++    // composer that composes every layer itself, the next frame drawn here may be long after.
++    virtual void releaseIdleGpuResources() {}
++
+     friend class impl::ExternalTexture;
+     friend class threaded::RenderEngineThreaded;
+     friend class RenderEngineTest_cleanupPostRender_cleansUpOnce_Test;
+diff --git a/libs/renderengine/skia/AutoBackendTexture.cpp b/libs/renderengine/skia/AutoBackendTexture.cpp
+index 4110579..42ce472 100644
+--- a/libs/renderengine/skia/AutoBackendTexture.cpp
++++ b/libs/renderengine/skia/AutoBackendTexture.cpp
+@@ -32,7 +32,9 @@ namespace skia {
+ 
+ AutoBackendTexture::AutoBackendTexture(std::unique_ptr<SkiaBackendTexture> backendTexture,
+                                        CleanupManager& cleanupMgr)
+-      : mCleanupMgr(cleanupMgr), mBackendTexture(std::move(backendTexture)) {}
++      : mCleanupMgr(cleanupMgr), mBackendTexture(std::move(backendTexture)) {
++    sLiveCount++;
++}
+ 
+ void AutoBackendTexture::unref(bool releaseLocalResources) {
+     if (releaseLocalResources) {
+diff --git a/libs/renderengine/skia/AutoBackendTexture.h b/libs/renderengine/skia/AutoBackendTexture.h
+index abb1c01..f7e5d44 100644
+--- a/libs/renderengine/skia/AutoBackendTexture.h
++++ b/libs/renderengine/skia/AutoBackendTexture.h
+@@ -26,6 +26,7 @@
+ #include "android-base/macros.h"
+ #include "compat/SkiaBackendTexture.h"
+ 
++#include <atomic>
+ #include <memory>
+ #include <vector>
+ 
+@@ -115,6 +116,10 @@ public:
+         AutoBackendTexture* mTexture = nullptr;
+     };
+ 
++    // How many textures exist, whether a cache or only GPU work still holds them. Each holds a
++    // buffer imported into the GPU context, so the count tells what an idle release let go of.
++    static int liveCount() { return sLiveCount.load(); }
++
+ private:
+     DISALLOW_COPY_AND_ASSIGN(AutoBackendTexture);
+ 
+@@ -124,7 +129,9 @@ private:
+                        CleanupManager& cleanupMgr);
+ 
+     // The only way to invoke dtor is with unref, when mUsageCount is 0.
+-    ~AutoBackendTexture() = default;
++    ~AutoBackendTexture() { sLiveCount--; }
++
++    static inline std::atomic<int> sLiveCount{0};
+ 
+     void ref() { mUsageCount++; }
+ 
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.cpp b/libs/renderengine/skia/SkiaRenderEngine.cpp
+index 3b16615..17a7318 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.cpp
++++ b/libs/renderengine/skia/SkiaRenderEngine.cpp
+@@ -744,6 +744,30 @@ void SkiaRenderEngine::cleanupPostRender() {
+     }
+ }
+ 
++void SkiaRenderEngine::releaseIdleGpuResources() {
++    SFTRACE_CALL();
++    std::lock_guard<std::mutex> lock(mRenderingMutex);
++    SkiaGpuContext* context = getActiveContext();
++    if (mDeviceLossPending || context == nullptr || context->isAbandonedOrDeviceLost()) {
++        // After a device loss the textures go with the lost context.
++        return;
++    }
++    const int before = AutoBackendTexture::liveCount();
++    mTextureCleanupMgr.cleanup();
++    // A texture that is no longer cached lives on while a frame that used it is not known to have
++    // finished: its buffer stays imported, and SurfaceFlinger holds it, however long ago the layer,
++    // the app or the screenshot it belonged to went. No frame is drawn while this holds
++    // mRenderingMutex, so what Skia lets go of here is deleted at once.
++    context->releaseFinishedWork();
++    mTextureCleanupMgr.cleanup();
++    const int after = AutoBackendTexture::liveCount();
++    if (after < before) {
++        ALOGI("RenderEngine idle: finished GPU work let go of %d textures; %d remain, %zu of them "
++              "for buffers SurfaceFlinger still holds",
++              before - after, after, mTextureCache.size());
++    }
++}
++
+ sk_sp<SkShader> SkiaRenderEngine::createRuntimeEffectShader(
+         const RuntimeEffectShaderParameters& parameters) {
+     SFTRACE_CALL();
+diff --git a/libs/renderengine/skia/SkiaRenderEngine.h b/libs/renderengine/skia/SkiaRenderEngine.h
+index 347e522..7efb025 100644
+--- a/libs/renderengine/skia/SkiaRenderEngine.h
++++ b/libs/renderengine/skia/SkiaRenderEngine.h
+@@ -192,6 +192,7 @@ private:
+                                   bool isRenderable) override final;
+     void unmapExternalTextureBuffer(sp<GraphicBuffer>&& buffer) override final;
+     bool canSkipPostRenderCleanup() const override final;
++    void releaseIdleGpuResources() override final;
+ 
+     // Before each use of the GPU: finds a device loss, drops what the lost context made, and
+     // builds the context again when the recovery says to. False while there is no context to
+diff --git a/libs/renderengine/skia/compat/GaneshGpuContext.cpp b/libs/renderengine/skia/compat/GaneshGpuContext.cpp
+index d163a14..aa76852 100644
+--- a/libs/renderengine/skia/compat/GaneshGpuContext.cpp
++++ b/libs/renderengine/skia/compat/GaneshGpuContext.cpp
+@@ -119,6 +119,15 @@ void GaneshGpuContext::purgeResourcesNotUsedIn(std::chrono::milliseconds duratio
+     mGrContext->performDeferredCleanup(duration);
+ }
+ 
++void GaneshGpuContext::releaseFinishedWork() {
++    SFTRACE_CALL();
++    // Recycles the command buffers of frames that have finished, which drops their refs on the
++    // textures those frames used. The synchronous submit makes an OpenGL driver free what it
++    // deferred until its next submission.
++    mGrContext->checkAsyncWorkCompletion();
++    mGrContext->flushAndSubmit(GrSyncCpu::kYes);
++}
++
+ void GaneshGpuContext::resetContextIfApplicable() {
+     mGrContext->resetContext(); // Only applicable to GL
+ };
+diff --git a/libs/renderengine/skia/compat/GaneshGpuContext.h b/libs/renderengine/skia/compat/GaneshGpuContext.h
+index 050703d..b5cdf15 100644
+--- a/libs/renderengine/skia/compat/GaneshGpuContext.h
++++ b/libs/renderengine/skia/compat/GaneshGpuContext.h
+@@ -45,6 +45,7 @@ public:
+     void setResourceCacheLimit(size_t maxResourceBytes) override;
+     void purgeUnlockedScratchResources() override;
+     void purgeResourcesNotUsedIn(std::chrono::milliseconds) override;
++    void releaseFinishedWork() override;
+     void resetContextIfApplicable() override;
+ 
+     void reportStatsForEachCache(const std::vector<ResourcePair>& resourceMap,
+diff --git a/libs/renderengine/skia/compat/GraphiteGpuContext.cpp b/libs/renderengine/skia/compat/GraphiteGpuContext.cpp
+index 6b41e29..faa266f 100644
+--- a/libs/renderengine/skia/compat/GraphiteGpuContext.cpp
++++ b/libs/renderengine/skia/compat/GraphiteGpuContext.cpp
+@@ -189,6 +189,14 @@ void GraphiteGpuContext::purgeResourcesNotUsedIn(std::chrono::milliseconds durat
+     mRecorder->performDeferredCleanup(duration);
+ }
+ 
++void GraphiteGpuContext::releaseFinishedWork() {
++    SFTRACE_CALL();
++    // Runs what waits on finished GPU work, which drops the refs that work held on the textures
++    // it used.
++    mContext->checkAsyncWorkCompletion();
++    mContext->submit(skgpu::graphite::SyncToCpu::kYes);
++}
++
+ void GraphiteGpuContext::reportStatsForEachCache(
+         const std::vector<ResourcePair>& resourceMap,
+         std::function<void(SkiaMemoryReporter& reporter, const char* label,
+diff --git a/libs/renderengine/skia/compat/GraphiteGpuContext.h b/libs/renderengine/skia/compat/GraphiteGpuContext.h
+index 88c08ff..723aeb9 100644
+--- a/libs/renderengine/skia/compat/GraphiteGpuContext.h
++++ b/libs/renderengine/skia/compat/GraphiteGpuContext.h
+@@ -48,6 +48,7 @@ public:
+     void setResourceCacheLimit(size_t maxResourceBytes) override;
+     void purgeUnlockedScratchResources() override;
+     void purgeResourcesNotUsedIn(std::chrono::milliseconds) override;
++    void releaseFinishedWork() override;
+ 
+     // No-op (only applicable to GL).
+     void resetContextIfApplicable() override {};
+diff --git a/libs/renderengine/skia/compat/SkiaGpuContext.h b/libs/renderengine/skia/compat/SkiaGpuContext.h
+index c02cef2..c814114 100644
+--- a/libs/renderengine/skia/compat/SkiaGpuContext.h
++++ b/libs/renderengine/skia/compat/SkiaGpuContext.h
+@@ -108,6 +108,13 @@ public:
+ 
+     virtual void purgeResourcesNotUsedIn(std::chrono::milliseconds) = 0;
+ 
++    /**
++     * Lets go of what GPU work that has finished still holds, waiting for the GPU first. Skia
++     * frees a texture a frame used only once it sees that frame finish, which it checks when it
++     * submits again; an OpenGL driver frees what it deferred at the same point.
++     */
++    virtual void releaseFinishedWork() = 0;
++
+     virtual constexpr RenderEngine::SkiaBackend getBackend_onlyUseForCriticalWorkarounds()
+             const = 0;
+     virtual size_t getMaxRenderTargetSize() const = 0;
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.cpp b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+index dc43bc0..8fba100 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.cpp
++++ b/libs/renderengine/threaded/RenderEngineThreaded.cpp
+@@ -114,16 +114,30 @@ void RenderEngineThreaded::threadMain(CreateInstanceFactory factory) NO_THREAD_S
+ 
+     ThreadStateCrashLogger stateLogger([this] { mRenderEngine->logStateForCrash(); });
+ 
++    // Set by any work, cleared once the thread has been idle long enough to let go of the GPU
++    // work of the frames that finished meanwhile.
++    bool idleReleaseDue = false;
++
+     // process any tasks until shutdown
+     while (mRunning) {
+         if (const auto task = getNextTask(); task) {
+             (*task)(*mRenderEngine);
++            idleReleaseDue = true;
+         }
+ 
+         std::unique_lock<std::mutex> lock(mThreadMutex);
+-        mCondition.wait(lock, [this]() REQUIRES(mThreadMutex) {
++        const auto hasWork = [this]() REQUIRES(mThreadMutex) {
+             return !mRunning || !mFunctionCalls.empty();
+-        });
++        };
++        if (idleReleaseDue && !hasWork()) {
++            if (!mCondition.wait_for(lock, kReleaseIdleGpuWorkAfter, hasWork)) {
++                lock.unlock();
++                idleReleaseDue = false;
++                mRenderEngine->releaseIdleGpuResources();
++            }
++            continue;
++        }
++        mCondition.wait(lock, hasWork);
+     }
+ 
+     // RenderEngine is only shutdown gracefully during tests / benchmarks, where cleanup tasks (e.g.
+diff --git a/libs/renderengine/threaded/RenderEngineThreaded.h b/libs/renderengine/threaded/RenderEngineThreaded.h
+index cadedbe..163fd12 100644
+--- a/libs/renderengine/threaded/RenderEngineThreaded.h
++++ b/libs/renderengine/threaded/RenderEngineThreaded.h
+@@ -17,6 +17,7 @@
+ #pragma once
+ 
+ #include <android-base/thread_annotations.h>
++#include <chrono>
+ #include <condition_variable>
+ #include <mutex>
+ #include <queue>
+@@ -105,6 +106,11 @@ private:
+     std::thread mThread GUARDED_BY(mThreadMutex);
+     std::atomic<bool> mRunning = true;
+     std::atomic<bool> mNeedsPostRenderCleanup = false;
++    // How long the thread waits with nothing to do before it lets go of the GPU work of frames
++    // that have finished (RenderEngine::releaseIdleGpuResources): a second, as long as
++    // SurfaceFlinger waits before it frees an idle client target, and far longer than a frame
++    // takes the GPU. It runs once after each stretch of work, so an idle thread stays asleep.
++    static constexpr std::chrono::milliseconds kReleaseIdleGpuWorkAfter{1000};
+ 
+     using Work = std::function<void(renderengine::RenderEngine&)>;
+     mutable std::queue<Work> mFunctionCalls GUARDED_BY(mThreadMutex);
