@@ -1461,6 +1461,44 @@ pub enum GrowthAction {
     Resize(u64),
     /// The memory added last did not reach the guest: stop growing, for the reason given.
     GiveUp(String),
+    /// The guest is short but its tasks do not wait on memory, so the VM keeps its size. Only
+    /// to be logged: the line says why, with the guest's numbers. Given at the start of a short
+    /// stretch (not twice within a minute) and every five minutes while it lasts.
+    Wait(String),
+}
+
+/// Why [`MemoryGrowth`] grew the VM, for the line the host logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrowthReason {
+    /// The guest's tasks waited on memory for 10% of the last 10 seconds or more.
+    Stalled,
+    /// The guest had less than `floor_mb` available: it is nearly out.
+    NearlyOut { floor_mb: u64 },
+    /// The guest was short, with its tasks waiting on memory 5% of the time or more, on every
+    /// report for `secs` seconds.
+    Sustained { secs: u64 },
+}
+
+impl std::fmt::Display for GrowthReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GrowthReason::Stalled => write!(
+                f,
+                "its tasks waited on memory {GROW_STALL_PERCENT:.0}% of the time or more"
+            ),
+            GrowthReason::NearlyOut { floor_mb } => {
+                write!(
+                    f,
+                    "it is nearly out of memory, under {floor_mb} MiB available"
+                )
+            }
+            GrowthReason::Sustained { secs } => write!(
+                f,
+                "it stayed short with its tasks waiting on memory {STRAIN_STALL_PERCENT:.0}% of \
+                 the time or more for {secs} s"
+            ),
+        }
+    }
 }
 
 /// Grows the VM's memory when the guest runs short and gives it back when the guest no longer
@@ -1471,14 +1509,24 @@ pub enum GrowthAction {
 /// while running costs that only for memory actually added, and the guest still has no fixed
 /// ceiling below the maximum.
 ///
-/// - Grow when the guest's available memory falls under a fifth of its total (at least
-///   512 MiB), or when its tasks stall on memory for 10% of the time: to what it uses plus
-///   [`headroom_mb`], the same size a shrink would leave, and by at least
-///   512 MiB, up to the maximum, at most every 5 seconds. Memory added once costs the guest its
-///   page records (about 1.6% of it) for as long as it runs, even after it has been ballooned
-///   back to the host, so the VM grows only as far as the guest needs: a step of half the
-///   current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where 3072 MiB
-///   was enough.
+/// - Grow only for a need that reclaim and zram do not absorb. Memory added once costs the
+///   guest its page records (16 MiB a GiB) for as long as it runs, even after it has been
+///   ballooned back to the host: Hyper-V has no hot-remove, and the balloon takes single pages,
+///   not whole blocks the guest could take offline. So the VM grows when the guest's tasks
+///   stall on memory for 10% of the time, when it is nearly out (available under a sixteenth
+///   of its total, at least 128 MiB), or when it stays short (available under a fifth of its
+///   total, at least 512 MiB) with its tasks stalled 5% of the time or more on every report for
+///   30 seconds. Short without stalls is not a need: the kernel takes page cache and moves cold
+///   app memory to zram, and its tasks do not wait for it. Android's boot is that: the
+///   framework raises the kernel's free memory watermarks for its display (192 MiB for a
+///   4096x4096 one, twice over for the high watermark the available count leaves out), which
+///   alone took about 390 MiB off the available memory of a 1.5 GiB guest at second 30 with
+///   nothing stalled, and the VM grew 1536 MiB in its first 45 seconds for an Android that used
+///   under 500 MiB ten minutes later.
+/// - A growth goes to what the guest uses plus [`headroom_mb`], the same size a shrink would
+///   leave, and by at least 512 MiB, up to the maximum, at most every 5 seconds: a step of
+///   half the current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where
+///   3072 MiB was enough.
 /// - Shrink on the first report that finds the guest not short, once 5 seconds have passed
 ///   since the last change: to what it uses plus [`headroom_mb`], never below the base. Memory
 ///   the guest no longer needs goes back at once; the headroom, and growing and shrinking to
@@ -1511,12 +1559,37 @@ pub struct MemoryGrowth {
     /// Resizes that failed in a row, and when the next may be tried.
     failures: u32,
     retry_at: Option<Instant>,
+    /// Since when every report has found the guest short with its tasks stalled
+    /// [`STRAIN_STALL_PERCENT`] or more, and when the last report came.
+    strained_since: Option<Instant>,
+    last_report: Option<Instant>,
+    /// Why the last growth was asked for.
+    last_reason: Option<GrowthReason>,
+    /// Whether the last report found the guest short, and when a [`GrowthAction::Wait`] was
+    /// last given.
+    holding: bool,
+    told_wait: Option<Instant>,
 }
 
 /// Memory is added and removed in steps of this, in MiB, the guest's memory block size.
 const GROWTH_GRANULE_MB: u64 = 128;
 /// The least one growth adds, in MiB: a guest short of memory gets at least this much more.
 const GROW_STEP_MIN_MB: u64 = 512;
+/// Tasks stalled on memory this share of the last 10 s or more grow the VM at once.
+const GROW_STALL_PERCENT: f64 = 10.0;
+/// The stall at which the guest's own daemon counts itself under pressure; held this long
+/// ([`STRAIN_SUSTAIN`]) while the guest is short, it grows the VM.
+const STRAIN_STALL_PERCENT: f64 = 5.0;
+const STRAIN_SUSTAIN: Duration = Duration::from_secs(30);
+/// A short guest reports every 2 s; a longer silence starts the count of [`STRAIN_SUSTAIN`]
+/// again, since nothing is known of the time between.
+const STRAIN_REPORT_GAP: Duration = Duration::from_secs(10);
+/// Available memory under a sixteenth of the guest's total, and at least this, is nearly out.
+const NEARLY_OUT_MIN_MB: u64 = 128;
+/// A [`GrowthAction::Wait`] is given at most once a minute at the start of a short stretch,
+/// and again every five minutes while the stretch lasts.
+const WAIT_TELL_STRETCH: Duration = Duration::from_secs(60);
+const WAIT_TELL_REPEAT: Duration = Duration::from_secs(5 * 60);
 const GROW_COOLDOWN: Duration = Duration::from_secs(5);
 const SHRINK_COOLDOWN: Duration = Duration::from_secs(5);
 const HOT_ADD_DEADLINE: Duration = Duration::from_secs(30);
@@ -1553,7 +1626,17 @@ impl MemoryGrowth {
             shrink_goal_mb: None,
             failures: 0,
             retry_at: None,
+            strained_since: None,
+            last_report: None,
+            last_reason: None,
+            holding: false,
+            told_wait: None,
         }
+    }
+
+    /// Why the last growth asked for was asked for; `None` before any.
+    pub fn last_reason(&self) -> Option<GrowthReason> {
+        self.last_reason
     }
 
     /// The size the VM was last set to, in MiB.
@@ -1594,12 +1677,43 @@ impl MemoryGrowth {
             }
         }
         let available_mb = p.mem_available_kb / 1024;
-        let short = available_mb < (total_mb / 5).max(512) || p.stall_percent >= 10.0;
+        let short = available_mb < (total_mb / 5).max(512);
+        let stalled = p.stall_percent >= GROW_STALL_PERCENT;
+        let nearly_out_mb = (total_mb / 16).max(NEARLY_OUT_MIN_MB);
+        // Short and stalling on every report, without a silence between them: how long for.
+        let silent = self
+            .last_report
+            .is_some_and(|at| now.saturating_duration_since(at) > STRAIN_REPORT_GAP);
+        self.last_report = Some(now);
+        if short && p.stall_percent >= STRAIN_STALL_PERCENT {
+            if silent || self.strained_since.is_none() {
+                self.strained_since = Some(now);
+            }
+        } else {
+            self.strained_since = None;
+        }
+        let strained_for = self
+            .strained_since
+            .map(|since| now.saturating_duration_since(since));
+        let reason = if stalled {
+            Some(GrowthReason::Stalled)
+        } else if available_mb < nearly_out_mb {
+            Some(GrowthReason::NearlyOut {
+                floor_mb: nearly_out_mb,
+            })
+        } else if strained_for.is_some_and(|d| d >= STRAIN_SUSTAIN) {
+            Some(GrowthReason::Sustained {
+                secs: STRAIN_SUSTAIN.as_secs(),
+            })
+        } else {
+            None
+        };
         let since_change = |cooldown| {
             self.last_change
                 .is_none_or(|at| now.saturating_duration_since(at) >= cooldown)
         };
-        if short {
+        if let Some(reason) = reason {
+            self.holding = true;
             if self.current_mb >= self.max_mb || !since_change(GROW_COOLDOWN) {
                 return None;
             }
@@ -1613,8 +1727,41 @@ impl MemoryGrowth {
             let target = round_up_mb(self.current_mb + step).min(self.max_mb);
             self.awaiting = Some((total_mb, now));
             self.shrink_goal_mb = None;
+            // The next growth for a sustained need waits out its own stretch.
+            self.strained_since = None;
+            self.last_reason = Some(reason);
             return Some(self.resize(target, now));
         }
+        if short {
+            // Reclaim and zram take it: the VM keeps its size, and the log says so once for
+            // the stretch and every five minutes while it lasts.
+            let new_stretch = !self.holding;
+            self.holding = true;
+            if self.current_mb >= self.max_mb {
+                return None;
+            }
+            let since_told = self.told_wait.map(|at| now.saturating_duration_since(at));
+            let tell = match since_told {
+                None => true,
+                Some(d) if new_stretch => d >= WAIT_TELL_STRETCH,
+                Some(d) => d >= WAIT_TELL_REPEAT,
+            };
+            if !tell {
+                return None;
+            }
+            self.told_wait = Some(now);
+            return Some(GrowthAction::Wait(format!(
+                "memory: Android is short of memory ({available_mb} MiB available of \
+                 {total_mb} MiB, {:.1}% stalled) but its tasks hardly wait on it: reclaim and \
+                 zram take it, and the VM stays at {} MiB until they stall \
+                 {GROW_STALL_PERCENT:.0}% of the time, or {STRAIN_STALL_PERCENT:.0}% for \
+                 {} s, or under {nearly_out_mb} MiB is available",
+                p.stall_percent,
+                self.current_mb,
+                STRAIN_SUSTAIN.as_secs()
+            )));
+        }
+        self.holding = false;
         if self.current_mb <= self.base_mb
             || p.stall_percent >= 1.0
             || !since_change(SHRINK_COOLDOWN)

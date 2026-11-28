@@ -710,6 +710,8 @@ struct ResizeOutcome {
     /// The guest's memory when it was asked for, for the log.
     available_mb: u64,
     stall_percent: f64,
+    /// Why a growth was asked for, for the log; `None` for a shrink.
+    reason: Option<String>,
     result: Result<(), String>,
 }
 
@@ -6333,14 +6335,24 @@ impl Worker {
                 self.launcher.memory_growth_failed(&why);
                 return;
             }
+            Some(GrowthAction::Wait(line)) => {
+                eprintln!("{line}");
+                return;
+            }
             Some(GrowthAction::Resize(mb)) => mb,
         };
+        // A growth says why it was asked for; a shrink needs no reason.
+        let reason = (mb > before)
+            .then(|| growth.last_reason())
+            .flatten()
+            .map(|reason| reason.to_string());
         let outcome = |result| ResizeOutcome {
             generation: 0,
             before,
             mb,
             available_mb: pressure.mem_available_kb / 1024,
             stall_percent: pressure.stall_percent,
+            reason: reason.clone(),
             result,
         };
         let generation = self.memory_generation;
@@ -6381,15 +6393,22 @@ impl Worker {
             return;
         };
         let ResizeOutcome {
-            before, mb, result, ..
+            before,
+            mb,
+            result,
+            reason,
+            ..
         } = outcome;
         match result {
             Ok(()) => {
                 growth.applied();
                 self.shared.set_vm_memory_mb(Some(mb));
+                // The growth's reason after a colon, so a line that starts as before still
+                // reads as before.
+                let reason = reason.map(|why| format!(": {why}")).unwrap_or_default();
                 eprintln!(
                     "memory: Android's memory {} from {before} to {mb} MiB ({} MiB available, \
-                     {:.1}% stalled)",
+                     {:.1}% stalled){reason}",
                     if mb > before { "grows" } else { "shrinks" },
                     outcome.available_mb,
                     outcome.stall_percent

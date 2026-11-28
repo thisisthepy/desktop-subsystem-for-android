@@ -1428,16 +1428,44 @@ fn nfr2_the_guest_memory_grows_when_its_daemon_says_it_is_short() {
     session.start();
     let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
+    // Short, with its tasks waiting on memory 12% of the time.
     send_body(
         &mut agent,
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: 2900 * 1024,
             mem_available_kb: 200 * 1024,
-            stall_centipercent: 0,
+            stall_centipercent: 1200,
         }),
     );
     wait_until("the memory is grown", || {
         launcher.0.lock().unwrap().memory_sizes == vec![3712]
+    });
+}
+
+#[test]
+fn nfr2_a_guest_short_without_stalls_keeps_the_vm_at_its_size() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().memory_range = Some((1536, 29042));
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    // dev.39's first growth at boot: 435 MiB available of 1474 MiB, nothing stalled.
+    let short = |stall_centipercent| {
+        Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
+            mem_total_kb: 1474 * 1024,
+            mem_available_kb: 435 * 1024,
+            stall_centipercent,
+        })
+    };
+    send_body(&mut agent, short(0));
+    send_body(&mut agent, short(340));
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, Vec::<u64>::new());
+    // Once its tasks wait on memory, it grows.
+    send_body(&mut agent, short(1200));
+    wait_until("the memory is grown", || {
+        launcher.0.lock().unwrap().memory_sizes == vec![2048]
     });
 }
 
@@ -1449,21 +1477,22 @@ fn nfr2_memory_ballooned_back_to_the_host_is_not_counted_as_reserved_by_the_kern
     session.start();
     let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
-    let pressure = |total_mb: u64, available_mb: u64| {
+    let pressure = |total_mb: u64, available_mb: u64, stall_centipercent: u32| {
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: total_mb * 1024,
             mem_available_kb: available_mb * 1024,
-            stall_centipercent: 0,
+            stall_centipercent,
         })
     };
-    // Short: the VM grows by hot-add, to what the guest uses plus 768 MiB of headroom.
-    send_body(&mut agent, pressure(1950, 300));
+    // Short and stalling: the VM grows by hot-add, to what the guest uses plus 768 MiB of
+    // headroom.
+    send_body(&mut agent, pressure(1950, 300, 1200));
     wait_until("the memory is grown", || {
         launcher.0.lock().unwrap().memory_sizes == vec![2560]
     });
     // Calm again after the cooldown: it is ballooned back to the base.
     thread::sleep(Duration::from_millis(5100));
-    send_body(&mut agent, pressure(2600, 2200));
+    send_body(&mut agent, pressure(2600, 2200, 0));
     wait_until("the memory is given back", || {
         launcher.0.lock().unwrap().memory_sizes == vec![2560, 2048]
     });
@@ -1501,7 +1530,7 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: 2900 * 1024,
             mem_available_kb: 200 * 1024,
-            stall_centipercent: 0,
+            stall_centipercent: 1200,
         })
     };
     send_body(&mut agent, short());
@@ -1540,7 +1569,7 @@ fn nfr2_a_slow_resize_runs_beside_the_session_which_keeps_serving_and_asks_for_n
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: 2900 * 1024,
             mem_available_kb: 200 * 1024,
-            stall_centipercent: 0,
+            stall_centipercent: 1200,
         })
     };
     send_body(&mut agent, short());

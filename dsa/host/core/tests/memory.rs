@@ -34,9 +34,10 @@ fn nfr2_the_vm_grows_when_the_guest_runs_short_up_to_its_maximum() {
     let mut growth = MemoryGrowth::new(3072, 6144);
     // Plenty free: nothing to do.
     assert_eq!(growth.on_pressure(&pressure(2900, 1500, 0.0), start), None);
-    // Short: grows to what it uses (2600 MiB) plus a third again, in whole 128 MiB blocks.
+    // Short, and its tasks stall on memory: grows to what it uses (2600 MiB) plus a third
+    // again, in whole 128 MiB blocks.
     assert_eq!(
-        growth.on_pressure(&pressure(2900, 300, 0.0), start),
+        growth.on_pressure(&pressure(2900, 300, 12.0), start),
         Some(GrowthAction::Resize(3584))
     );
     growth.applied();
@@ -69,8 +70,14 @@ fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its
     );
     growth.applied();
     let t = start + Duration::from_secs(6);
-    assert_eq!(
+    // 2.7% stalled is a guest that reclaim and zram keep up with: it keeps its size.
+    assert!(!matches!(
         growth.on_pressure(&pressure(2483, 509, 2.7), t),
+        Some(GrowthAction::Resize(_))
+    ));
+    // Once its tasks wait on memory, it grows by what it needs, not by half its size.
+    assert_eq!(
+        growth.on_pressure(&pressure(2483, 509, 12.0), t),
         Some(GrowthAction::Resize(3072))
     );
     growth.applied();
@@ -80,6 +87,156 @@ fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its
         growth.on_pressure(&pressure(2995, 100, 30.0), t),
         Some(GrowthAction::Resize(3968))
     );
+}
+
+/// The guest of a 1536 MiB VM: 62 MiB of it the kernel keeps for itself from boot.
+const BOOT_TOTAL_MB: u64 = 1536 - 62;
+
+#[test]
+fn nfr2_a_boot_burst_that_reclaim_and_zram_absorb_does_not_grow_the_vm() {
+    use dsa_host_core::memory::{GrowthAction, MemoryGrowth};
+    // dev.39 on the owner's PC, no app open (check-dev39/snap/host/dsa-hostd.log): the VM
+    // started at 1536 MiB and grew three times in the first 45 s, on reports of 435 MiB
+    // available with 0.0% stalled, 257 MiB with 3.4% and 385 MiB with 2.5%. Ten minutes later
+    // Android used 487 MiB, and the 1536 MiB added kept 24 MiB of page structures for the rest
+    // of the run. Not one of those reports had tasks waiting on memory long enough to matter.
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    let reports = [(435, 0.0), (257, 3.4), (385, 2.5), (300, 4.9), (420, 0.6)];
+    let mut t = start;
+    let mut said = Vec::new();
+    for _ in 0..12 {
+        for (available, stall) in reports {
+            match growth.on_pressure(&pressure(BOOT_TOTAL_MB, available, stall), t) {
+                None => {}
+                Some(GrowthAction::Wait(line)) => said.push(line),
+                other => panic!("{available} MiB available, {stall}% stalled: {other:?}"),
+            }
+            t += Duration::from_secs(2);
+        }
+    }
+    assert_eq!(growth.current_mb(), 1536, "the VM keeps its start size");
+    // It says why it does not grow, with the numbers, once for the stretch rather than at
+    // every report.
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("435 MiB available"), "{}", said[0]);
+    assert!(said[0].contains("0.0% stalled"), "{}", said[0]);
+    assert!(said[0].contains("stays at 1536 MiB"), "{}", said[0]);
+}
+
+#[test]
+fn nfr2_a_vm_held_at_its_size_says_so_once_a_stretch_and_every_five_minutes_while_it_lasts() {
+    use dsa_host_core::memory::{GrowthAction, MemoryGrowth};
+    let start = Instant::now();
+    let at = |s: u64| start + Duration::from_secs(s);
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    let short = || pressure(BOOT_TOTAL_MB, 450, 1.0);
+    let calm = || pressure(BOOT_TOTAL_MB, 700, 0.0);
+    let waits = |action: Option<GrowthAction>| matches!(action, Some(GrowthAction::Wait(_)));
+    assert!(waits(growth.on_pressure(&short(), at(0))));
+    assert!(!waits(growth.on_pressure(&short(), at(2))));
+    // A new stretch within the minute is not said again; one after it is.
+    assert!(!waits(growth.on_pressure(&calm(), at(10))));
+    assert!(!waits(growth.on_pressure(&short(), at(20))));
+    assert!(!waits(growth.on_pressure(&calm(), at(40))));
+    assert!(waits(growth.on_pressure(&short(), at(70))));
+    // A stretch that lasts is said again every five minutes.
+    let mut said = 0;
+    for s in (72..=670).step_by(2) {
+        said += usize::from(waits(growth.on_pressure(&short(), at(s))));
+    }
+    assert_eq!(said, 2, "at 370 s and 670 s");
+}
+
+#[test]
+fn nfr2_the_vm_grows_at_once_when_the_guests_tasks_stall_on_memory() {
+    use dsa_host_core::memory::{GrowthAction, GrowthReason, MemoryGrowth};
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    // The same 435 MiB available, but tasks waited on memory 12% of the last 10 s: what it
+    // uses (1039 MiB) plus 768 MiB of headroom is under the least step, 512 MiB.
+    assert_eq!(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 435, 12.0), start),
+        Some(GrowthAction::Resize(2048))
+    );
+    assert_eq!(growth.last_reason(), Some(GrowthReason::Stalled));
+    assert!(GrowthReason::Stalled.to_string().contains("10%"));
+}
+
+#[test]
+fn nfr2_the_vm_grows_at_once_when_the_guest_is_nearly_out_of_memory() {
+    use dsa_host_core::memory::{GrowthAction, GrowthReason, MemoryGrowth};
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    // Under 128 MiB available (a sixteenth of the guest, at least 128 MiB) with nothing stalled
+    // yet: an app that is allocating fast gets the memory before lmkd ends anything.
+    assert_eq!(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 100, 0.0), start),
+        Some(GrowthAction::Resize(2176))
+    );
+    assert_eq!(
+        growth.last_reason(),
+        Some(GrowthReason::NearlyOut { floor_mb: 128 })
+    );
+    // On a larger guest the floor is a sixteenth of it.
+    let mut large = MemoryGrowth::new(4096, 29042);
+    assert!(matches!(
+        large.on_pressure(&pressure(4000, 240, 0.0), start),
+        Some(GrowthAction::Resize(_))
+    ));
+    assert_eq!(
+        large.last_reason(),
+        Some(GrowthReason::NearlyOut { floor_mb: 250 })
+    );
+}
+
+#[test]
+fn nfr2_the_vm_grows_when_the_guest_stays_short_and_stalled_for_30_seconds() {
+    use dsa_host_core::memory::{GrowthAction, GrowthReason, MemoryGrowth};
+    let start = Instant::now();
+    let at = |s: u64| start + Duration::from_secs(s);
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    let strained = || pressure(BOOT_TOTAL_MB, 400, 6.0);
+    let resized = |action: Option<GrowthAction>| matches!(action, Some(GrowthAction::Resize(_)));
+    // Short with 6% stalled, as the guest reports it every 2 s while it is short.
+    for s in (0..30).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // A report that finds it not short starts the count again.
+    assert!(!resized(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 700, 0.0), at(30))
+    ));
+    for s in (32..62).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // So does a report under 5% stalled.
+    assert!(!resized(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 400, 4.0), at(62))
+    ));
+    for s in (64..90).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // And a silence of more than 10 s, in which the guest said nothing of itself.
+    for s in (102..132).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // 30 s on end short and stalled: it grows, by what it uses plus headroom (1074 + 768 MiB,
+    // the least step 512 MiB).
+    assert_eq!(
+        growth.on_pressure(&strained(), at(132)),
+        Some(GrowthAction::Resize(2048))
+    );
+    assert_eq!(
+        growth.last_reason(),
+        Some(GrowthReason::Sustained { secs: 30 })
+    );
+    growth.applied();
+    // The next growth needs its own 30 s.
+    let grown = || pressure(2048 - 62, 450, 6.0);
+    for s in (138..162).step_by(2) {
+        assert!(!resized(growth.on_pressure(&grown(), at(s))), "{s} s");
+    }
+    assert!(resized(growth.on_pressure(&grown(), at(168))));
 }
 
 #[test]
