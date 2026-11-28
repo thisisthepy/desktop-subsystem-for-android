@@ -18,6 +18,9 @@ interface DiagnosticsSource {
     /** What the system service [service] writes when dumped with [args]; null when there is none. */
     fun dump(service: String, args: List<String>): ByteArray?
 
+    /** Every system property the agent may read, as `getprop` lists them; null when it cannot. */
+    fun properties(): ByteArray? = null
+
     companion object {
         val NONE = object : DiagnosticsSource {
             override fun dropbox(): List<DropboxEntry> = emptyList()
@@ -33,6 +36,11 @@ interface DiagnosticsSource {
  * the boot before. Each goes to the host as `DiagnosticsFile` pieces, which the control daemon
  * sends on the log port, and the part ends with `DiagnosticsDone`. Nothing is written to the
  * guest's disk; the work runs on a thread of its own, since a dump can take seconds.
+ *
+ * For the memory snapshot it adds each process's own breakdown (`dumpsys meminfo -a`: Java heap,
+ * native heap, code and other mappings) for the system server, Google Play services and the apps
+ * whose windows are shown ([MEMINFO_PROCESSES], `shownPackages`), the shown apps' graphics caches
+ * (`dumpsys gfxinfo`) and the system properties (`getprop`).
  */
 class DiagnosticsCollector(
     private val source: DiagnosticsSource,
@@ -41,6 +49,11 @@ class DiagnosticsCollector(
     private val run: (Runnable) -> Unit = { Thread(it, "dsa-diagnostics").start() },
     /** The agent's latest focus trace lines; empty when no focus moved. */
     private val focusTrace: () -> String = { "" },
+    /**
+     * The packages whose task windows are shown now. Read on the thread that hands the request
+     * in ([handle]), which owns the agent's task state.
+     */
+    private val shownPackages: () -> List<String> = { emptyList() },
 ) {
     /** Starts gathering if the frame asks for it. False for any other frame. */
     fun handle(frame: ByteArray): Boolean {
@@ -51,29 +64,70 @@ class DiagnosticsCollector(
         }
         if (envelope.bodyCase != Envelope.BodyCase.COLLECT_DIAGNOSTICS) return false
         val requestId = envelope.collectDiagnostics.requestId
-        run(Runnable { collect(requestId) })
+        val shown = try {
+            shownPackages().distinct()
+        } catch (e: Exception) {
+            log.warn("could not tell which apps are shown for the diagnostics", e)
+            emptyList()
+        }
+        run(Runnable { collect(requestId, shown) })
         return true
     }
 
-    /** Gathers and sends everything for request [requestId], then says it is done. */
-    fun collect(requestId: Int) {
-        val problems = mutableListOf<String>()
-        val summary = StringBuilder()
-        for ((service, args) in DUMPS) {
+    /**
+     * Each of [dumps] (service and arguments) under a header line, and what could not be
+     * dumped added to [problems]. Null when none gave anything.
+     */
+    private fun dumpAll(dumps: List<Pair<String, List<String>>>, problems: MutableList<String>): ByteArray? {
+        val text = StringBuilder()
+        var any = false
+        for ((service, args) in dumps) {
             val name = (listOf(service) + args).joinToString(" ")
-            summary.append("-------- dumpsys ").append(name).append('\n')
+            text.append("-------- dumpsys ").append(name).append('\n')
             try {
                 val out = source.dump(service, args)
                 if (out == null) {
                     problems += "dumpsys $name: no such service"
                 } else {
-                    summary.append(String(out, Charsets.UTF_8)).append('\n')
+                    any = true
+                    text.append(String(out, Charsets.UTF_8)).append('\n')
                 }
             } catch (e: Exception) {
                 problems += "dumpsys $name: ${e.message ?: e.javaClass.simpleName}"
             }
         }
-        sendFile(requestId, "android/dumpsys.txt", summary.toString().toByteArray(Charsets.UTF_8))
+        return if (any) text.toString().toByteArray(Charsets.UTF_8) else null
+    }
+
+    /**
+     * Gathers and sends everything for request [requestId], then says it is done. [shown] are
+     * the packages whose windows are shown, whose memory and graphics caches the archive breaks
+     * down.
+     */
+    fun collect(requestId: Int, shown: List<String> = emptyList()) {
+        val problems = mutableListOf<String>()
+        // The summary goes even when every dump failed: its headers say what was tried.
+        val summary = dumpAll(DUMPS, problems) ?: DUMPS.joinToString("") { (service, args) ->
+            "-------- dumpsys ${(listOf(service) + args).joinToString(" ")}\n"
+        }.toByteArray(Charsets.UTF_8)
+        sendFile(requestId, "android/dumpsys.txt", summary)
+        val meminfo = (MEMINFO_PROCESSES + shown).distinct().map { "meminfo" to listOf("-a", it) }
+        dumpAll(meminfo, problems)?.let { sendFile(requestId, "android/meminfo-detail.txt", it) }
+        if (shown.isNotEmpty()) {
+            dumpAll(shown.map { "gfxinfo" to listOf(it) }, problems)
+                ?.let { sendFile(requestId, "android/gfxinfo.txt", it) }
+        }
+        val properties = try {
+            source.properties()
+        } catch (e: Exception) {
+            problems += "getprop: ${e.message ?: e.javaClass.simpleName}"
+            null
+        }
+        if (properties != null) {
+            sendFile(requestId, "android/getprop.txt", properties)
+        } else if (problems.none { it.startsWith("getprop:") }) {
+            problems += "getprop: could not be read"
+        }
         val trace = focusTrace()
         if (trace.isNotEmpty()) sendFile(requestId, "android/focus-trace.txt", trace.toByteArray(Charsets.UTF_8))
         try {
@@ -142,6 +196,17 @@ class DiagnosticsCollector(
             "power" to emptyList(),
             "deviceidle" to emptyList(),
             "SurfaceFlinger" to emptyList(),
+        )
+
+        /**
+         * The processes whose memory the snapshot always breaks down (`dumpsys meminfo -a`),
+         * besides the shown apps: the system server (its process name is "system") and Google
+         * Play services' two resident processes, the largest the guest has while idle.
+         */
+        val MEMINFO_PROCESSES: List<String> = listOf(
+            "system",
+            "com.google.android.gms",
+            "com.google.android.gms.persistent",
         )
 
         /**

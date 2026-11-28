@@ -25,6 +25,11 @@
 //! memory) and its committed memory by owner (`committed`), so a log shows where the window
 //! manager's memory goes. The graphics renderer runs in its own process (`dsa-gfx`): it is asked
 //! to give back what it does not use at the same moment, and its own line says what it holds.
+//! A last line puts what Windows' GPU counters say both processes use (shared and dedicated GPU
+//! memory, [`gpu_counters`]) beside their private commit, which may leave GPU-only allocations
+//! out.
+//!
+//! [`gpu_counters`]: super::gpu_counters
 //!
 //! Once Android has stopped (not dozing: [`SharedPresence`] says when), the window manager
 //! holds nothing for it: the renderer process has ended, and the Direct3D device the task
@@ -51,8 +56,10 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::android_presence::SharedPresence;
 use dsa_host_core::compositor::idle_device::{released_line, DeviceRelease, IdleDevice};
-use dsa_host_core::memory::{committed_line, held_line, HeldMemory, IdleTrim};
-use dsa_host_core::renderer::renderer_line;
+use dsa_host_core::memory::{
+    committed_line, gpu_process_memory_line, held_line, GpuMemoryOf, HeldMemory, IdleTrim,
+};
+use dsa_host_core::renderer::{renderer_line, RendererProcessMemory};
 use dsa_host_core::video_slots::{give_back_unused_pictures, PicturesGivenBack};
 use windows_sys::Win32::System::ProcessStatus::{
     K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
@@ -62,6 +69,7 @@ use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 use super::adapter::DisplayPresenter;
 use super::committed;
+use super::gpu_counters;
 use super::log::{note, CompositorLogger};
 use super::present::Gpu;
 
@@ -189,9 +197,38 @@ fn give_back_because(
     note(logger, &message);
     note(logger, &by_owner(&after));
     // The renderer's process gives back what it does not use too, and says what it holds.
-    if let Some(renderer) = renderer {
-        note(logger, &renderer_line(renderer.give_back().as_ref()));
+    let renderer_held = renderer.and_then(|renderer| {
+        let held = renderer.give_back();
+        note(logger, &renderer_line(held.as_ref()));
+        held
+    });
+    note(logger, &gpu_line(&after, renderer_held.as_ref()));
+}
+
+/// The log line that puts what Windows' GPU counters say this process and the renderer use
+/// beside their private commit, so a log shows whether GPU-only allocations sit outside the
+/// private totals (on an integrated GPU they are system memory either way).
+fn gpu_line(own: &HeldMemory, renderer: Option<&RendererProcessMemory>) -> String {
+    let own_pid = std::process::id();
+    let mut pids = vec![own_pid];
+    pids.extend(renderer.map(|r| r.process_id));
+    let counters = gpu_counters::gpu_process_memory(&pids);
+    let gpu = |pid: u32| counters.as_ref().and_then(|c| c.get(&pid).copied());
+    let mut processes = vec![GpuMemoryOf {
+        name: "window manager",
+        pid: own_pid,
+        private_kb: own.private_kb,
+        gpu: gpu(own_pid),
+    }];
+    if let Some(r) = renderer {
+        processes.push(GpuMemoryOf {
+            name: "graphics renderer",
+            pid: r.process_id,
+            private_kb: r.held.private_kb,
+            gpu: gpu(r.process_id),
+        });
     }
+    gpu_process_memory_line(&processes)
 }
 
 /// Gives back the GPU driver's spare memory and the default heap's free memory while windows
@@ -219,9 +256,12 @@ fn give_back_spare(
         ),
     );
     note(logger, &by_owner(&after));
-    if let Some(renderer) = renderer {
-        note(logger, &renderer_line(renderer.memory().as_ref()));
-    }
+    let renderer_held = renderer.and_then(|renderer| {
+        let held = renderer.memory();
+        note(logger, &renderer_line(held.as_ref()));
+        held
+    });
+    note(logger, &gpu_line(&after, renderer_held.as_ref()));
 }
 
 /// Lets go of what the window manager holds only for a running Android, once `presence` says

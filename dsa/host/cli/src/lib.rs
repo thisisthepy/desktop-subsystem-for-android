@@ -286,9 +286,14 @@
 //! prints), taken as the request comes in, `host/memory.txt`, the latest memory lines of the
 //! window manager, the graphics renderer and the service (`host/memory-lines.txt`), the guest
 //! control daemon's kernel log lines (`host/channeld-kernel-log.txt`), Android's
-//! `/proc/meminfo` (`android/proc-meminfo.txt`), and `dumpsys meminfo` and the SurfaceFlinger
-//! buffers (`android/dumpsys.txt`). `dsa memory snapshot -o <file.zip>` saves the same archive,
-//! for a memory report.
+//! `/proc/meminfo` (`android/proc-meminfo.txt`), `/proc/vmstat` twice ten seconds apart
+//! (`android/proc-vmstat-0s.txt`, `android/proc-vmstat-10s.txt`), the kernel memory report
+//! (`android/kernel-memory-report.txt`: slab, vmalloc by caller, threads, page tables, and what
+//! the processes that read the most read and wrote), `dumpsys meminfo` and the SurfaceFlinger
+//! buffers (`android/dumpsys.txt`), `dumpsys meminfo -a` of the system server, Google Play
+//! services and the shown apps (`android/meminfo-detail.txt`), `dumpsys gfxinfo` of the shown
+//! apps (`android/gfxinfo.txt`) and the system properties (`android/getprop.txt`).
+//! `dsa memory snapshot -o <file.zip>` saves the same archive, for a memory report.
 //!
 //! `dsa settings` shows the settings the service keeps: the GPU the window manager renders on
 //! (`render-gpu`: `display`, `integrated`, `discrete` or part of a GPU's name), whether

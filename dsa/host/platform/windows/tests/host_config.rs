@@ -27,9 +27,9 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     assert_eq!(session.stop_timeout, Duration::from_secs(30));
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
-    // Without memory_mb and without a user limit, the VM starts at its 2 GiB default.
+    // Without memory_mb and without a user limit, the VM starts at its 1.5 GiB default.
     assert_eq!(vm.memory_mb, start_mb(0));
-    assert_eq!(vm.memory_mb, 2048);
+    assert_eq!(vm.memory_mb, 1536);
     assert!([0, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document_for(GuestArch::X86_64)

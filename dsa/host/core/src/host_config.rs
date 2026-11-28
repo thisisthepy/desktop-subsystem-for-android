@@ -25,11 +25,13 @@ use crate::update::service::UpdatesConfig;
 use crate::update::store::ImageStore;
 
 /// The VM's memory when the configuration names none and the user set no limit, in MiB: what
-/// it boots with, before it grows. 2 GiB rather than 3: the guest kernel keeps 64 bytes of page
-/// records for every 4 KiB page it boots with, resident for as long as the VM runs (48 MiB for
-/// 3 GiB, 32 MiB for 2 GiB), while memory added later carries its own records inside it. A guest
-/// with Google Play grows once or twice after boot instead.
-pub const DEFAULT_MEMORY_MB: u32 = 2048;
+/// it boots with, before it grows. 1.5 GiB rather than 2 or 3: the guest kernel keeps 64 bytes
+/// of page records for every 4 KiB page it boots with, resident for as long as the VM runs
+/// (48 MiB for 3 GiB, 32 MiB for 2 GiB, 24 MiB for 1.5 GiB), and the first zram device is sized
+/// to the boot memory, so its slot table shrinks with it too. Memory added later costs its page
+/// records only once it is added. A guest with Google Play grows once or twice after boot
+/// instead, and keeps the records of what it added until the VM stops.
+pub const DEFAULT_MEMORY_MB: u32 = 1536;
 
 /// Whether "automatic" sizes the VM to the computer (its memory less what the host keeps, see
 /// [`automatic_vm_memory_mb`]) rather than [`DEFAULT_MEMORY_MB`]. Off for now: the guest

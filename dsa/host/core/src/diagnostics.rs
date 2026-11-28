@@ -275,8 +275,10 @@ pub const CHANNELD_LINES: usize = 400;
 /// the graphics renderer's periodic memory lines, the service's), and
 /// `host/channeld-kernel-log.txt`, the guest's control daemon's lines from the Android console,
 /// where its kernel log goes. Together with `host/memory.json` and the guest's
-/// `android/proc-meminfo.txt` and `android/dumpsys.txt` (meminfo, SurfaceFlinger), they are
-/// one moment's memory, so readings from different moments are never mixed.
+/// `android/proc-meminfo.txt`, `android/proc-vmstat-*.txt`, `android/kernel-memory-report.txt`,
+/// `android/dumpsys.txt` (meminfo, SurfaceFlinger), `android/meminfo-detail.txt` and
+/// `android/gfxinfo.txt`, they are one moment's memory, so readings from different moments are
+/// never mixed.
 pub fn memory_files(host_files: &[HostFile]) -> Vec<(String, Vec<u8>)> {
     let mut lines = String::new();
     let mut channeld = String::new();

@@ -1736,6 +1736,22 @@ pub struct GuestMemory {
     pub reported_total_kb: u64,
     #[prost(uint64, tag = "29")]
     pub refaulted_total_kb: u64,
+    /// The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+    /// holds, kept until one of them is written to. Cached leaves them out; those a process maps
+    /// are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+    #[prost(uint64, tag = "30")]
+    pub swap_cached_kb: u64,
+    /// The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+    /// times the page size): those of the persistent memory the guest maps directly (the disks
+    /// it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+    /// /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+    #[prost(uint64, tag = "31")]
+    pub memmap_kb: u64,
+    /// The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+    /// it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+    /// say.
+    #[prost(uint64, tag = "32")]
+    pub memmap_boot_kb: u64,
 }
 /// From the agent to the guest's control daemon, on each connection to it: the agent has
 /// subscribed and takes the host's frames. It stops at the daemon, which tells the host with

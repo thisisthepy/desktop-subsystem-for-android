@@ -16,6 +16,7 @@ private class FakeDiagnostics(
     val entries: List<DropboxEntry> = emptyList(),
     val dumps: Map<String, String> = emptyMap(),
     val failing: Set<String> = emptySet(),
+    val props: String? = null,
 ) : DiagnosticsSource {
     val asked = mutableListOf<String>()
 
@@ -26,6 +27,8 @@ private class FakeDiagnostics(
         if (service in failing) throw SecurityException("no DUMP")
         return dumps[service]?.toByteArray()
     }
+
+    override fun properties(): ByteArray? = props?.toByteArray()
 }
 
 class DiagnosticsCollectorTest {
@@ -59,6 +62,7 @@ class DiagnosticsCollectorTest {
         assertEquals(
             listOf(
                 "android/dumpsys.txt",
+                "android/meminfo-detail.txt",
                 "android/tombstones/SYSTEM_TOMBSTONE@100.txt",
                 "android/anr/data_app_anr@200.txt",
                 "android/dropbox/SYSTEM_LAST_KMSG@300.txt",
@@ -73,6 +77,58 @@ class DiagnosticsCollectorTest {
         assertEquals(7, done.diagnosticsDone.requestId)
         assertTrue(done.diagnosticsDone.error, done.diagnosticsDone.error.contains("dumpsys cpuinfo: no DUMP"))
         assertTrue(done.diagnosticsDone.error, done.diagnosticsDone.error.contains("dumpsys window windows: no such service"))
+    }
+
+    @Test
+    fun nfr1_the_memory_snapshot_breaks_down_system_server_play_services_and_the_shown_apps() {
+        // What the last diagnoses could only estimate: each process's Java heap, native heap and
+        // mappings (meminfo -a), the shown apps' HWUI caches (gfxinfo), and the properties.
+        val source = FakeDiagnostics(
+            dumps = mapOf("meminfo" to "** MEMINFO **", "gfxinfo" to "Caches:"),
+            props = "[ro.build.type]: [userdebug]\n",
+        )
+        val sent = mutableListOf<ByteArray>()
+        val collector = DiagnosticsCollector(
+            source, { sent += it }, RecordingLog(), run = { it.run() },
+            shownPackages = { listOf("com.android.settings", "com.android.deskclock", "com.android.settings") },
+        )
+        val frame = Envelope.newBuilder()
+            .setCollectDiagnostics(CollectDiagnostics.newBuilder().setRequestId(3))
+            .build()
+            .toByteArray()
+        assertTrue(collector.handle(frame))
+        for (asked in listOf(
+            "meminfo -a system",
+            "meminfo -a com.google.android.gms",
+            "meminfo -a com.google.android.gms.persistent",
+            "meminfo -a com.android.settings",
+            "meminfo -a com.android.deskclock",
+            "gfxinfo com.android.settings",
+            "gfxinfo com.android.deskclock",
+        )) {
+            assertEquals(asked, 1, source.asked.count { it == asked })
+        }
+        val files = sent.map { Envelope.parseFrom(it) }.filter { it.hasDiagnosticsFile() }.map { it.diagnosticsFile }
+        val byName = files.associate { it.name to it.data.toStringUtf8() }
+        assertTrue(byName.keys.toString(), byName.keys.containsAll(
+            listOf("android/meminfo-detail.txt", "android/gfxinfo.txt", "android/getprop.txt"),
+        ))
+        val detail = byName.getValue("android/meminfo-detail.txt")
+        assertTrue(detail, detail.contains("-------- dumpsys meminfo -a com.android.deskclock\n** MEMINFO **"))
+        assertTrue(byName.getValue("android/gfxinfo.txt").contains("-------- dumpsys gfxinfo com.android.settings\nCaches:"))
+        assertEquals("[ro.build.type]: [userdebug]\n", byName.getValue("android/getprop.txt"))
+    }
+
+    @Test
+    fun nfr1_without_shown_apps_or_properties_the_snapshot_says_what_it_could_not_gather() {
+        val sent = collect(FakeDiagnostics(dumps = mapOf("meminfo" to "x")))
+        val names = sent.filter { it.hasDiagnosticsFile() }.map { it.diagnosticsFile.name }
+        // No shown app: no gfxinfo file, but system_server and Play services still have theirs.
+        assertTrue(names.toString(), "android/meminfo-detail.txt" in names)
+        assertFalse(names.toString(), "android/gfxinfo.txt" in names)
+        assertFalse(names.toString(), "android/getprop.txt" in names)
+        val done = sent.last().diagnosticsDone
+        assertTrue(done.error, done.error.contains("getprop: could not be read"))
     }
 
     @Test

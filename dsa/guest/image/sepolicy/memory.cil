@@ -91,6 +91,11 @@
 (allow system_app sysfs_zram (file (read open getattr)))
 (allow platform_app sysfs_zram (dir (search)))
 (allow platform_app sysfs_zram (file (read open getattr)))
+;
+; And the page structures the kernel made after boot for the disks it maps in place and for
+; added memory (nr_memmap_pages in /proc/vmstat), which /proc/meminfo counts in no line.
+(allow system_app proc_vmstat (file (read open getattr)))
+(allow platform_app proc_vmstat (file (read open getattr)))
 
 ; It also reports how much memory the guest has online (the online blocks in
 ; /sys/devices/system/memory times block_size_bytes), so the host can tell memory the guest has

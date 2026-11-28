@@ -3145,6 +3145,15 @@ class GuestMemoryTests(unittest.TestCase):
                 self.assertIn(f"(allow {app} dsa_sysfs_memory (dir (search read open getattr)))", policy)
                 self.assertIn(f"(allow {app} dsa_sysfs_memory (file (read open getattr)))", policy)
 
+    def test_nfr1_the_agent_may_read_the_page_structures_the_kernel_made_after_boot(self):
+        # nr_memmap_pages in /proc/vmstat: the page structures of the disks mapped in place and
+        # of added memory, which `dsa memory` shows apart from the unaccounted rest.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            for app in ("system_app", "platform_app"):
+                self.assertIn(f"(allow {app} proc_vmstat (file (read open getattr)))", policy)
+            self.assertNotRegex(policy, r"\(allow \S+ proc_vmstat \(file \([^)]*write")
+
     def test_fr5_the_audio_hal_and_software_codecs_can_share_memory_through_memfds(self):
         # Refused, libcutils falls back to an ashmem device DSA's kernel does not have: audio
         # policy never starts, system_server retries ten times a second, and every click
@@ -3229,6 +3238,25 @@ class GuestMemoryTests(unittest.TestCase):
             for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo", "proc_allocinfo"]:
                 self.assertIn(f"(allow dsa_memory_report {kind} (file (read open getattr)))", policy)
             # It writes nothing but its log.
+            writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)
+            self.assertEqual(sorted(writes), [("kmsg_debug_device", "chr_file"), ("kmsg_device", "chr_file")])
+
+    def test_nfr1_the_host_diagnostics_get_the_kernel_memory_report_without_developer_mode(self):
+        # `dsa memory snapshot` carries the report (slab, vmalloc by caller, threads, page tables,
+        # what the processes read and wrote) whether or not developer mode is on: the daemon sets
+        # a property only it and init may set, and init runs the same read-only root report.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode().splitlines()
+            trigger = rc.index("on property:vendor.dsa.memory.report=*")
+            self.assertEqual(rc[trigger + 1], "    start dsa_memory_report")
+            contexts = archive.read(make_image.VENDOR_PROPERTY_CONTEXTS).decode()
+            self.assertIn("vendor.dsa.memory.report u:object_r:dsa_memory_prop:s0 exact int", contexts)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            setters = re.findall(r"\(allow\s+(\S+)\s+dsa_memory_prop\s+\(\s*property_service\s+\(([^)]*)\)", policy)
+            self.assertEqual({who for who, perms in setters if "set" in perms.split()},
+                             {"dsa_channeld", "vendor_init"})
+            # /proc/<pid>/io is its owner's alone: root reads it with two read-only capabilities.
+            self.assertIn("(allow dsa_memory_report self (capability (dac_read_search sys_ptrace)))", policy)
             writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)
             self.assertEqual(sorted(writes), [("kmsg_debug_device", "chr_file"), ("kmsg_device", "chr_file")])
 

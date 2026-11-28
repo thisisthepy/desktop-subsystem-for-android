@@ -1769,6 +1769,12 @@ message GuestMemory {
   // guest's online memory blocks beyond the VM's size. 0 when none, or from a service that
   // does not count it.
   uint64 ballooned_kb = 33;
+  // The swap cache, and the page structures the guest's kernel made after boot (persistent
+  // memory and hot-added memory) and at boot, in KiB, as the control channel's GuestMemory
+  // says. 0 from a guest or a service that does not count them.
+  uint64 swap_cached_kb = 34;
+  uint64 memmap_kb = 35;
+  uint64 memmap_boot_kb = 36;
 }
 
 // One host process that runs the caller's Android: its VM's memory process, the window

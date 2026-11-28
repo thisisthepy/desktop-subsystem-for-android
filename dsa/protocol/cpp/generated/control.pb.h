@@ -18253,6 +18253,9 @@ class GuestMemory final :
     kFreeReportedKbFieldNumber = 27,
     kReportedTotalKbFieldNumber = 28,
     kRefaultedTotalKbFieldNumber = 29,
+    kSwapCachedKbFieldNumber = 30,
+    kMemmapKbFieldNumber = 31,
+    kMemmapBootKbFieldNumber = 32,
     kGooglePlayProcessesFieldNumber = 24,
   };
   // repeated .dsa.control.v1.ProcessMemory top_processes = 14;
@@ -18516,6 +18519,33 @@ class GuestMemory final :
   void _internal_set_refaulted_total_kb(uint64_t value);
   public:
 
+  // uint64 swap_cached_kb = 30;
+  void clear_swap_cached_kb();
+  uint64_t swap_cached_kb() const;
+  void set_swap_cached_kb(uint64_t value);
+  private:
+  uint64_t _internal_swap_cached_kb() const;
+  void _internal_set_swap_cached_kb(uint64_t value);
+  public:
+
+  // uint64 memmap_kb = 31;
+  void clear_memmap_kb();
+  uint64_t memmap_kb() const;
+  void set_memmap_kb(uint64_t value);
+  private:
+  uint64_t _internal_memmap_kb() const;
+  void _internal_set_memmap_kb(uint64_t value);
+  public:
+
+  // uint64 memmap_boot_kb = 32;
+  void clear_memmap_boot_kb();
+  uint64_t memmap_boot_kb() const;
+  void set_memmap_boot_kb(uint64_t value);
+  private:
+  uint64_t _internal_memmap_boot_kb() const;
+  void _internal_set_memmap_boot_kb(uint64_t value);
+  public:
+
   // uint32 google_play_processes = 24;
   void clear_google_play_processes();
   uint32_t google_play_processes() const;
@@ -18561,6 +18591,9 @@ class GuestMemory final :
     uint64_t free_reported_kb_;
     uint64_t reported_total_kb_;
     uint64_t refaulted_total_kb_;
+    uint64_t swap_cached_kb_;
+    uint64_t memmap_kb_;
+    uint64_t memmap_boot_kb_;
     uint32_t google_play_processes_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -58949,6 +58982,66 @@ inline void GuestMemory::_internal_set_refaulted_total_kb(uint64_t value) {
 inline void GuestMemory::set_refaulted_total_kb(uint64_t value) {
   _internal_set_refaulted_total_kb(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.refaulted_total_kb)
+}
+
+// uint64 swap_cached_kb = 30;
+inline void GuestMemory::clear_swap_cached_kb() {
+  _impl_.swap_cached_kb_ = uint64_t{0u};
+}
+inline uint64_t GuestMemory::_internal_swap_cached_kb() const {
+  return _impl_.swap_cached_kb_;
+}
+inline uint64_t GuestMemory::swap_cached_kb() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestMemory.swap_cached_kb)
+  return _internal_swap_cached_kb();
+}
+inline void GuestMemory::_internal_set_swap_cached_kb(uint64_t value) {
+  
+  _impl_.swap_cached_kb_ = value;
+}
+inline void GuestMemory::set_swap_cached_kb(uint64_t value) {
+  _internal_set_swap_cached_kb(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.swap_cached_kb)
+}
+
+// uint64 memmap_kb = 31;
+inline void GuestMemory::clear_memmap_kb() {
+  _impl_.memmap_kb_ = uint64_t{0u};
+}
+inline uint64_t GuestMemory::_internal_memmap_kb() const {
+  return _impl_.memmap_kb_;
+}
+inline uint64_t GuestMemory::memmap_kb() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestMemory.memmap_kb)
+  return _internal_memmap_kb();
+}
+inline void GuestMemory::_internal_set_memmap_kb(uint64_t value) {
+  
+  _impl_.memmap_kb_ = value;
+}
+inline void GuestMemory::set_memmap_kb(uint64_t value) {
+  _internal_set_memmap_kb(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.memmap_kb)
+}
+
+// uint64 memmap_boot_kb = 32;
+inline void GuestMemory::clear_memmap_boot_kb() {
+  _impl_.memmap_boot_kb_ = uint64_t{0u};
+}
+inline uint64_t GuestMemory::_internal_memmap_boot_kb() const {
+  return _impl_.memmap_boot_kb_;
+}
+inline uint64_t GuestMemory::memmap_boot_kb() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestMemory.memmap_boot_kb)
+  return _internal_memmap_boot_kb();
+}
+inline void GuestMemory::_internal_set_memmap_boot_kb(uint64_t value) {
+  
+  _impl_.memmap_boot_kb_ = value;
+}
+inline void GuestMemory::set_memmap_boot_kb(uint64_t value) {
+  _internal_set_memmap_boot_kb(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.memmap_boot_kb)
 }
 
 // -------------------------------------------------------------------

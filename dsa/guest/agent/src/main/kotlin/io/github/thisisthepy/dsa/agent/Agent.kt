@@ -367,8 +367,12 @@ class Agent(
     private val settingsSync = SystemSettingsSync(systemSettings, log)
     private val deviceNameSync = DeviceNameSync(deviceName, log)
     private val focusTrace = io.github.thisisthepy.dsa.agent.accessibility.FocusTraceLog()
-    private val diagnosticsCollector =
-        DiagnosticsCollector(diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner, focusTrace::text)
+    private val diagnosticsCollector = DiagnosticsCollector(
+        diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner, focusTrace::text,
+        // The apps whose windows the host shows: their memory and graphics caches go in the
+        // memory snapshot. Read on the scheduler's thread, which hands the request in.
+        shownPackages = { reporter.reported.mapNotNull(reporter::reportedPackage) },
+    )
     private val backgroundApps = BackgroundApps(
         ownPackage,
         notifications,

@@ -1919,6 +1919,15 @@ pub struct GuestMemory {
     /// does not count it.
     #[prost(uint64, tag = "33")]
     pub ballooned_kb: u64,
+    /// The swap cache, and the page structures the guest's kernel made after boot (persistent
+    /// memory and hot-added memory) and at boot, in KiB, as the control channel's GuestMemory
+    /// says. 0 from a guest or a service that does not count them.
+    #[prost(uint64, tag = "34")]
+    pub swap_cached_kb: u64,
+    #[prost(uint64, tag = "35")]
+    pub memmap_kb: u64,
+    #[prost(uint64, tag = "36")]
+    pub memmap_boot_kb: u64,
 }
 /// One host process that runs the caller's Android: its VM's memory process, the window
 /// manager, the graphics renderer, an app window, the settings app, the service.

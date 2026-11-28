@@ -265,8 +265,13 @@ service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
 # the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
 # root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
 # read (channeld.cil), and in the readproc group, which lets it see every process under /proc.
-# Only while developer mode is on, when the shell asks: `setprop debug.dsa.memory_report 1`
-# (0 and then 1 again for another report). The memory measurement in CI asks for one.
+# It also lists what the processes that read and wrote the most did (/proc/<pid>/io, which root
+# reads for another user's process with dac_read_search and sys_ptrace, read checks only).
+# While developer mode is on, the shell may ask: `setprop debug.dsa.memory_report 1` (0 and then
+# 1 again for another report); the memory measurement in CI asks for one. The host's diagnostics
+# (`dsa memory snapshot`, `dsa logs collect`) ask too, in developer mode or not: dsa-channeld
+# sets vendor.dsa.memory.report to the time as a collection starts, which only it may set, and
+# takes the report out of the kernel's log at the collection's end.
 service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
     user root
     group root readproc
@@ -276,4 +281,7 @@ service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
     stdio_to_kmsg
 
 on property:debug.dsa.memory_report=1 && property:vendor.dsa.adb=1
+    start dsa_memory_report
+
+on property:vendor.dsa.memory.report=*
     start dsa_memory_report

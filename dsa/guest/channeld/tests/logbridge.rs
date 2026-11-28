@@ -451,6 +451,131 @@ fn fr21_pstore_records_are_cleared_once_the_host_has_them() {
     );
 }
 
+/// logd, faked per request: the kernel's buffer (`lids=7`) holds an old report, a line of
+/// something else and a fresh report; any other request gets one line.
+struct KernelLogd {
+    requests: Arc<Mutex<Vec<String>>>,
+    now: u32,
+}
+
+struct Packets(std::vec::IntoIter<Vec<u8>>);
+
+impl LogPackets for Packets {
+    fn next(&mut self, _timeout: Duration) -> Result<Option<Vec<u8>>, String> {
+        // An empty packet: logd has closed the reader, the dump is over.
+        Ok(Some(self.0.next().unwrap_or_default()))
+    }
+}
+
+impl LogSource for KernelLogd {
+    fn open(&self, request: &str) -> Result<Box<dyn LogPackets>, String> {
+        self.requests.lock().unwrap().push(request.to_string());
+        let mark = dsa_guest_channeld::memory_report::MARK;
+        let kernel = |text: &str, sec| packet(7, 4, "dsa-channeld", &format!("{mark}{text}"), sec);
+        let packets = if request.ends_with("lids=7") {
+            vec![
+                // From an hour before: the report the shell asked for then.
+                kernel("begin", self.now - 3600),
+                kernel("slab-total 1 1 1", self.now - 3600),
+                kernel("end", self.now - 3600),
+                packet(7, 4, "init", "something else", self.now),
+                kernel("begin", self.now),
+                kernel("slab-total 9 900 9", self.now),
+                kernel("end", self.now),
+            ]
+        } else {
+            vec![packet(0, 4, "Tag", "a line", self.now)]
+        };
+        Ok(Box::new(Packets(packets.into_iter())))
+    }
+}
+
+/// Files that ask for the kernel memory report as the collection starts, and make a file of
+/// the last whole one in the kernel's log at its end.
+#[derive(Default)]
+struct ReportFiles {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+impl DiagnosticFiles for ReportFiles {
+    fn files(&self) -> Vec<(String, Result<Vec<u8>, String>)> {
+        self.events.lock().unwrap().push("files".into());
+        vec![(
+            "android/proc-vmstat-0s.txt".into(),
+            Ok(b"pgpgin 1\n".to_vec()),
+        )]
+    }
+
+    fn prepare(&self) -> bool {
+        self.events.lock().unwrap().push("prepare".into());
+        true
+    }
+
+    fn kernel_log_files(&self, log: &[String]) -> Vec<(String, Result<Vec<u8>, String>)> {
+        use dsa_guest_channeld::memory_report::{last_report, REPORT_FILE};
+        self.events
+            .lock()
+            .unwrap()
+            .push(format!("kernel log of {}", log.len()));
+        vec![(
+            REPORT_FILE.into(),
+            last_report(log)
+                .map(String::into_bytes)
+                .ok_or_else(|| "no report".to_string()),
+        )]
+    }
+}
+
+#[test]
+fn nfr1_the_diagnostics_ask_for_the_kernel_memory_report_first_and_carry_it_at_the_end() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let logd = KernelLogd {
+        requests: Arc::clone(&requests),
+        now,
+    };
+    let files = ReportFiles::default();
+    let events = Arc::clone(&files.events);
+    let (mut listener, connect, _) = port();
+    let bridge = LogBridge::new(Arc::new(logd), Arc::new(files), connect, Arc::new(|| false));
+    bridge.from_host(&host(Body::CollectDiagnostics(CollectDiagnostics {
+        request_id: 12,
+    })));
+    let mut connection = listener.accept(WAIT).unwrap();
+    let mut files = Vec::new();
+    loop {
+        let frame = connection.recv(Some(WAIT)).unwrap();
+        match decode(&frame).unwrap().body {
+            Some(Body::DiagnosticsFile(file)) => files.push((file.name, file.data)),
+            Some(Body::DiagnosticsDone(_)) => break,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    // The report is asked for before the log is read, so it has the whole collection to run
+    // in; the kernel's log is read again after the other files, which take ten seconds.
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert!(requests[1].ends_with("lids=7"), "{requests:?}");
+    // Only the records from the collection's start count: the old report is not taken.
+    assert_eq!(
+        *events.lock().unwrap(),
+        ["prepare", "files", "kernel log of 4"]
+    );
+    let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "android/logcat.txt",
+            "android/proc-vmstat-0s.txt",
+            "android/kernel-memory-report.txt"
+        ]
+    );
+    assert_eq!(files[2].1, b"begin\nslab-total 9 900 9\nend\n".to_vec());
+}
+
 #[test]
 fn fr21_pstore_records_stay_when_the_host_cannot_be_reached() {
     let (logd, feed) = fake_logd();

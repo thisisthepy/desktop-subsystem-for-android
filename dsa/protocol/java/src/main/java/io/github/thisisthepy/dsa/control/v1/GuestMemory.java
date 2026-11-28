@@ -1063,6 +1063,141 @@ public  final class GuestMemory extends
     refaultedTotalKb_ = 0L;
   }
 
+  public static final int SWAP_CACHED_KB_FIELD_NUMBER = 30;
+  private long swapCachedKb_;
+  /**
+   * <pre>
+   * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+   * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+   * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 swap_cached_kb = 30;</code>
+   * @return The swapCachedKb.
+   */
+  @java.lang.Override
+  public long getSwapCachedKb() {
+    return swapCachedKb_;
+  }
+  /**
+   * <pre>
+   * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+   * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+   * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 swap_cached_kb = 30;</code>
+   * @param value The swapCachedKb to set.
+   */
+  private void setSwapCachedKb(long value) {
+    
+    swapCachedKb_ = value;
+  }
+  /**
+   * <pre>
+   * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+   * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+   * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 swap_cached_kb = 30;</code>
+   */
+  private void clearSwapCachedKb() {
+    
+    swapCachedKb_ = 0L;
+  }
+
+  public static final int MEMMAP_KB_FIELD_NUMBER = 31;
+  private long memmapKb_;
+  /**
+   * <pre>
+   * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+   * times the page size): those of the persistent memory the guest maps directly (the disks
+   * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+   * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+   * </pre>
+   *
+   * <code>uint64 memmap_kb = 31;</code>
+   * @return The memmapKb.
+   */
+  @java.lang.Override
+  public long getMemmapKb() {
+    return memmapKb_;
+  }
+  /**
+   * <pre>
+   * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+   * times the page size): those of the persistent memory the guest maps directly (the disks
+   * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+   * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+   * </pre>
+   *
+   * <code>uint64 memmap_kb = 31;</code>
+   * @param value The memmapKb to set.
+   */
+  private void setMemmapKb(long value) {
+    
+    memmapKb_ = value;
+  }
+  /**
+   * <pre>
+   * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+   * times the page size): those of the persistent memory the guest maps directly (the disks
+   * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+   * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+   * </pre>
+   *
+   * <code>uint64 memmap_kb = 31;</code>
+   */
+  private void clearMemmapKb() {
+    
+    memmapKb_ = 0L;
+  }
+
+  public static final int MEMMAP_BOOT_KB_FIELD_NUMBER = 32;
+  private long memmapBootKb_;
+  /**
+   * <pre>
+   * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+   * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+   * say.
+   * </pre>
+   *
+   * <code>uint64 memmap_boot_kb = 32;</code>
+   * @return The memmapBootKb.
+   */
+  @java.lang.Override
+  public long getMemmapBootKb() {
+    return memmapBootKb_;
+  }
+  /**
+   * <pre>
+   * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+   * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+   * say.
+   * </pre>
+   *
+   * <code>uint64 memmap_boot_kb = 32;</code>
+   * @param value The memmapBootKb to set.
+   */
+  private void setMemmapBootKb(long value) {
+    
+    memmapBootKb_ = value;
+  }
+  /**
+   * <pre>
+   * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+   * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+   * say.
+   * </pre>
+   *
+   * <code>uint64 memmap_boot_kb = 32;</code>
+   */
+  private void clearMemmapBootKb() {
+    
+    memmapBootKb_ = 0L;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.GuestMemory parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -2275,6 +2410,147 @@ public  final class GuestMemory extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+     * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+     * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+     * </pre>
+     *
+     * <code>uint64 swap_cached_kb = 30;</code>
+     * @return The swapCachedKb.
+     */
+    @java.lang.Override
+    public long getSwapCachedKb() {
+      return instance.getSwapCachedKb();
+    }
+    /**
+     * <pre>
+     * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+     * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+     * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+     * </pre>
+     *
+     * <code>uint64 swap_cached_kb = 30;</code>
+     * @param value The swapCachedKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSwapCachedKb(long value) {
+      copyOnWrite();
+      instance.setSwapCachedKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+     * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+     * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+     * </pre>
+     *
+     * <code>uint64 swap_cached_kb = 30;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearSwapCachedKb() {
+      copyOnWrite();
+      instance.clearSwapCachedKb();
+      return this;
+    }
+
+    /**
+     * <pre>
+     * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+     * times the page size): those of the persistent memory the guest maps directly (the disks
+     * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+     * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+     * </pre>
+     *
+     * <code>uint64 memmap_kb = 31;</code>
+     * @return The memmapKb.
+     */
+    @java.lang.Override
+    public long getMemmapKb() {
+      return instance.getMemmapKb();
+    }
+    /**
+     * <pre>
+     * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+     * times the page size): those of the persistent memory the guest maps directly (the disks
+     * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+     * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+     * </pre>
+     *
+     * <code>uint64 memmap_kb = 31;</code>
+     * @param value The memmapKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMemmapKb(long value) {
+      copyOnWrite();
+      instance.setMemmapKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+     * times the page size): those of the persistent memory the guest maps directly (the disks
+     * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+     * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+     * </pre>
+     *
+     * <code>uint64 memmap_kb = 31;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMemmapKb() {
+      copyOnWrite();
+      instance.clearMemmapKb();
+      return this;
+    }
+
+    /**
+     * <pre>
+     * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+     * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+     * say.
+     * </pre>
+     *
+     * <code>uint64 memmap_boot_kb = 32;</code>
+     * @return The memmapBootKb.
+     */
+    @java.lang.Override
+    public long getMemmapBootKb() {
+      return instance.getMemmapBootKb();
+    }
+    /**
+     * <pre>
+     * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+     * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+     * say.
+     * </pre>
+     *
+     * <code>uint64 memmap_boot_kb = 32;</code>
+     * @param value The memmapBootKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMemmapBootKb(long value) {
+      copyOnWrite();
+      instance.setMemmapBootKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+     * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+     * say.
+     * </pre>
+     *
+     * <code>uint64 memmap_boot_kb = 32;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMemmapBootKb() {
+      copyOnWrite();
+      instance.clearMemmapBootKb();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.GuestMemory)
   }
   @java.lang.Override
@@ -2321,13 +2597,16 @@ public  final class GuestMemory extends
             "freeReportedKb_",
             "reportedTotalKb_",
             "refaultedTotalKb_",
+            "swapCachedKb_",
+            "memmapKb_",
+            "memmapBootKb_",
           };
           java.lang.String info =
-              "\u0000\u001d\u0000\u0000\u0001\u001d\u001d\u0000\u0001\u0000\u0001\u0003\u0002\u0003" +
-              "\u0003\u0003\u0004\u0003\u0005\u0003\u0006\u0003\u0007\u0003\b\u0003\t\u0003\n\u0003" +
-              "\u000b\u0003\f\u0003\r\u0003\u000e\u001b\u000f\u0003\u0010\u0003\u0011\u0003\u0012" +
-              "\u0003\u0013\u0003\u0014\u0003\u0015\u0003\u0016\u0003\u0017\u0003\u0018\u000b\u0019" +
-              "\u0003\u001a\u0003\u001b\u0003\u001c\u0003\u001d\u0003";
+              "\u0000 \u0000\u0000\u0001  \u0000\u0001\u0000\u0001\u0003\u0002\u0003\u0003\u0003" +
+              "\u0004\u0003\u0005\u0003\u0006\u0003\u0007\u0003\b\u0003\t\u0003\n\u0003\u000b\u0003" +
+              "\f\u0003\r\u0003\u000e\u001b\u000f\u0003\u0010\u0003\u0011\u0003\u0012\u0003\u0013" +
+              "\u0003\u0014\u0003\u0015\u0003\u0016\u0003\u0017\u0003\u0018\u000b\u0019\u0003\u001a" +
+              "\u0003\u001b\u0003\u001c\u0003\u001d\u0003\u001e\u0003\u001f\u0003 \u0003";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

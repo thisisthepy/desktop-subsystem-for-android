@@ -356,6 +356,9 @@ fn report() -> control::GuestMemory {
         free_reported_kb: 2000 * MIB,
         reported_total_kb: 9000 * MIB,
         refaulted_total_kb: 300 * MIB,
+        swap_cached_kb: 6 * MIB,
+        memmap_kb: 75 * MIB,
+        memmap_boot_kb: 64 * MIB,
     }
 }
 
@@ -586,13 +589,69 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
          before compression)",
         "Google Play services: 51 MiB (15 resident, 36 compressed in zram) in 2 processes",
         "kernel and everything else 358 MiB",
-        "unreclaimable slab 60, kernel stacks 10, page tables 20, vmalloc 30, per-CPU 2",
-        "zram store 30, unaccounted (drivers, GPU and DMA buffers) 206 MiB",
-        "reserved by the kernel at boot 104 MiB of 4200 MiB given",
+        "unreclaimable slab 60, page tables 20, vmalloc 30 (kernel stacks 10 of it), per-CPU 2",
+        "zram store 30, page structures of the mapped disks and of added memory 75, swap cache 6, \
+         unaccounted (drivers, GPU and DMA buffers) 135 MiB",
+        "reserved by the kernel at boot 104 MiB of 4200 MiB given (code, page structures, \
+         swiotlb, pstore; the page structures made at boot 64 MiB)",
         "system",
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");
     }
+}
+
+#[test]
+fn nfr1_unaccounted_memory_leaves_out_what_the_kernel_names_elsewhere() {
+    // 358 MiB besides the page cache, buffers, app memory and reclaimable slab.
+    let guest = GuestMemory::from_control(report());
+    assert_eq!(guest.other_kb(), 358 * MIB);
+    // The guest kernel allocates thread stacks with vmalloc (VMAP_STACK), so VmallocUsed has
+    // KernelStack in it already: taking both away took the stacks twice. The page structures
+    // of the mapped disks and of added memory, and the swap cache, are named on lines of their
+    // own: 358 - (60 slab + 20 page tables + 30 vmalloc + 2 per-CPU + 30 zram) - 75 - 6 = 135.
+    assert_eq!(guest.unaccounted_kb(), 135 * MIB);
+
+    // A guest that does not send the page structures or the swap cache (an older agent or a
+    // kernel before 6.11): only the stacks are no longer taken twice.
+    let mut older = report();
+    older.swap_cached_kb = 0;
+    older.memmap_kb = 0;
+    older.memmap_boot_kb = 0;
+    let older = GuestMemory::from_control(older);
+    assert_eq!(older.unaccounted_kb(), 216 * MIB);
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: older,
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    assert!(text.contains("zram store 30, unaccounted"), "{text}");
+    assert!(!text.contains("page structures made at boot"), "{text}");
+
+    // A kernel whose stacks are not in vmalloc would show more stack than vmalloc: the
+    // larger of the two is what both hold, never less than the stacks.
+    let mut separate = report();
+    separate.kernel_stack_kb = 40 * MIB;
+    separate.vmalloc_used_kb = 30 * MIB;
+    assert_eq!(
+        GuestMemory::from_control(separate).unaccounted_kb(),
+        125 * MIB
+    );
+
+    // The parts cross the local API and the JSON unchanged.
+    let snapshot = snapshot();
+    let back = snapshot_from_wire(snapshot_to_wire(&snapshot));
+    let guest = &back.guest.as_ref().unwrap().memory;
+    assert_eq!(guest.swap_cached_kb, 6 * MIB);
+    assert_eq!(guest.kernel.memmap_kb, 75 * MIB);
+    assert_eq!(guest.kernel.memmap_boot_kb, 64 * MIB);
+    let json = dsa_host_core::memory::snapshot_json(&snapshot);
+    assert_eq!(json["guest"]["swap_cached_kb"], 6 * MIB);
+    assert_eq!(json["guest"]["kernel"]["memmap_kb"], 75 * MIB);
+    assert_eq!(json["guest"]["kernel"]["memmap_boot_kb"], 64 * MIB);
+    assert_eq!(json["guest"]["kernel"]["unaccounted_kb"], 135 * MIB);
 }
 
 #[test]
@@ -1165,6 +1224,55 @@ fn nfr2_the_window_managers_committed_memory_is_broken_down_by_owner() {
 }
 
 #[test]
+fn nfr1_the_gpu_counters_are_logged_beside_the_private_commit() {
+    // Both diagnoses left open whether GPU-only allocations sit outside the private totals: on
+    // an integrated GPU they are system memory either way. The line puts the GPU's own count of
+    // each process beside its private commit, so one log answers it.
+    use dsa_host_core::memory::{gpu_process_memory_line, GpuMemoryOf, GpuProcessMemory};
+    let line = gpu_process_memory_line(&[
+        GpuMemoryOf {
+            name: "window manager",
+            pid: 10,
+            private_kb: Some(53 * MIB),
+            gpu: Some(GpuProcessMemory {
+                shared_kb: 45 * MIB,
+                dedicated_kb: 0,
+            }),
+        },
+        GpuMemoryOf {
+            name: "graphics renderer",
+            pid: 20,
+            private_kb: Some(307 * MIB),
+            gpu: Some(GpuProcessMemory {
+                shared_kb: 112 * MIB,
+                dedicated_kb: 3 * MIB,
+            }),
+        },
+    ]);
+    assert_eq!(
+        line,
+        "GPU memory beside the private commit (the GPU's own counters; private commit may leave \
+         GPU-only memory out): window manager pid 10: private 53 MiB, GPU shared 45 MiB, GPU \
+         dedicated 0 MiB; graphics renderer pid 20: private 307 MiB, GPU shared 112 MiB, GPU \
+         dedicated 3 MiB"
+    );
+    // What could not be read shows as ?, and no process says so.
+    let unknown = gpu_process_memory_line(&[GpuMemoryOf {
+        name: "graphics renderer",
+        pid: 20,
+        private_kb: None,
+        gpu: None,
+    }]);
+    assert!(
+        unknown.ends_with(
+            "graphics renderer pid 20: private ? MiB, GPU shared ? MiB, GPU dedicated ? MiB"
+        ),
+        "{unknown}"
+    );
+    assert!(gpu_process_memory_line(&[]).ends_with(": no process"));
+}
+
+#[test]
 fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
     use dsa_host_core::renderer::{renderer_owners_line, Allocations, RendererOwners};
     let at = |mib: u64, count: u32| Allocations {
@@ -1364,9 +1472,11 @@ fn nfr1_the_renderers_largest_guest_devices_are_named_and_their_imports_split() 
 fn nfr2_memory_plan_matches_windows_sizing() {
     use dsa_host_core::memory::{growth_max_mb, memory_plan, start_mb, GrowthCeiling::*};
     const GIB: u64 = 1024;
-    // The VM starts at 2 GiB whatever the limit, and grows to the computer less what it keeps.
-    for limit in [0, 1024, 2048, 4096, 8192] {
-        assert_eq!(start_mb(limit), 2048, "limit {limit}");
+    // The VM starts at 1.5 GiB whatever the limit, and grows to the computer less what it
+    // keeps. A limit below the least a VM is given (2 GiB) is that least, so even then the VM
+    // can grow by half a gibibyte past its start.
+    for limit in [0, 1024, 1536, 2048, 4096, 8192] {
+        assert_eq!(start_mb(limit), 1536, "limit {limit}");
     }
     let table: [(u32, u64, Option<u64>); 15] = [
         (0, 8 * GIB, Some(6144)),
@@ -1393,8 +1503,9 @@ fn nfr2_memory_plan_matches_windows_sizing() {
         );
         // A maximum that is not above the start is no growth.
         let plan = memory_plan(None, limit, Some(total), HostLessReserve);
-        assert_eq!(plan.start_mb, 2048);
-        assert_eq!(plan.max_mb, expected.filter(|max| *max > 2048));
+        assert_eq!(plan.start_mb, 1536);
+        assert_eq!(plan.max_mb, expected.filter(|max| *max > 1536));
+        assert!(plan.max_mb.is_some(), "limit {limit}, total {total}");
     }
     // A fixed size in the configuration never grows, whatever the limit.
     let plan = memory_plan(Some(4096), 8192, Some(32 * GIB), HostLessReserve);
@@ -1409,13 +1520,13 @@ fn nfr2_half_host_ceiling_matches_macos_sizing() {
         (plan.start_mb, plan.max_mb)
     };
     // No limit: the default start, growing to half the computer's memory.
-    assert_eq!(plan(0, 16384), (2048, Some(8192)));
-    assert_eq!(plan(0, 65536), (2048, Some(32768)));
-    assert_eq!(plan(0, 8192), (2048, Some(4096)));
+    assert_eq!(plan(0, 16384), (1536, Some(8192)));
+    assert_eq!(plan(0, 65536), (1536, Some(32768)));
+    assert_eq!(plan(0, 8192), (1536, Some(4096)));
     // A limit is how far it grows, within what the computer has, even above half of it.
-    assert_eq!(plan(6144, 32768), (2048, Some(6144)));
-    assert_eq!(plan(24576, 32768), (2048, Some(24576)));
-    assert_eq!(plan(2048, 32768), (2048, None));
+    assert_eq!(plan(6144, 32768), (1536, Some(6144)));
+    assert_eq!(plan(24576, 32768), (1536, Some(24576)));
+    assert_eq!(plan(2048, 32768), (1536, Some(2048)));
     let fixed = memory_plan(Some(4096), 0, Some(65536), HalfHost);
     assert_eq!((fixed.start_mb, fixed.max_mb), (4096, None));
 }
@@ -1427,7 +1538,7 @@ fn nfr2_unreadable_memory_keeps_the_start_size() {
         assert_eq!(growth_max_mb(0, None, ceiling), None);
         assert_eq!(growth_max_mb(8192, None, ceiling), None);
         let plan = memory_plan(None, 8192, None, ceiling);
-        assert_eq!((plan.start_mb, plan.max_mb), (2048, None));
+        assert_eq!((plan.start_mb, plan.max_mb), (1536, None));
     }
 }
 

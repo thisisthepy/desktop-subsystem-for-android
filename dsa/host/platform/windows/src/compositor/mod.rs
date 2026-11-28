@@ -42,6 +42,7 @@ pub mod frames;
 pub mod gamepads;
 pub mod geocode;
 pub mod gpu;
+pub mod gpu_counters;
 pub mod graphics_notice;
 pub mod hosts;
 pub mod language;

@@ -101,14 +101,48 @@ mod daemon {
 
     impl DiagnosticFiles for Pstore {
         /// With pstore, the guest's `/proc/meminfo` as the archive is made, so the memory
-        /// snapshot has the kernel's own counts of the same moment.
+        /// snapshot has the kernel's own counts of the same moment, and `/proc/vmstat` twice,
+        /// ten seconds apart, so the page cache's churn between them can be read.
         fn files(&self) -> Vec<(String, Result<Vec<u8>, String>)> {
+            use dsa_guest_channeld::memory_report::vmstat_files;
             let mut files = files_in(std::path::Path::new(PSTORE), "android/pstore");
             files.push((
                 "android/proc-meminfo.txt".to_string(),
                 std::fs::read("/proc/meminfo").map_err(|e| format!("/proc/meminfo: {e}")),
             ));
+            files.extend(vmstat_files(
+                &|| std::fs::read("/proc/vmstat").map_err(|e| format!("/proc/vmstat: {e}")),
+                &thread::sleep,
+            ));
             files
+        }
+
+        /// Asks init for the kernel memory report (slab, vmalloc by caller, threads, page
+        /// tables, what the processes read and wrote), which root writes to the kernel's log.
+        /// Developer mode is not needed for this one: only this daemon may set the property.
+        fn prepare(&self) -> bool {
+            use dsa_guest_channeld::memory_report::SNAPSHOT_PROPERTY;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            match set_property(SNAPSHOT_PROPERTY, &now.to_string()) {
+                Ok(()) => true,
+                Err(why) => {
+                    say!("could not ask for the kernel memory report: {why}");
+                    false
+                }
+            }
+        }
+
+        /// The last whole kernel memory report in the kernel's log.
+        fn kernel_log_files(&self, log: &[String]) -> Vec<(String, Result<Vec<u8>, String>)> {
+            use dsa_guest_channeld::memory_report::{last_report, REPORT_FILE};
+            let report = last_report(log).map(String::into_bytes).ok_or_else(|| {
+                "no whole report in the kernel's log (init did not run it, or the log does \
+                 not keep the kernel's messages)"
+                    .to_string()
+            });
+            vec![(REPORT_FILE.to_string(), report)]
         }
 
         /// Unlinking a pstore file erases its record from the pstore disk. Android's init

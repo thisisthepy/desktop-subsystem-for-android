@@ -271,7 +271,8 @@
 (dontaudit dsa_dns_redirect self (capability (sys_module)))
 (dontaudit dsa_dns_redirect kernel (system (module_request)))
 ; The memory report: dsa-channeld --memory-report, which init runs as root while developer
-; mode is on and the shell asks (dsa-channeld.rc). It reads what the guest kernel's memory is
+; mode is on and the shell asks, or when the daemon asks for the host's diagnostics
+; (vendor.dsa.memory.report, dsa-channeld.rc). It reads what the guest kernel's memory is
 ; made of and writes it to the kernel log; nothing it may touch can be written. root and these
 ; reads are what /proc/slabinfo and /proc/vmallocinfo need. Every process's status and command
 ; line under /proc (each labelled with the process's own domain, at the app's own MLS level for
@@ -298,6 +299,11 @@
 (allow dsa_memory_report cgroup_v2 (file (read open getattr)))
 (allow dsa_memory_report sysfs (dir (search)))
 (allow dsa_memory_report sysfs (file (read open getattr)))
+; /proc/<pid>/io of every process, for what the processes that read and wrote the most did. The
+; file is its owner's alone (0400), so root reads another user's with dac_read_search, and the
+; kernel checks the read as a ptrace read of the process (sys_ptrace, then the file read on the
+; process's domain allowed above). Both are read checks: the domain still writes nothing.
+(allow dsa_memory_report self (capability (dac_read_search sys_ptrace)))
 
 ; The Google Services Framework Android ID, which Google's page for uncertified devices asks for.
 ; Google Play services refuse their provider to the agent, and keep the ID in their check-in
