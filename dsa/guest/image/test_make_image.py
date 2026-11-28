@@ -2644,7 +2644,8 @@ class GuestMemoryTests(unittest.TestCase):
 
     def test_nfr1_the_guest_swaps_to_zram_of_half_its_memory(self):
         fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
-        self.assertIn("/dev/block/zram0 none swap defaults zramsize=100%", fstab)
+        self.assertIn("/dev/block/zram0 none swap defaults zramsize=50%,", fstab)
+        self.assertNotIn("zramsize=100%", fstab)
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
             self.assertIn("swapon_all /vendor/etc/fstab.dsa", rc)
@@ -2659,7 +2660,7 @@ class GuestMemoryTests(unittest.TestCase):
                 archive.read("META/vendor_filesystem_config.txt").decode(),
             )
             for directory in make_image.FSTAB_DIRS:
-                self.assertIn(b"zramsize=100%", archive.read(directory + "fstab.dsa"))
+                self.assertIn(b"zramsize=50%,", archive.read(directory + "fstab.dsa"))
 
     def test_nfr1_the_idle_reclaim_compresses_what_stays_in_zram_again_with_zstd(self):
         # LZ4 for every swap, zstd for what stays cold: zstd must be named before swapon_all

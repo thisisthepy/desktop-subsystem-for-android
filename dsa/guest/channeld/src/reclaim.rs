@@ -15,7 +15,7 @@
 //!
 //! Memory the guest no longer uses goes back at once, not over minutes: the first look after
 //! the last task closes reclaims, and while idle every look that finds memory grown back
-//! reclaims again. Dropping caches costs reading those files again later, so the full drop
+//! reclaims again, grown from the least the idle guest was found at since the last reclaim. Dropping caches costs reading those files again later, so the full drop
 //! with tasks open waits for cache to dominate, at most every few minutes.
 //! When the host says it is short of memory, the guest gives back what it can at once, as a
 //! phone's low memory killer would: the agent ends the cached app processes first, and the
@@ -389,8 +389,9 @@ pub struct ReclaimPolicy {
     pub idle_growth_kb: u64,
     /// The least time between two working set trims.
     pub trim_gap: Duration,
-    /// The least page cache the working set trim leaves alone, in KiB: warm files of the open
-    /// apps. It is where the working set target starts and the lowest it goes.
+    /// The least page cache the working set trim leaves alone while a task is in use, in KiB:
+    /// warm files of the open apps. It is where the working set target starts and the lowest it
+    /// goes while tasks are in use.
     ///
     /// 160 MiB: in a memory audit of 1.0.1-dev.7, idle after one app had been open, the guest
     /// held 236 MiB of page cache, of which some 110 MiB was on the inactive list, the files
@@ -398,6 +399,15 @@ pub struct ReclaimPolicy {
     /// system_server and SurfaceFlinger read back. The 256 MiB this was before kept the cold
     /// part too.
     pub keep_cache_kb: u64,
+    /// The same while no task is in use, in KiB: the target then stays at it.
+    ///
+    /// 64 MiB: on the owner's PC (1.0.1-dev.37), with no app open, a floor of 160 MiB kept the
+    /// page cache between 160 and 224 MiB between idle reclaims, while an idle reclaim leaves 25
+    /// to 53 MiB, the files the running processes map. The 160 MiB was set before the system
+    /// partitions were mapped straight from the host, when the framework's own files were page
+    /// cache too. With no app there is no working set to keep: what the trim takes is mostly
+    /// what background work read once.
+    pub idle_keep_cache_kb: u64,
     /// The most the working set target rises to, in KiB, however often evicted files are read
     /// back and however many tasks are in use. 768 MiB is the floor and the allowance of six
     /// shown tasks ([`ReclaimPolicy::task_cache_kb`]): beyond that, an app's files are
@@ -421,7 +431,7 @@ pub struct ReclaimPolicy {
     pub host_short_gap: Duration,
     /// How much the working set target may rise above `keep_cache_kb` for each task in use
     /// whose window is shown, in KiB, up to `keep_cache_max_kb`. With no task in use the target
-    /// stays at `keep_cache_kb`: what is read back then is the system's background work, and
+    /// stays at `idle_keep_cache_kb`: what is read back then is the system's background work, and
     /// keeping cache for it is what left some 650 MiB of page cache in an idle guest on the
     /// owner's PC.
     ///
@@ -480,6 +490,7 @@ impl Default for ReclaimPolicy {
             idle_growth_kb: 64 * 1024,
             trim_gap: Duration::ZERO,
             keep_cache_kb: 160 * 1024,
+            idle_keep_cache_kb: 64 * 1024,
             keep_cache_max_kb: 768 * 1024,
             min_trim_kb: 64 * 1024,
             max_trim_kb: u64::MAX,
@@ -509,8 +520,12 @@ pub struct Reclaimer {
     last_trim: Option<Duration>,
     /// Whether the next look at memory is the first since a reclaim, which sets `idle_floor_kb`.
     measure_floor: bool,
-    /// What was left reclaimable just after the last reclaim, in KiB.
+    /// What was left reclaimable just after the last reclaim, in KiB, and while no task is in
+    /// use, the least any look has found since (see [`Reclaimer::idle_floor_kb`]).
     idle_floor_kb: Option<u64>,
+    /// The floor the last [`Reason::Idle`] counted growth from, when it was a repeat in its idle
+    /// stretch rather than the stretch's first.
+    idle_grew_from_kb: Option<u64>,
     /// The host said it is short of memory.
     host_short: bool,
     /// The page cache the apps are taken to need, in KiB: the working set trim leaves this much.
@@ -624,6 +639,7 @@ impl Reclaimer {
             last_trim: None,
             measure_floor: false,
             idle_floor_kb: None,
+            idle_grew_from_kb: None,
             host_short: false,
             target_kb: policy.keep_cache_kb,
             last_refaults_kb: None,
@@ -735,30 +751,49 @@ impl Reclaimer {
         .min(p.refault_backoff_max);
     }
 
+    /// The least page cache the trim leaves with `tasks` tasks in use:
+    /// [`ReclaimPolicy::keep_cache_kb`] with any, [`ReclaimPolicy::idle_keep_cache_kb`] with
+    /// none.
+    fn keep_kb(&self, tasks: usize) -> u64 {
+        if tasks == 0 {
+            self.policy.idle_keep_cache_kb
+        } else {
+            self.policy.keep_cache_kb
+        }
+    }
+
     /// Holds the target and its floor to what `tasks` tasks in use may keep: `keep_cache_kb`,
     /// [`ReclaimPolicy::task_cache_kb`] for each shown and
     /// [`ReclaimPolicy::minimized_task_cache_kb`] for each minimized, or what trims read back
-    /// proved they need if that is more, so with none in use, the floor.
+    /// proved they need if that is more; with none in use, `idle_keep_cache_kb`. Neither goes
+    /// below the floor for that many tasks, so the first task after an idle stretch has
+    /// `keep_cache_kb` again.
     fn cap_to_tasks(&mut self, tasks: usize) {
         let p = self.policy;
-        let shown = self.shown_tasks.map_or(tasks, |shown| shown.min(tasks));
-        let minimized = tasks - shown;
-        let proven = if tasks > 0 { self.proven_kb } else { 0 };
-        let cap = p
-            .keep_cache_kb
-            .saturating_add(p.task_cache_kb.saturating_mul(shown as u64))
-            .saturating_add(p.minimized_task_cache_kb.saturating_mul(minimized as u64))
-            .max(proven)
-            .min(p.keep_cache_max_kb)
-            .max(p.keep_cache_kb);
-        self.floor_kb = self.floor_kb.min(cap);
-        self.target_kb = self.target_kb.min(cap);
+        let keep = self.keep_kb(tasks);
+        let cap = if tasks == 0 {
+            keep
+        } else {
+            let shown = self.shown_tasks.map_or(tasks, |shown| shown.min(tasks));
+            let minimized = tasks - shown;
+            p.keep_cache_kb
+                .saturating_add(p.task_cache_kb.saturating_mul(shown as u64))
+                .saturating_add(p.minimized_task_cache_kb.saturating_mul(minimized as u64))
+                .max(self.proven_kb)
+                .min(p.keep_cache_max_kb)
+                .max(p.keep_cache_kb)
+        };
+        self.floor_kb = self.floor_kb.min(cap).max(keep);
+        self.target_kb = self.target_kb.min(cap).max(keep);
     }
 
-    /// Steps the floor down toward `keep_cache_kb`: half the way, at least `min_trim_kb`. What
-    /// trims had proven steps down with it.
+    /// Steps the floor down toward the least page cache the trim leaves for the tasks in use
+    /// ([`Reclaimer::keep_kb`]): half the way, at least `min_trim_kb`. What trims had proven
+    /// steps down with it.
     fn step_floor_down(&mut self) {
-        let keep = self.policy.keep_cache_kb;
+        let keep = self
+            .last_tasks
+            .map_or(self.policy.keep_cache_kb, |tasks| self.keep_kb(tasks));
         let step = (self.floor_kb.saturating_sub(keep) / 2).max(self.policy.min_trim_kb);
         self.floor_kb = self.floor_kb.saturating_sub(step).max(keep);
         self.proven_kb = self.proven_kb.min(self.floor_kb);
@@ -918,6 +953,21 @@ impl Reclaimer {
         self.target_kb
     }
 
+    /// The reclaimable memory the next idle reclaim counts growth from, in KiB: what the look
+    /// after the last reclaim found, or, while no task is in use, the least any look has found
+    /// since. The idle reclaim runs again once the guest holds
+    /// [`ReclaimPolicy::idle_growth_kb`] more than this. `None` before the first reclaim.
+    pub fn idle_floor_kb(&self) -> Option<u64> {
+        self.idle_floor_kb
+    }
+
+    /// For the log: the floor the last [`Reason::Idle`] counted growth from, in KiB, when it
+    /// repeated an idle stretch's reclaim because memory grew back; `None` for the first of a
+    /// stretch.
+    pub fn idle_grew_from_kb(&self) -> Option<u64> {
+        self.idle_grew_from_kb
+    }
+
     /// How much the last [`Reason::Gradual`] asks for, in whole MiB.
     pub fn trim_mib(&self) -> u64 {
         self.trim_kb / 1024
@@ -1061,6 +1111,16 @@ impl Reclaimer {
         if self.measure_floor {
             self.measure_floor = false;
             self.idle_floor_kb = Some(memory.reclaimable_kb());
+        } else if tasks == 0 && self.idle_reclaimed {
+            // The look right after a reclaim may catch the guest busy: after the last app
+            // closes, the processes that start behind it read their files for a few seconds.
+            // Measured there, the floor stood above anything the idle guest grew back to, and
+            // the idle reclaim never ran again in that stretch. So the floor follows the least
+            // the idle guest is found at, and growth counts from there.
+            self.idle_floor_kb =
+                Some(self.idle_floor_kb.map_or(memory.reclaimable_kb(), |floor| {
+                    floor.min(memory.reclaimable_kb())
+                }));
         }
         let worth_it = memory.droppable_kb() >= self.policy.min_droppable_kb;
         let idle_worth_it = memory.reclaimable_kb() >= self.policy.min_droppable_kb;
@@ -1121,6 +1181,7 @@ impl Reclaimer {
         }
         let reason = if (idle_due || idle_grew) && idle_worth_it {
             self.idle_reclaimed = true;
+            self.idle_grew_from_kb = if idle_due { None } else { self.idle_floor_kb };
             Some(Reason::Idle)
         } else if host_short_due {
             self.host_short_reclaimed = true;

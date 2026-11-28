@@ -500,7 +500,7 @@ mod daemon {
         let mut failures = ReadFailures::default();
         let mut closed = router.apps_closed();
         // The second zram device's size last asked for, so init is asked only on a change.
-        let mut zram_extra_asked: Option<u64> = None;
+        let mut zram_extra = ZramExtra::default();
         // What /proc/vmstat counted at the last trim, so each trim's line says what was read
         // back and swapped since.
         let mut last_trim_counters: Option<VmCounters> = None;
@@ -536,7 +536,7 @@ mod daemon {
                     return;
                 }
             };
-            ask_for_zram_extra(&memory, &mut zram_extra_asked);
+            ask_for_zram_extra(&memory, &mut zram_extra);
             let tasks = router.tasks_in_use();
             reclaimer.host_short(router.host_memory_low());
             // Pressure stall information is optional in the kernel: unreadable counts as busy.
@@ -640,9 +640,19 @@ mod daemon {
                     }
                     RECLAIM_PROPERTY
                 };
+                // A repeat in an idle stretch says what low it grew from, so the log shows how
+                // often the idle reclaim runs again and what each run costs.
+                let repeat = match (reason, reclaimer.idle_grew_from_kb()) {
+                    (Reason::Idle, Some(floor)) => format!(
+                        "; again in this idle stretch, {} MiB reclaimable grown from a low of {} MiB",
+                        memory.reclaimable_kb() / 1024,
+                        floor / 1024
+                    ),
+                    _ => String::new(),
+                };
                 say!(
                     "reclaiming the guest's memory ({reason:?}, {tasks} tasks in use): {} MiB \
-                     droppable and {} MiB anonymous of {} MiB in use",
+                     droppable and {} MiB anonymous of {} MiB in use{repeat}",
                     memory.droppable_kb() / 1024,
                     memory.anon_pages_kb / 1024,
                     memory.used_kb() / 1024
@@ -675,12 +685,27 @@ mod daemon {
         }
     }
 
-    /// Asks init for a second zram device when the guest has more memory than zram0 was sized
-    /// for at boot, and for none when it is back (see `zram_grow`). zram0 not yet on asks
-    /// nothing.
+    /// What the daemon has asked of the second zram device and said of the first.
     #[cfg(target_os = "android")]
-    fn ask_for_zram_extra(memory: &dsa_guest_channeld::reclaim::MemInfo, asked: &mut Option<u64>) {
-        use dsa_guest_channeld::zram_grow::{extra_mib, ZRAM_EXTRA_PROPERTY};
+    #[derive(Default)]
+    struct ZramExtra {
+        /// The second device's size last asked for, so init is asked only on a change.
+        asked: Option<u64>,
+        /// zram0's size has been logged.
+        told_zram0: bool,
+        /// When the daemon last looked whether zram1 is larger than needed and empty.
+        looked_at_zram1: Option<std::time::Instant>,
+    }
+
+    /// Asks init for a second zram device when the guest has more memory than zram0 was sized
+    /// for at boot, and for none when it is back (see `zram_grow`), and again, once a minute at
+    /// most, while zram1 is larger than needed and has emptied. zram0 not yet on asks nothing.
+    #[cfg(target_os = "android")]
+    fn ask_for_zram_extra(memory: &dsa_guest_channeld::reclaim::MemInfo, state: &mut ZramExtra) {
+        use dsa_guest_channeld::zram_grow::{
+            ask_again, extra_mib, stored_bytes, REASK_INTERVAL, ZRAM_EXTRA_PROPERTY, ZRAM_PERCENT,
+        };
+        const ZRAM1: &str = "/sys/devices/virtual/block/zram1";
         let zram0 = std::fs::read_to_string("/sys/devices/virtual/block/zram0/disksize")
             .ok()
             .and_then(|v| v.trim().parse::<u64>().ok())
@@ -688,8 +713,51 @@ mod daemon {
         if zram0 == 0 {
             return;
         }
+        if !state.told_zram0 {
+            state.told_zram0 = true;
+            say!(
+                "zram0 swaps {} MiB, {ZRAM_PERCENT}% of the memory it was sized for; the guest has {} MiB",
+                zram0 / (1024 * 1024),
+                memory.mem_total_kb / 1024
+            );
+        }
         let target = extra_mib(memory.mem_total_kb, zram0);
+        let asked = &mut state.asked;
         if *asked == Some(target) || (asked.is_none() && target == 0) {
+            // Nothing new to ask. The helper leaves a zram1 larger than the target while it holds
+            // pages; once it is empty it is asked again, and a daemon started again finds a zram1
+            // its last run asked for the same way.
+            if state
+                .looked_at_zram1
+                .is_some_and(|at| at.elapsed() < REASK_INTERVAL)
+            {
+                return;
+            }
+            state.looked_at_zram1 = Some(std::time::Instant::now());
+            let zram1_mib = std::fs::read_to_string(format!("{ZRAM1}/disksize"))
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(0)
+                / (1024 * 1024);
+            if zram1_mib == 0 {
+                return;
+            }
+            let stored = std::fs::read_to_string(format!("{ZRAM1}/mm_stat"))
+                .map(|text| stored_bytes(&text))
+                .unwrap_or(u64::MAX);
+            if !ask_again(target, zram1_mib, stored) {
+                return;
+            }
+            say!(
+                "zram1 swaps {zram1_mib} MiB and holds {} KiB, where {target} MiB is needed: asking \
+                 init again to cut it back",
+                stored / 1024
+            );
+            if let Err(why) = set_property(ZRAM_EXTRA_PROPERTY, &target.to_string()) {
+                say!("could not ask init for zram1: {why}");
+            } else {
+                *asked = Some(target);
+            }
             return;
         }
         say!(
@@ -736,7 +804,9 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn page_out_after_wakes(router: Arc<Router>) {
         use dsa_guest_channeld::pageout::system::{page_out, samples, Refused};
-        use dsa_guest_channeld::pageout::{Pageout, PageoutPolicy, SAMPLE_INTERVAL};
+        use dsa_guest_channeld::pageout::{
+            is_resident_service, Pageout, PageoutPolicy, SAMPLE_INTERVAL,
+        };
         // The daemon runs ahead of apps so pointer events never wait; a pageout is work that
         // may wait for them, so this thread runs behind them.
         // SAFETY: setpriority on this thread's own id has no other effect.
@@ -766,6 +836,7 @@ mod daemon {
             };
             let windows = router.task_packages();
             for target in pageout.look(start.elapsed(), &looked, &windows) {
+                let resident = is_resident_service(&target.name);
                 match page_out(&target) {
                     Ok(done) => {
                         pageout.paged(target.pid, done.after.rss_anon_kb);
@@ -776,7 +847,9 @@ mod daemon {
                             target.name,
                             target.pid,
                             target.oom_score_adj,
-                            if target.google_play {
+                            if resident {
+                                ", resident service"
+                            } else if target.google_play {
                                 ", Google Play services"
                             } else {
                                 ""
@@ -791,6 +864,15 @@ mod daemon {
                         );
                     }
                     Err(Refused::Skipped(_)) => {}
+                    Err(Refused::NotAllowed(why)) if resident => {
+                        // The resident services run under other users and SELinux domains than
+                        // the apps: a refusal for one says nothing about the apps.
+                        say!(
+                            "WARNING: {why}. The resident services stay resident after they wake \
+                             until the next idle reclaim; apps are still paged out."
+                        );
+                        pageout.stop_resident_services();
+                    }
                     Err(Refused::NotAllowed(why)) => {
                         say!(
                             "WARNING: {why}. Apps woken in the background stay resident until \
@@ -816,7 +898,7 @@ mod daemon {
     fn write_back_cold_zram(router: Arc<Router>) {
         use dsa_guest_channeld::writeback::{
             day_of, has_backing_device, BackingStat, Day, Run, Writeback, WritebackPolicy,
-            ZramStat, CHECK_INTERVAL, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
+            ZramStat, CHECK_INTERVAL, PAGE_KB, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
             WRITEBACK_AGE_PROPERTY, WRITEBACK_DAY_PROPERTY, WRITEBACK_PAGES_PROPERTY,
             WRITEBACK_PROPERTY, ZRAM,
         };
@@ -859,19 +941,27 @@ mod daemon {
             &read_property(WRITEBACK_AGE_PROPERTY),
         );
         let start = std::time::Instant::now();
+        // What zram's backing device took this boot counts against the boot's budget, so a
+        // daemon started again within the boot does not get the budget twice. Earlier boots'
+        // files went with them, and what they wrote counts only against the day's cap.
+        let boot_written = backing_stat().map_or(0, |stat| stat.written_kb / PAGE_KB);
         let mut writeback = Writeback::new(
             policy,
             today(),
             Day::parse(&read_property(WRITEBACK_DAY_PROPERTY)),
-        );
+        )
+        .with_boot_written(boot_written);
         say!(
             "zram writes what no one has used for {} s to its backing file once no app has been \
-             in use for {} s, at most {} MiB a run and {} MiB a day ({} MiB left today)",
+             in use for {} s, at most {} MiB a run, {} MiB a boot and {} MiB a day ({} MiB left \
+             this boot, {} MiB left today)",
             policy.age.as_secs(),
             policy.idle_after.as_secs(),
-            policy.run_pages * 4 / 1024,
-            policy.daily_pages * 4 / 1024,
-            writeback.left_pages() * 4 / 1024
+            policy.run_pages * PAGE_KB / 1024,
+            policy.boot_pages * PAGE_KB / 1024,
+            policy.daily_pages * PAGE_KB / 1024,
+            writeback.boot_left_pages() * PAGE_KB / 1024,
+            writeback.day_left_pages() * PAGE_KB / 1024
         );
         loop {
             thread::sleep(CHECK_INTERVAL);
@@ -902,6 +992,8 @@ mod daemon {
                 backing_before,
                 backing_after: backing_stat().unwrap_or(backing_before),
                 took: began.elapsed(),
+                boot_left_pages: 0,
+                boot_pages: policy.boot_pages,
                 left_pages: 0,
                 daily_pages: policy.daily_pages,
             };
@@ -912,7 +1004,8 @@ mod daemon {
             say!(
                 "{}",
                 Run {
-                    left_pages: writeback.left_pages(),
+                    boot_left_pages: writeback.boot_left_pages(),
+                    left_pages: writeback.day_left_pages(),
                     ..run
                 }
                 .line()

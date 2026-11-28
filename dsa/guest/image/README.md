@@ -74,7 +74,7 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   on to a backing file on the data disk (`/data/per_boot/zram_swap`, 512 MiB, made again each
   boot): once no app has been open for ten minutes, at most every ten minutes, the daemon has
   init write zram's pages unused for half an hour, incompressible ones first, at most 32 MiB a
-  run and 512 MiB a day. ART keeps less free heap
+  run, 512 MiB a boot and 2 GiB a day. ART keeps less free heap
   (`MEMORY_PROPS` in `make-image.py`), and the zygote does not preload the classes of the
   features a desktop guest has no device for (`PRELOAD_DROPPED_PREFIXES`). Only the daemon
   may set the property, and only init's vendor scripts may write those kernel settings.

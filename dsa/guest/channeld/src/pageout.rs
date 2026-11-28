@@ -17,10 +17,13 @@
 //! [`VISIBLE_APP_ADJ`]), and otherwise one at perceptible importance or lower
 //! (`oom_score_adj` [`PERCEPTIBLE_APP_ADJ`] and up). Google Play services' processes, which
 //! other apps and the system bind and so often sit just above perceptible without anything to
-//! show, are taken from [`VISIBLE_APP_ADJ`] up. Each process is paged out at most every
-//! [`PageoutPolicy::min_interval`], only after it has grown by [`PageoutPolicy::min_growth_kb`]
-//! since the last time, and one process at most per look, so the daemon never competes with
-//! the apps for the CPU.
+//! show, are taken from [`VISIBLE_APP_ADJ`] up. The system's resident services (the extension
+//! services, the media provider and the network stack, [`is_resident_service`]) are taken at
+//! any importance: the system keeps them bound or persistent, and they show nothing. Each
+//! process is paged out at most every [`PageoutPolicy::min_interval`] (a resident service every
+//! [`PageoutPolicy::resident_min_interval`]), only after it has grown by
+//! [`PageoutPolicy::min_growth_kb`] since the last time, and one process at most per look, so
+//! the daemon never competes with the apps for the CPU.
 //!
 //! Never a process that is exiting (state `X` or `Z`, or no address space left): paging out
 //! the memory of a process the kernel is tearing down raced with its exit, and the kernel then
@@ -101,6 +104,31 @@ pub fn is_google_play(name: &str) -> bool {
         || base.starts_with("com.google.process.")
 }
 
+/// The network stack's user (`AID_NETWORK_STACK`): its process is a resident service
+/// ([`is_resident_service`]) that runs under this system user rather than an app's.
+pub const NETWORK_STACK_UID: u32 = 1073;
+
+/// The process names, before any `:`, of the system's resident services: the extension services
+/// (notification assistant, text classifier, autofill suggestions), the media provider (the
+/// shared storage's file system and database) and the network stack. The system keeps them
+/// running for good, bound or persistent, so they sit at an importance (`oom_score_adj` 100,
+/// -700 and -800 on the owner's PC) that no other process is paged out at. They have no window
+/// and nothing to draw, and between the system's calls they sleep like Google Play services.
+const RESIDENT_SERVICES: &[&str] = &[
+    "android.ext.services",
+    "com.google.android.ext.services",
+    "com.android.providers.media.module",
+    "com.google.android.providers.media.module",
+    "com.android.networkstack.process",
+];
+
+/// Whether a process of this name is one of the system's resident services, paged out after
+/// it wakes whatever its importance.
+pub fn is_resident_service(name: &str) -> bool {
+    let base = name.split(':').next().unwrap_or("");
+    RESIDENT_SERVICES.contains(&base)
+}
+
 /// Whether a process of this name runs the code of one of `packages` (those with a task
 /// window open): Android names an app's processes after its package, its other processes
 /// `<package>:<name>` or `<package>.<name>`.
@@ -119,6 +147,9 @@ pub fn eligible(sample: &ProcessSample, windows: &BTreeSet<String>) -> bool {
     if sample.exiting {
         return false;
     }
+    if is_resident_service(&sample.name) {
+        return !has_window(&sample.name, windows);
+    }
     if sample.uid % PER_USER_RANGE < FIRST_APPLICATION_UID {
         return false;
     }
@@ -135,6 +166,11 @@ pub struct PageoutPolicy {
     pub quiet: Duration,
     /// The least time between two pageouts of one process.
     pub min_interval: Duration,
+    /// The same for a resident service ([`is_resident_service`]). The system calls on them for
+    /// the apps in use (a file opened in shared storage, a text selection, a network change), so
+    /// what one pageout takes may be wanted again soon; five minutes keeps a busy one from being
+    /// paged out and read back every half minute.
+    pub resident_min_interval: Duration,
     /// How much its resident anonymous memory must have grown since the last pageout, in KiB:
     /// below it the wake brought too little back to be worth a pageout.
     pub min_growth_kb: u64,
@@ -147,6 +183,7 @@ impl Default for PageoutPolicy {
         PageoutPolicy {
             quiet: QUIET_AFTER_WAKE,
             min_interval: Duration::from_secs(30),
+            resident_min_interval: Duration::from_secs(5 * 60),
             min_growth_kb: 2 * 1024,
             per_look: 1,
         }
@@ -171,6 +208,8 @@ struct Tracked {
 pub struct Pageout {
     policy: PageoutPolicy,
     tracked: BTreeMap<i32, Tracked>,
+    /// The resident services are left alone: the policy refused a pageout of one.
+    residents_stopped: bool,
 }
 
 impl Pageout {
@@ -178,7 +217,15 @@ impl Pageout {
         Pageout {
             policy,
             tracked: BTreeMap::new(),
+            residents_stopped: false,
         }
+    }
+
+    /// Leaves the resident services ([`is_resident_service`]) alone from now on: the kernel or
+    /// the policy refused to page one out. They run under other users and SELinux domains than
+    /// the apps, so a refusal for them says nothing about the apps, which go on being paged out.
+    pub fn stop_resident_services(&mut self) {
+        self.residents_stopped = true;
     }
 
     /// Takes in a look at `now` (any monotonic clock) at the processes in `samples`, with
@@ -216,12 +263,21 @@ impl Pageout {
             if !tracked.woke || !eligible(sample, windows) {
                 continue;
             }
+            let resident = is_resident_service(&sample.name);
+            if resident && self.residents_stopped {
+                continue;
+            }
             if now.saturating_sub(tracked.last_active) < self.policy.quiet {
                 continue;
             }
+            let min_interval = if resident {
+                self.policy.resident_min_interval
+            } else {
+                self.policy.min_interval
+            };
             if tracked
                 .last_pageout
-                .is_some_and(|at| now.saturating_sub(at) < self.policy.min_interval)
+                .is_some_and(|at| now.saturating_sub(at) < min_interval)
             {
                 continue;
             }
@@ -282,6 +338,10 @@ pub fn skip_reason(target: &Target, now: &Recheck) -> Option<String> {
         ));
     }
     let adj = now.oom_score_adj;
+    if is_resident_service(&target.name) {
+        // Taken at any importance: it is the system's, with nothing on screen.
+        return None;
+    }
     if adj < VISIBLE_APP_ADJ || (!target.google_play && adj < PERCEPTIBLE_APP_ADJ) {
         return Some(format!(
             "{} became more important (oom_score_adj {adj})",
@@ -394,7 +454,7 @@ pub mod system {
 
     use super::{anonymous_ranges, cpu_ticks, is_exiting, skip_reason, ProcessSample, Recheck};
     use super::{Status, Target};
-    use super::{FIRST_APPLICATION_UID, PER_USER_RANGE};
+    use super::{FIRST_APPLICATION_UID, NETWORK_STACK_UID, PER_USER_RANGE};
 
     /// The system call numbers, the same on every architecture since Linux 5.1.
     const SYS_PIDFD_OPEN: libc::c_long = 434;
@@ -403,8 +463,9 @@ pub mod system {
     /// The most ranges one `process_madvise` takes (`UIO_MAXIOV`).
     const MOST_RANGES: usize = 1024;
 
-    /// The app processes now. A process is an app's when the folder its `/proc` entry is owned
-    /// by an app's UID, which the daemon reads without opening anything; only those are read.
+    /// The app processes now, and the network stack's. A process is an app's when the folder its
+    /// `/proc` entry is owned by an app's UID, which the daemon reads without opening anything;
+    /// only those, and the ones owned by the network stack's user, are read.
     pub fn samples() -> std::io::Result<Vec<ProcessSample>> {
         let mut samples = Vec::new();
         for entry in std::fs::read_dir("/proc")?.flatten() {
@@ -415,7 +476,9 @@ pub mod system {
             let Ok(metadata) = entry.metadata() else {
                 continue;
             };
-            if metadata.uid() % PER_USER_RANGE < FIRST_APPLICATION_UID {
+            if metadata.uid() % PER_USER_RANGE < FIRST_APPLICATION_UID
+                && metadata.uid() != NETWORK_STACK_UID
+            {
                 continue;
             }
             let dir = entry.path();

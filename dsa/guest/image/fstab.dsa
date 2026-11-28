@@ -36,13 +36,17 @@ odm_dlkm /odm_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,s
 # that file is missing. The guest's kernel no longer has it (zram keeps a stream per CPU), so
 # -1 is what lets fs_mgr go on to size the device, mkswap and swapon. The compressor is the
 # kernel's default, LZ4.
-# zramsize=100%: the device is sized once, at boot, from the memory Android has then, and a
-# device in use cannot be resized. At half, a guest that later grew filled it (985 of 986 MiB)
-# with 1.4 GiB free, and lmkd, seeing swap low, killed cached apps. The size is only a cap:
-# zram holds what is swapped, compressed, and its slot table costs 16 B per 4 KiB page.
+# zramsize=50%: the device is sized once, at boot, from the memory Android has then, and a
+# device in use cannot be resized. The size is only a cap: zram holds what is swapped,
+# compressed, but its slot table costs 16 to 24 B for every 4 KiB of the cap, used or not, so
+# half saves 4 to 6 MiB of a 2 GiB guest. An idle guest on the owner's PC held 277 MiB in zram.
+# It was 100% because a guest that grew filled half (985 of 986 MiB) with 1.4 GiB free, and lmkd,
+# seeing swap low, killed cached apps. lmkd no longer weighs how full the swap is
+# (ro.lmk.swap_free_low_percentage=0, make-image.py), and memory added after boot gets a second
+# device of half its size (dsa-memory.rc).
 # zram_backingdev_size: before it sizes the device, fs_mgr makes /data/per_boot/zram_swap of
 # this size (fallocate, so nothing is written yet), attaches it to a loop device with direct
 # I/O and names that zram's backing device. The idle reclaim writes zram's coldest pages there
-# within a daily budget (dsa-channeld.rc). Without the folder or the space, fs_mgr logs it and
+# within a budget for the boot and the day (dsa-channeld.rc). Without the folder or the space, fs_mgr logs it and
 # the swap starts without a backing device.
-/dev/block/zram0 none swap defaults zramsize=100%,max_comp_streams=-1,zram_backingdev_size=512M
+/dev/block/zram0 none swap defaults zramsize=50%,max_comp_streams=-1,zram_backingdev_size=512M

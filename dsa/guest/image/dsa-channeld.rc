@@ -7,10 +7,11 @@ service dsa_channeld /vendor/bin/dsa-channeld
     # daemon reads the name of a caller that says it is the agent. uhid: /dev/uinput, where the
     # daemon makes the host's game controllers gamepads.
     group system readproc uhid
-    # SYS_NICE and SYS_PTRACE: after something wakes an app that no window shows, the daemon
-    # pages its anonymous memory back to zram (process_madvise with MADV_PAGEOUT). The kernel
-    # asks SYS_NICE of a caller that advises another process, and SYS_PTRACE to read the
-    # address space of another user's process.
+    # SYS_NICE and SYS_PTRACE: after something wakes an app that no window shows, or one of the
+    # system's resident services (the extension services, the media provider, the network
+    # stack), the daemon pages its anonymous memory back to zram (process_madvise with
+    # MADV_PAGEOUT). The kernel asks SYS_NICE of a caller that advises another process, and
+    # SYS_PTRACE to read the address space of another user's process.
     capabilities SYS_NICE SYS_PTRACE
     stdio_to_kmsg
     # Every pointer event passes through here on its way to the agent; it must not wait
@@ -76,8 +77,9 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
 # (fstab.dsa), so the host keeps disk space for it instead of memory. dsa-channeld sets this
 # only after no app has been open for vendor.dsa.memory.writeback_after seconds, at most every
 # ten minutes, and gives it vendor.dsa.memory.writeback_pages, the 4 KiB pages this run may
-# write: what is left of the day's budget, and at most 32 MiB, so init is busy for a fraction
-# of a second. zram counts the budget down as it writes and stops at zero, and it is set back
+# write: what is left of the boot's budget (512 MiB, the backing file's size, which is made new
+# each boot) and of the day's across boots (2 GiB), and at most 32 MiB, so init is busy for a
+# fraction of a second. zram counts the budget down as it writes and stops at zero, and it is set back
 # to zero afterwards, so nothing else writes. Only pages untouched for
 # vendor.dsa.memory.writeback_age seconds are marked idle (zram keeps when each page was last
 # read or written, and compressing one again with zstd is not a use). Incompressible pages go

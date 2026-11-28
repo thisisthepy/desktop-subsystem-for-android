@@ -185,6 +185,123 @@ fn nfr2_google_play_services_is_known_by_its_process_names() {
 }
 
 #[test]
+fn nfr1_resident_services_are_paged_out_after_they_wake_like_google_play_services() {
+    use dsa_guest_channeld::pageout::{is_resident_service, NETWORK_STACK_UID};
+    // The owner's PC, 1.0.1-dev.37, idle: android.ext.services (bound by the system at
+    // oom_score_adj 100), the media provider (a persistent service, -700) and the network stack
+    // (persistent, uid 1073, -800) held 10, 12 and 11 MiB resident, and none was ever paged out.
+    let service = |pid: i32, name: &str, uid: u32, adj: i32, cpu: u64, rss: u64| ProcessSample {
+        pid,
+        name: name.into(),
+        uid,
+        oom_score_adj: adj,
+        cpu_ticks: cpu,
+        rss_anon_kb: rss * MIB,
+        exiting: false,
+    };
+    let ext = |cpu, rss| service(1132, "android.ext.services", 10_103, 100, cpu, rss);
+    let media = |cpu, rss| {
+        service(
+            1160,
+            "com.android.providers.media.module",
+            10_092,
+            -700,
+            cpu,
+            rss,
+        )
+    };
+    let network = |cpu, rss| {
+        service(
+            955,
+            "com.android.networkstack.process",
+            NETWORK_STACK_UID,
+            -800,
+            cpu,
+            rss,
+        )
+    };
+    assert_eq!(NETWORK_STACK_UID, 1073);
+    for name in [
+        "android.ext.services",
+        "com.google.android.ext.services",
+        "com.android.providers.media.module",
+        "com.google.android.providers.media.module",
+        "com.android.providers.media.module:transcode",
+        "com.android.networkstack.process",
+    ] {
+        assert!(is_resident_service(name), "{name}");
+    }
+    for name in [
+        "system_server",
+        "com.android.systemui",
+        "android.ext.servicesx",
+        "com.android.networkstack.tethering",
+    ] {
+        assert!(!is_resident_service(name), "{name}");
+    }
+    // Whatever their oom_score_adj, and the network stack under its system uid.
+    for sample in [ext(1, 10), media(1, 12), network(1, 11)] {
+        assert!(eligible(&sample, &no_windows()), "{}", sample.name);
+    }
+    // Still never one that is exiting, nor the system's other processes.
+    assert!(!eligible(
+        &ProcessSample {
+            exiting: true,
+            ..media(1, 12)
+        },
+        &no_windows()
+    ));
+    assert!(!eligible(
+        &service(639, "system_server", 1000, -900, 1, 180),
+        &no_windows()
+    ));
+
+    // Woken, quiet for the grace period, paged out; one a look, the most grown first.
+    let policy = PageoutPolicy::default();
+    let mut pageout = Pageout::new(policy);
+    let all = [ext(1, 10), media(1, 12), network(1, 11)];
+    pageout.look(secs(0), &all, &no_windows());
+    let due = pageout.look(secs(6), &all, &no_windows());
+    assert_eq!(due.iter().map(|t| t.pid).collect::<Vec<_>>(), [1160]);
+    pageout.paged(1160, 3 * MIB);
+    // Read again right before the pageout: its importance does not hold it back.
+    let quiet = Recheck {
+        oom_score_adj: -700,
+        cpu_ticks: 1,
+        exiting: false,
+    };
+    assert_eq!(skip_reason(&due[0], &quiet), None);
+    assert_eq!(
+        pageout
+            .look(secs(8), &all, &no_windows())
+            .iter()
+            .map(|t| t.pid)
+            .collect::<Vec<_>>(),
+        [955]
+    );
+    // The system calls on them for the apps in use (storage, text selection, the network), so
+    // a woken one waits longer than Play services before it is paged out again.
+    assert!(policy.resident_min_interval >= policy.min_interval);
+    assert_eq!(policy.resident_min_interval, secs(300));
+    let woke = [ext(1, 10), media(2, 14), network(1, 11)];
+    pageout.look(secs(20), &woke, &no_windows());
+    let between = pageout.look(secs(60), &woke, &no_windows());
+    assert!(between.iter().all(|t| t.pid != 1160), "{between:?}");
+    let later = pageout.look(secs(6) + policy.resident_min_interval, &woke, &no_windows());
+    assert!(later.iter().any(|t| t.pid == 1160), "{later:?}");
+
+    // If the policy refuses one, the resident services are left alone from then on, and Play
+    // services are still paged out.
+    let mut refused = Pageout::new(policy);
+    refused.stop_resident_services();
+    let mixed = [media(1, 12), gms(1, 30)];
+    refused.look(secs(0), &mixed, &no_windows());
+    let due = refused.look(secs(6), &mixed, &no_windows());
+    assert_eq!(due.iter().map(|t| t.pid).collect::<Vec<_>>(), [700]);
+    assert!(refused.look(secs(8), &mixed, &no_windows()).is_empty());
+}
+
+#[test]
 fn nfr2_a_process_id_used_again_starts_over() {
     let mut pageout = Pageout::new(PageoutPolicy::default());
     pageout.look(secs(0), &[gms(1, 30)], &no_windows());

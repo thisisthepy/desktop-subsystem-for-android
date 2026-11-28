@@ -1,21 +1,33 @@
 //! A second zram device for memory the guest gains after boot.
 //!
-//! fs_mgr sizes zram0 once, at boot, from the memory Android has then, and the kernel refuses to
-//! resize a device that is in use. A guest that grows later (the host adds memory, or its
-//! balloon gives memory back) would then fill zram0 with memory still free, and lmkd, seeing
-//! swap low, would kill cached apps. So when MemTotal outgrows zram0, the daemon asks for a
-//! second device, zram1, sized for the memory added, and asks for it to go again when the guest
-//! shrinks back and the device holds nothing.
+//! fs_mgr sizes zram0 once, at boot, as half of the memory Android has then ([`ZRAM_PERCENT`]),
+//! and the kernel refuses to resize a device that is in use. A guest that grows later (the host
+//! adds memory, or its balloon gives memory back) could then fill zram0 with memory still free.
+//! So when MemTotal outgrows what zram0 was sized for, the daemon asks for a second device,
+//! zram1, sized for the memory added, and asks for it to go again when the guest shrinks back
+//! and the device holds nothing.
 //!
 //! The daemon only decides ([`extra_mib`]) and sets [`ZRAM_EXTRA_PROPERTY`]. init then starts
 //! `dsa-channeld --zram-extra` as root in a domain of its own, which reads the property and
 //! applies it ([`step`], [`swap_header`]): it adds the device through zram-control, sizes it,
 //! writes the swap header and turns it on with a priority below zram0's, so zram0 fills first.
 //! A device in use is never cut back while it holds pages: taking it off would read them all
-//! back into memory the guest no longer has.
+//! back into memory the guest no longer has. The daemon looks again every minute and asks once
+//! more when such a device has emptied ([`ask_again`]).
 
 /// The property the daemon sets to the MiB the second zram device should have, 0 for none.
 pub const ZRAM_EXTRA_PROPERTY: &str = "vendor.dsa.memory.zram_extra";
+
+/// How large a zram device is for the memory it swaps for, in percent: fstab.dsa sizes zram0 as
+/// half of the memory at boot (`zramsize=50%`), and zram1 is half of the memory added.
+///
+/// A device's size is only a cap on what it holds before compression, but its slot table costs
+/// memory for every 4 KiB of that cap whether used or not (16 to 24 B, 8 to 12 MiB for 2 GiB).
+/// On the owner's PC an idle guest held 277 MiB in zram of the 1977 MiB zram0 could take. At 100%, as it was, the cap was kept for
+/// lmkd: a full zram0 in a guest that had grown made lmkd see swap low and kill cached apps with
+/// memory free. lmkd no longer looks at how full the swap is (`ro.lmk.swap_free_low_percentage`
+/// is 0 in make-image.py), and memory added gets zram1.
+pub const ZRAM_PERCENT: u64 = 50;
 
 /// Growth smaller than this gets no device: a device's own cost and an extra swap area are not
 /// worth less memory than this, and small changes in MemTotal (memory the kernel reserves or
@@ -25,16 +37,19 @@ pub const MIN_EXTRA_MIB: u64 = 256;
 /// The device's size is rounded down to this, so a few MiB of change ask for nothing new.
 pub const STEP_MIB: u64 = 64;
 
-/// The MiB of memory the guest has beyond what zram0 was sized for, rounded down to
-/// [`STEP_MIB`], or 0 when that is less than [`MIN_EXTRA_MIB`].
+/// The MiB the second zram device should have: [`ZRAM_PERCENT`] of the memory the guest has
+/// beyond what zram0 was sized for, rounded down to [`STEP_MIB`], or 0 when the memory added is
+/// less than [`MIN_EXTRA_MIB`].
 ///
-/// `zram0_bytes` is zram0's `disksize`: fstab.dsa sizes it as all of the memory at boot.
+/// `zram0_bytes` is zram0's `disksize`: fstab.dsa sizes it as [`ZRAM_PERCENT`] of the memory at
+/// boot, so it was sized for that memory.
 pub fn extra_mib(mem_total_kb: u64, zram0_bytes: u64) -> u64 {
-    let extra = (mem_total_kb / 1024).saturating_sub(zram0_bytes / (1024 * 1024));
-    if extra < MIN_EXTRA_MIB {
+    let covered_mib = zram0_bytes / (1024 * 1024) * 100 / ZRAM_PERCENT;
+    let added_mib = (mem_total_kb / 1024).saturating_sub(covered_mib);
+    if added_mib < MIN_EXTRA_MIB {
         0
     } else {
-        extra / STEP_MIB * STEP_MIB
+        added_mib * ZRAM_PERCENT / 100 / STEP_MIB * STEP_MIB
     }
 }
 
@@ -49,23 +64,43 @@ pub enum Step {
     Remove,
 }
 
+/// A device holding less than this, before compression, counts as empty: taking it off reads
+/// that little back into memory, and keeping it costs its slot table (some 3 MiB for 512 MiB)
+/// for as long as the guest runs. On the owner's PC a zram1 kept for "0 MiB of swapped pages",
+/// under a MiB, stayed for the rest of the boot.
+pub const EMPTY_BELOW_BYTES: u64 = 1024 * 1024;
+
+/// How often the daemon looks whether a second device it was told to cut back is empty now.
+pub const REASK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// The step for a target of `target_mib`, with the device now `current_mib` large (0 when it is
 /// not in use) and holding `stored_bytes` of swapped pages.
 ///
 /// A larger target remakes the device: taking it off reads what it holds back into memory, which
-/// the guest has just gained. A smaller one, or none, takes it off only once it is empty.
+/// the guest has just gained. A smaller one, or none, takes it off only once it is empty (it holds
+/// less than [`EMPTY_BELOW_BYTES`]).
 pub fn step(target_mib: u64, current_mib: u64, stored_bytes: u64) -> Step {
     if target_mib == current_mib {
         Step::Leave
     } else if target_mib > current_mib {
         Step::Make(target_mib)
-    } else if stored_bytes > 0 {
+    } else if stored_bytes >= EMPTY_BELOW_BYTES {
         Step::Leave
     } else if target_mib == 0 {
         Step::Remove
     } else {
         Step::Make(target_mib)
     }
+}
+
+/// Whether the daemon asks again for a target of `target_mib` it already asked for, with the
+/// device `current_mib` large (its `disksize`, 0 when it is gone) and holding `stored_bytes`.
+///
+/// The helper leaves a device larger than the target while it holds pages, and the daemon asks
+/// only when the target changes, so such a device stayed until the guest stopped. It is asked for
+/// again once the step would now cut it back, at most every [`REASK_INTERVAL`].
+pub fn ask_again(target_mib: u64, current_mib: u64, stored_bytes: u64) -> bool {
+    current_mib > target_mib && step(target_mib, current_mib, stored_bytes) != Step::Leave
 }
 
 /// The first page of a swap area of `size_bytes` with pages of `page_size` bytes: what mkswap

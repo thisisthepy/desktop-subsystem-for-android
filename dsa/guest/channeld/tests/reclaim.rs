@@ -24,11 +24,12 @@ fn memory(free: u64, cached: u64) -> MemInfo {
 }
 
 /// The policy the trim's behaviour is tested with: the defaults, with the page cache sizes these
-/// tests were written for (a 256 MiB floor, 192 MiB for a shown task, 64 for a minimized one).
-/// The default sizes have tests of their own.
+/// tests were written for (a 256 MiB floor with tasks in use and without, 192 MiB for a shown
+/// task, 64 for a minimized one). The default sizes have tests of their own.
 fn sized() -> ReclaimPolicy {
     ReclaimPolicy {
         keep_cache_kb: 256 * MIB,
+        idle_keep_cache_kb: 256 * MIB,
         task_cache_kb: 192 * MIB,
         minimized_task_cache_kb: 64 * MIB,
         ..ReclaimPolicy::default()
@@ -688,6 +689,57 @@ fn nfr2_an_idle_guest_reclaims_again_on_the_next_look_that_finds_memory_grown_ba
 }
 
 #[test]
+fn nfr1_the_idle_reclaim_repeats_after_the_last_app_closes_once_memory_grows_back() {
+    // The owner's PC, 1.0.1-dev.37: FLO, the last app, closed. The first look after the close's
+    // reclaim found Play Store, the permission controller and contacts starting, 671 MiB
+    // reclaimable, and took that as the idle floor. Background work then grew the guest from
+    // 270 to 340 MiB reclaimable, and no idle reclaim ran again for the 16 minutes until the
+    // snapshot: it waited for 671 + 64 MiB.
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let with = |free: u64, cached: u64, anon: u64| MemInfo {
+        anon_pages_kb: anon * MIB,
+        ..memory(free, cached)
+    };
+    assert_eq!(
+        reclaimer.decide_under(secs(0), 1, &with(2000, 200, 300), false),
+        None
+    );
+    assert_eq!(
+        reclaimer.app_closed(secs(100), 0, &with(2000, 451, 280)),
+        Some(Reason::AppClosed)
+    );
+    // Right after the close: processes starting behind it read their files.
+    assert_eq!(
+        reclaimer.decide_under(secs(105), 0, &with(2600, 443, 228), false),
+        Some(Reason::Gradual)
+    );
+    // They have finished and been trimmed: this is how small the idle guest is.
+    assert_eq!(
+        reclaimer.decide_under(secs(110), 0, &with(3000, 100, 120), false),
+        None
+    );
+    assert_eq!(
+        reclaimer.decide_under(secs(115), 0, &with(3000, 110, 130), false),
+        None
+    );
+    // Memory grows back by more than 64 MiB over that low: the idle reclaim runs again.
+    assert_eq!(
+        reclaimer.decide_under(secs(400), 0, &with(3000, 120, 170), false),
+        Some(Reason::Idle)
+    );
+    assert_eq!(reclaimer.idle_floor_kb(), Some(220 * MIB));
+    // The log says it repeated, and from what.
+    assert_eq!(reclaimer.idle_grew_from_kb(), Some(220 * MIB));
+    // The first idle reclaim of a stretch is no repeat.
+    let mut first = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(
+        first.decide_under(secs(0), 0, &with(3000, 400, 300), false),
+        Some(Reason::Idle)
+    );
+    assert_eq!(first.idle_grew_from_kb(), None);
+}
+
+#[test]
 fn nfr2_open_tasks_get_cold_cache_trimmed_on_every_look_it_is_found() {
     use dsa_guest_channeld::reclaim::TRIM_PROPERTY;
     assert!(TRIM_PROPERTY.starts_with("vendor."));
@@ -1163,6 +1215,50 @@ fn nfr1_one_shown_app_keeps_at_most_256_mib_of_page_cache() {
     assert_eq!(target_after_refaults_with(policy, 2, 1, 20), 160 + 96 + 32);
     // The cap still holds: six shown tasks reach it, more add nothing.
     assert_eq!(target_after_refaults_with(policy, 7, 7, 40), 768);
+}
+
+#[test]
+fn nfr1_with_no_task_in_use_the_page_cache_floor_is_64_mib() {
+    // The owner's PC, 1.0.1-dev.37, no app open: the trim kept 160 to 224 MiB of page cache
+    // between idle reclaims, a floor set from a memory audit of 1.0.1-dev.7, before the system
+    // partitions were mapped straight from the host. With no app there is no working set to keep
+    // it for; with tasks in use the floor stays where it was.
+    let policy = ReclaimPolicy::default();
+    assert_eq!(policy.idle_keep_cache_kb, 64 * MIB);
+    assert_eq!(policy.keep_cache_kb, 160 * MIB);
+    let with = |cached: u64, anon: u64| MemInfo {
+        anon_pages_kb: anon * MIB,
+        ..memory(3000, cached)
+    };
+    let mut reclaimer = Reclaimer::new(policy);
+    assert_eq!(
+        reclaimer.decide_under(secs(0), 0, &with(400, 300), false),
+        Some(Reason::Idle)
+    );
+    assert_eq!(reclaimer.working_set_target_kb(), 64 * MIB);
+    // Under the floor and a trim's worth above it: kept.
+    assert_eq!(
+        reclaimer.decide_under(secs(5), 0, &with(100, 200), false),
+        None
+    );
+    // Background work reads files back: the trim takes the cache back down to 64 MiB.
+    assert_eq!(
+        reclaimer.decide_under(secs(10), 0, &with(200, 140), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 200 - 64);
+    // An app opens: its working set gets the floor with tasks in use again, and its allowance.
+    reclaimer.tasks_seen(secs(20), 1, 1);
+    assert_eq!(
+        reclaimer.decide_under(secs(20), 1, &with(200, 300), false),
+        None
+    );
+    assert_eq!(reclaimer.working_set_target_kb(), 160 * MIB);
+    assert_eq!(
+        reclaimer.decide_under(secs(60), 1, &with(250, 300), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 250 - 160);
 }
 
 #[test]
