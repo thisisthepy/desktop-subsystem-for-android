@@ -38,13 +38,16 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                     </ui:CardControl>
-                    <ui:CardControl Icon="{ui:SymbolIcon Wrench24}">
+                    <!-- Without an image there is no build or security patch to show. -->
+                    <ui:CardControl Icon="{ui:SymbolIcon Wrench24}"
+                                    Visibility="{Binding HasImage, Converter={StaticResource Visible}}">
                         <ui:CardControl.Header>
                             <TextBlock Text="{l:Text AndroidBuildCard.Header}" Style="{StaticResource CardTitle}" />
                         </ui:CardControl.Header>
                         <TextBlock Text="{Binding BuildId, Mode=OneWay}" Style="{StaticResource CardValue}" />
                     </ui:CardControl>
-                    <ui:CardControl Icon="{ui:SymbolIcon Shield24}">
+                    <ui:CardControl Icon="{ui:SymbolIcon Shield24}"
+                                    Visibility="{Binding HasImage, Converter={StaticResource Visible}}">
                         <ui:CardControl.Header>
                             <TextBlock Text="{l:Text AndroidPatchCard.Header}" Style="{StaticResource CardTitle}" />
                         </ui:CardControl.Header>

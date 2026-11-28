@@ -1,6 +1,7 @@
 //! Updates as the service runs them: the periodic check, and a user's Android that boots a
 //! new image on trial.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -104,8 +105,15 @@ impl AndroidVersions for StoreVersions {
     }
 
     fn choose(&self, channel: Channel, erase_data: bool) -> Result<VersionReport, ChooseError> {
-        self.store.choose(channel, erase_data)?;
-        if self.store.switch_pending() {
+        let retried = self.store.choose_retrying(channel, erase_data)?;
+        if !retried.is_empty() {
+            self.notices.set(format!(
+                "Android {} did not start on this computer before and is tried again: the \
+                 service downloads it now, and it boots the next time Android starts (going \
+                 back if it fails again)",
+                retried.join(", ")
+            ));
+        } else if self.store.switch_pending() {
             let report = self.report().map_err(ChooseError::Store)?;
             let notice = format!(
                 "Android {} is chosen; the service downloads it now and it is used the next \
@@ -264,6 +272,12 @@ fn apply_list(
     match decision {
         Decision::UpToDate => Ok(moved_up),
         Decision::Unsupported(why) => Ok(Some(why)),
+        Decision::FailedHere(images) => Ok(Some(failed_here_notice(
+            &state.current,
+            &images,
+            &state.failed_reasons,
+            &manifest.supported_majors,
+        ))),
         Decision::Apply(image) => {
             let total = image.files.iter().map(|file| file.size).sum();
             downloading(&Download {
@@ -284,6 +298,58 @@ fn apply_list(
             )))
         }
     }
+}
+
+/// How to collect the logs to report a failure with, as the user types it.
+const COLLECT_LOGS: &str = "dsa logs collect -o dsa-logs.zip";
+
+/// The news when nothing can be installed because every image that would replace `installed`
+/// (no longer supported, or no image at all) failed to start on this computer: which images,
+/// why each did as far as `reasons` recorded it, how to try again, and how to report it.
+fn failed_here_notice(
+    installed: &InstalledImage,
+    failed: &[ImageEntry],
+    reasons: &BTreeMap<String, String>,
+    supported: &[u32],
+) -> String {
+    let mut words = vec![if installed.is_none() {
+        "No Android image is installed, because the images available for this computer failed \
+         to start on it."
+            .to_string()
+    } else {
+        format!(
+            "Android {} ({}) is no longer supported (supported: Android {}), and the images to \
+             move to failed to start on this computer.",
+            installed.android_major,
+            installed.version,
+            supported
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }];
+    for image in failed {
+        words.push(match reasons.get(&image.version) {
+            Some(why) => format!(
+                "Android {} did not start: {}.",
+                image.version,
+                why.trim_end_matches('.')
+            ),
+            None => format!("Android {} did not start.", image.version),
+        });
+    }
+    let major = failed.first().map_or_else(
+        || "latest".to_string(),
+        |image| image.android_major.to_string(),
+    );
+    words.push(format!(
+        "The service does not download them again by itself. To try again, choose a version \
+         under Updates in the settings app (or press Check now there), or run `dsa android use \
+         {major}`. If it fails again, collect the logs with `{COLLECT_LOGS}` and attach the \
+         file to your report."
+    ));
+    words.join(" ")
 }
 
 /// [`check_on_channel`], and raises on `notices` the alert that an image is downloaded and
@@ -313,6 +379,28 @@ pub fn check_alerting(
     Ok(news)
 }
 
+/// At a service's start: tries the images again that failed here only because of the host
+/// ([`ImageStore::forget_host_failures`]), when `host_can_run_vms` says that cause is gone.
+/// While the computer still cannot run a VM they stay where they are: a start fails for the
+/// computer's sake either way, and is not blamed on any image. Returns the line for the
+/// service's log, when there is news.
+pub fn retry_host_failures(store: &ImageStore, host_can_run_vms: bool) -> Option<String> {
+    if !host_can_run_vms {
+        return None;
+    }
+    match store.forget_host_failures() {
+        Ok(forgotten) if forgotten.is_empty() => None,
+        Ok(forgotten) => Some(format!(
+            "Android {} failed here only because of this computer, which can run Android now; \
+             the service downloads and tries them again",
+            forgotten.join(", ")
+        )),
+        Err(error) => Some(format!(
+            "the images that failed here because of this computer are not tried again: {error}"
+        )),
+    }
+}
+
 /// When the image check runs next. A check scheduled while an image was in place stands,
 /// unless none is left now (the first image failed its first boot): then waiting for the
 /// regular interval would leave the user with no Android for that long, so it runs now if
@@ -332,16 +420,32 @@ pub fn next_image_check(
 
 /// Boots a session as [`trial::start`] needs it. The session's launcher reads the current
 /// image from the store itself, so the image folder passed in is not used here.
-pub struct SessionBoot(pub Arc<Session>);
+pub struct SessionBoot {
+    session: Arc<Session>,
+    /// Why the last boot stopped, when it stopped rather than stalled or ran out of time.
+    stopped: Option<StopReason>,
+}
+
+impl SessionBoot {
+    pub fn new(session: Arc<Session>) -> SessionBoot {
+        SessionBoot {
+            session,
+            stopped: None,
+        }
+    }
+}
 
 impl Boot for SessionBoot {
     /// A disk made under other signing keys stops the agent whichever image runs on it, and a
-    /// start the host refused never ran the image at all.
+    /// start the host refused never ran the image at all. Only this boot's own stop counts:
+    /// the session keeps the reason of an earlier stop until the next one, and a boot that ran
+    /// the guest and then stalled or ran out of time is the image's even when the start before
+    /// it was refused by the host.
     fn image_to_blame(&self) -> bool {
         !matches!(
-            self.0.problem(),
+            self.session.problem(),
             Some(BootProblem::DiskFromOtherKeys { .. })
-        ) && !matches!(self.0.last_reason(), Some(StopReason::HostFailed { .. }))
+        ) && !matches!(self.stopped, Some(StopReason::HostFailed { .. }))
     }
 
     fn boot(
@@ -350,7 +454,8 @@ impl Boot for SessionBoot {
         _image_dir: &std::path::Path,
         timeout: Duration,
     ) -> Result<(), String> {
-        let session = &self.0;
+        self.stopped = None;
+        let session = Arc::clone(&self.session);
         let events = session.events();
         session.start();
         let mut deadline = Instant::now() + timeout;
@@ -380,10 +485,11 @@ impl Boot for SessionBoot {
                     Some(problem) => return Err(problem.to_string()),
                 },
                 Ok(event) if event.state == SessionState::Stopped => {
+                    self.stopped = event.reason.clone();
                     return Err(event
                         .reason
                         .map(|reason| reason.to_string())
-                        .unwrap_or_else(|| "it stopped while starting".into()))
+                        .unwrap_or_else(|| "it stopped while starting".into()));
                 }
                 Ok(_) => {}
                 Err(RecvTimeoutError::Timeout) if Instant::now() < deadline => {}
@@ -401,9 +507,9 @@ impl Boot for SessionBoot {
         // A stop that failed leaves the session in Stopping, where a start is ignored; asking
         // again retries it, so the previous image is not kept from booting by it.
         for _ in 0..2 {
-            self.0.stop();
+            self.session.stop();
             if self
-                .0
+                .session
                 .wait_for(SessionState::Stopped, Duration::from_secs(120))
             {
                 return;
@@ -485,7 +591,7 @@ impl Boot for TrialBoot {
         if on {
             self.rollback.begin();
         } else if self.rollback.end() {
-            self.session.0.stop();
+            self.session.session.stop();
         }
     }
 }
@@ -543,9 +649,10 @@ fn kept_notice(image: &InstalledImage, first: bool) -> String {
 /// What happens to an image that failed its trial, in words for the user.
 fn not_retried(failed: &InstalledImage) -> String {
     format!(
-        "Android {} is not tried again until a newer build of it, or a new version of DSA, \
-         is available",
-        failed.version
+        "Android {} is not tried again until a newer build of it or a new version of DSA is \
+         available, or until Android {} is chosen again in the settings app (dsa android use \
+         {})",
+        failed.version, failed.android_major, failed.android_major
     )
 }
 
@@ -835,6 +942,13 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn last_reason(&self) -> Option<String> {
         if self.no_image_yet() {
+            // A computer whose virtualization is off cannot run any image: that is what the
+            // user has to fix first, while the image downloads.
+            let own = self.session.last_reason().map(|reason| reason.to_string());
+            if let Some(own) = own.filter(|reason| crate::start_failure::virtualization_off(reason))
+            {
+                return Some(own);
+            }
             return Some(NO_IMAGE_YET.into());
         }
         if let Some(StopReason::GuestFromOtherRelease(why)) = self.session.last_reason() {
@@ -1120,7 +1234,7 @@ impl UserAndroid for UpdatingAndroid {
         let image_restart = Arc::clone(&self.image_restart);
         thread::spawn(move || {
             let mut guest = TrialBoot {
-                session: SessionBoot(session),
+                session: SessionBoot::new(session),
                 rollback,
             };
             let outcome = trial::start(&store, &mut guest, timeout);
@@ -1169,9 +1283,10 @@ impl UserAndroid for UpdatingAndroid {
                 ),
                 Ok(Outcome::GaveUp { failed, reason }) => format!(
                     "Android {} did not start ({reason}); no other image is installed. The \
-                     service downloads another image if there is one, and the next \
-                     version of DSA tries this one again",
-                    failed.version
+                     service downloads another image if there is one. To try this one \
+                     again, choose Android {} in the settings app (dsa android use {}); \
+                     the next version of DSA also tries it again",
+                    failed.version, failed.android_major, failed.android_major
                 ),
                 Ok(Outcome::Undecided { image, reason }) => format!(
                     "Android {} is kept on trial and is not to blame: {reason}",

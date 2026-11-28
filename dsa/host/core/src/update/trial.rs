@@ -91,7 +91,7 @@ pub fn start(
         Err(reason) if state.on_trial => {
             guest.rolling_back(true);
             guest.halt();
-            let image = match store.roll_back() {
+            let image = match store.roll_back_because(&reason) {
                 Ok(image) => image,
                 Err(error) => {
                     guest.rolling_back(false);

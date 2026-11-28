@@ -406,8 +406,10 @@ impl CrashNotices {
 pub const WATCH_EVERY: Duration = Duration::from_secs(2);
 
 /// Reads the status through `connector` every [`WATCH_EVERY`], from a thread of its own, and
-/// hands `tell` the notice for each crash, in the language `language` gives at the time. It
-/// reconnects whenever the service goes away, and runs for as long as the process does.
+/// hands `tell` the notice for each crash, and the notice that virtualization is off when the
+/// computer cannot run Android for that reason
+/// ([`crate::start_failure::VirtualizationNotices`]), in the language `language` gives at the
+/// time. It reconnects whenever the service goes away, and runs for as long as the process does.
 pub fn watch_in_background(
     mut connector: Box<dyn Connector>,
     build: String,
@@ -419,6 +421,9 @@ pub fn watch_in_background(
         .name("dsa-crash-watch".into())
         .spawn(move || {
             let mut notices = CrashNotices::new();
+            // A computer that cannot run Android at all is told the same way, with what to
+            // turn on.
+            let mut virtualization = crate::start_failure::VirtualizationNotices::new();
             let mut said = false;
             loop {
                 let mut client =
@@ -444,6 +449,13 @@ pub fn watch_in_background(
                     {
                         log(&format!("Android crashed: {why}; the user is told"));
                         tell(notification(&why, language()));
+                    }
+                    if virtualization.observe(status.state, status.last_reason.as_deref()) {
+                        log(
+                            "virtualization is off on this computer; the user is told how to \
+                             turn it on",
+                        );
+                        tell(crate::start_failure::virtualization_notification(language()));
                     }
                     thread::sleep(WATCH_EVERY);
                 }

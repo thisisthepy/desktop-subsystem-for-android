@@ -27,6 +27,9 @@ msgstr "L'impostazione non è stata modificata perché non è stata concessa l'a
 msgid "Unknown"
 msgstr "Sconosciuto"
 
+msgid "No Android image is installed"
+msgstr "Nessuna immagine di Android installata"
+
 msgid "Stopped"
 msgstr "Fermo"
 

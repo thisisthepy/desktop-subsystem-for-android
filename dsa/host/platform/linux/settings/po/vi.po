@@ -27,6 +27,9 @@ msgstr "Cài đặt chưa được thay đổi vì không có quyền của qu�
 msgid "Unknown"
 msgstr "Không rõ"
 
+msgid "No Android image is installed"
+msgstr "Chưa cài đặt ảnh Android nào"
+
 msgid "Stopped"
 msgstr "Đã dừng"
 

@@ -361,15 +361,16 @@ impl GuestLauncher for MacVmLauncher {
 
     /// A start that returned an error never ran the guest: the Virtualization framework
     /// refused to create or start the VM. A VM that ended during boot failed on the host when
-    /// the guest printed nothing on its console.
+    /// the guest printed nothing on its console, and when it had no console log, since then
+    /// nothing shows the guest ran.
     fn failure_side(&mut self) -> FailureSide {
         if self.slot.get().is_none() {
             return FailureSide::Host;
         }
-        FailureSide::from_guest_output(
+        FailureSide::from_console(
             self.console_log
                 .as_ref()
-                .is_none_or(|log| std::fs::metadata(log).is_ok_and(|meta| meta.len() > 0)),
+                .map(|log| std::fs::metadata(log).is_ok_and(|meta| meta.len() > 0)),
         )
     }
 

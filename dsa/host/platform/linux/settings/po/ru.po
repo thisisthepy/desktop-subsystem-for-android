@@ -27,6 +27,9 @@ msgstr "Параметр не изменён, так как разрешение
 msgid "Unknown"
 msgstr "Неизвестно"
 
+msgid "No Android image is installed"
+msgstr "Образ Android не установлен"
+
 msgid "Stopped"
 msgstr "Остановлен"
 

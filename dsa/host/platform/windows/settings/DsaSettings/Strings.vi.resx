@@ -76,7 +76,7 @@ Các cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng
     <value>DSA đang được cập nhật. Hãy khởi động lại Android khi cập nhật xong.</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>Ảo hóa đang tắt hoặc thiếu Hyper-V. Hãy bật Nền tảng Máy ảo, rồi khởi động lại PC.</value>
+    <value>Máy tính này không chạy được Android vì ảo hóa đang tắt. Phiên bản Android đang dùng được giữ nguyên. Hãy kiểm tra ba điều sau rồi khởi động lại máy tính: 1. Bật ảo hóa (Intel VT-x hoặc AMD-V) trong cài đặt UEFI/BIOS của máy tính; khi đã bật, Trình quản lý Tác vụ hiển thị "Ảo hóa: Đã bật" trong Hiệu suất, CPU. 2. Bật tính năng Windows "Nền tảng Máy ảo" (Bật hoặc tắt tính năng Windows). 3. Hypervisor không được tắt trong cấu hình khởi động: nếu bcdedit hiển thị "hypervisorlaunchtype Off", hãy chạy "bcdedit /set hypervisorlaunchtype auto" với quyền quản trị.</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>Windows đã từ chối cài đặt cho máy ảo của Android. Hãy cập nhật hoặc cài đặt lại DSA.</value>
@@ -119,7 +119,7 @@ Các cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>Android {0} không khởi động được ({1}), nên Android {2} được dùng lại.
-Android {0} sẽ được thử lại khi có bản dựng mới hơn của nó hoặc phiên bản DSA mới.</value>
+Android {0} sẽ được thử lại khi có bản dựng mới hơn của nó hoặc phiên bản DSA mới, hoặc khi bạn chọn lại phiên bản của nó hay chọn Kiểm tra ngay.</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>Android {0} không khởi động được ({1}), nên Android {2} được dùng lại.
@@ -127,10 +127,20 @@ Android {2} chưa khởi động xong ({3}). Hãy khởi động lại Android �
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>Android {0} không khởi động được ({1}), và không có ảnh nào khác được cài đặt.
-DSA sẽ tải xuống ảnh khác nếu có. Phiên bản DSA tiếp theo sẽ thử lại ảnh này.</value>
+DSA sẽ tải xuống ảnh khác nếu có. Để thử lại ảnh này, hãy chọn phiên bản của nó hoặc chọn Kiểm tra ngay. Phiên bản DSA tiếp theo cũng sẽ thử lại ảnh này.</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} vẫn được giữ ở chế độ dùng thử và không phải là nguyên nhân: {1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>Chưa cài đặt ảnh Android nào vì các ảnh dành cho máy tính này không khởi động được trên đó: {0}
+Để thử lại, hãy chọn một phiên bản hoặc chọn Kiểm tra ngay (hoặc chạy dsa android use {1}). Nếu vẫn lỗi, hãy thu thập nhật ký bằng dsa logs collect -o dsa-logs.zip và đính kèm tệp vào báo cáo của bạn.</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>Chưa cài đặt ảnh Android nào và hiện chưa có ảnh nào để cài (hỗ trợ: Android {0}). DSA sẽ tiếp tục kiểm tra.</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>Android {0} trước đây không khởi động được trên máy tính này và sẽ được thử lại. DSA tải xuống ngay bây giờ và dùng nó vào lần khởi động Android tiếp theo; nếu lại lỗi, DSA sẽ quay lại.</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>DSA đã được cập nhật lên {0}.</value>
@@ -2150,6 +2160,9 @@ Không thể hoàn tác thao tác này.</value>
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>Không xác định</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>Chưa cài đặt ảnh Android nào</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>Phiên bản được hỗ trợ: Android {0}</value>

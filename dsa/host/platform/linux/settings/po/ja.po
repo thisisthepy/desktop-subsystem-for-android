@@ -27,6 +27,9 @@ msgstr "管理者の権限が得られなかったため、設定は変更され
 msgid "Unknown"
 msgstr "不明"
 
+msgid "No Android image is installed"
+msgstr "Android のイメージがインストールされていません"
+
 msgid "Stopped"
 msgstr "停止"
 

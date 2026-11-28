@@ -64,15 +64,31 @@ public class UpdateNoticeTextTests
     [InlineData("Android 16 is chosen; the service downloads it now and it is used the next time Android starts",
         "UpdateNotice_AndroidChosen(16)")]
     [InlineData("Android 17.0.0-2 did not start (the agent did not connect (after 300 s)), so Android 17.0.0-1 is in use again. "
-        + "Android 17.0.0-2 is not tried again until a newer build of it, or a new version of DSA, is available",
+        + "Android 17.0.0-2 is not tried again until a newer build of it or a new version of DSA is available, or until "
+        + "Android 17 is chosen again in the settings app (dsa android use 17)",
         "UpdateNotice_AndroidRolledBack(17.0.0-2|the agent did not connect (after 300 s)|17.0.0-1)")]
     [InlineData("Android 17.0.0-2 did not start (it crashed), so Android 17.0.0-1 is in use again, but it has not finished "
         + "starting yet (still booting). Start Android again (dsa start) to boot Android 17.0.0-1. Android 17.0.0-2 is not "
-        + "tried again until a newer build of it, or a new version of DSA, is available",
+        + "tried again until a newer build of it or a new version of DSA is available, or until Android 17 is chosen again "
+        + "in the settings app (dsa android use 17)",
         "UpdateNotice_AndroidRolledBackNotReady(17.0.0-2|it crashed|17.0.0-1|still booting)")]
     [InlineData("Android 17.0.0-2 did not start (it crashed); no other image is installed. The service downloads another "
-        + "image if there is one, and the next version of DSA tries this one again",
+        + "image if there is one. To try this one again, choose Android 17 in the settings app (dsa android use 17); the "
+        + "next version of DSA also tries it again",
         "UpdateNotice_AndroidGaveUp(17.0.0-2|it crashed)")]
+    [InlineData("No Android image is installed, because the images available for this computer failed to start on it. "
+        + "Android 17.0.0-2 did not start: the guest did not start: it crashed. Android 16.0.0-1 did not start. "
+        + "The service does not download them again by itself. To try again, choose a version under Updates in the "
+        + "settings app (or press Check now there), or run `dsa android use 17`. If it fails again, collect the logs "
+        + "with `dsa logs collect -o dsa-logs.zip` and attach the file to your report.",
+        "UpdateNotice_AndroidFailedHere(Android 17.0.0-2 did not start: the guest did not start: it crashed. "
+        + "Android 16.0.0-1 did not start.|17)")]
+    [InlineData("No Android image is installed, and no image to install is available yet (supported: Android 16, 17); "
+        + "the service keeps checking",
+        "UpdateNotice_AndroidNoImageAvailable(16, 17)")]
+    [InlineData("Android 16.0.0-1 did not start on this computer before and is tried again: the service downloads it now, "
+        + "and it boots the next time Android starts (going back if it fails again)",
+        "UpdateNotice_AndroidRetried(16.0.0-1)")]
     [InlineData("Android 17.0.0-2 is kept on trial and is not to blame: the host went to sleep",
         "UpdateNotice_AndroidOnTrial(17.0.0-2|the host went to sleep)")]
     [InlineData("DSA was updated to 0.2.1", "UpdateNotice_DsaUpdated(0.2.1)")]

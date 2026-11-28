@@ -74,14 +74,25 @@ public sealed partial class AndroidVersionViewModel : ObservableObject
     public ObservableCollection<AndroidVersionChoice> Choices { get; } = new();
 
     public bool IsLoaded => _info is not null;
-    public string VersionText => _info is null ? "" : string.Format(CultureInfo.CurrentCulture,
-        _text.Get("Android_Major"), _info.Major);
-    public string ImageVersion => _info?.Version ?? "";
+
+    /// <summary>Whether an Android image is installed. An installer without a bundled image
+    /// records the name "none" with Android 0 until the first image has been downloaded; that is
+    /// no Android version, so the page says no image is installed and leaves out the build and
+    /// security patch rows instead of showing "Android 0" and "Unknown".</summary>
+    public bool HasImage => _info is { Major: > 0 };
+
+    public string VersionText => _info is null ? ""
+        : HasImage ? string.Format(CultureInfo.CurrentCulture, _text.Get("Android_Major"), _info.Major)
+        : _text.Get("Android_NoImage");
+    public string ImageVersion => HasImage ? _info!.Version : "";
     public string BuildId => _info?.BuildId ?? _text.Get("Android_Unknown");
     public string SecurityPatch => _info?.SecurityPatch ?? _text.Get("Android_Unknown");
     public string SupportedText => _info is null ? "" : string.Format(CultureInfo.CurrentCulture,
         _text.Get("Android_Supported"), string.Join(", ", _info.Supported));
-    public string Notice => _info?.Notice ?? "";
+
+    /// <summary>The service's latest news about the image, in the app's language where the app
+    /// knows the sentence.</summary>
+    public string Notice => _info?.Notice is { Length: > 0 } notice ? UpdateNoticeText.Localize(_text, notice) : "";
     public bool HasNotice => !string.IsNullOrEmpty(_info?.Notice);
     /// <summary>A switch waits for its image: it is used from the next start.</summary>
     public bool IsSwitching => _info is not null && _info.TargetMajor != _info.Major;

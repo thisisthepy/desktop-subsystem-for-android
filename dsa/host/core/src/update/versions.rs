@@ -252,6 +252,15 @@ pub struct VersionReport {
     pub restart_pending: Option<String>,
 }
 
+impl VersionReport {
+    /// Whether an Android image is installed. An installer without a bundled image records the
+    /// name `none` with Android 0 until the first image is downloaded and has booted; that is
+    /// no Android version, and is shown as no image rather than as "Android 0".
+    pub fn has_image(&self) -> bool {
+        self.android_major != 0
+    }
+}
+
 /// Why a version was not chosen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChooseError {

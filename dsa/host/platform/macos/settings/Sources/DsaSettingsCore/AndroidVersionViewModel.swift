@@ -67,8 +67,18 @@ public final class AndroidVersionViewModel: ObservableObject {
     }
 
     public var isLoaded: Bool { info != nil }
-    public var versionText: String { info.map { text.format("Android_Major", $0.major) } ?? "" }
-    public var imageVersion: String { info?.version ?? "" }
+    /// Whether an Android image is installed. An installation without a bundled image reports
+    /// the name "none" with Android 0 until its first image is downloaded; that is no Android
+    /// version, so the page says no image is installed and leaves out the build and security
+    /// patch rows instead of showing "Android 0" and "Unknown".
+    public var hasImage: Bool { (info?.major ?? 0) > 0 }
+    public var versionText: String {
+        guard let info else {
+            return ""
+        }
+        return hasImage ? text.format("Android_Major", info.major) : text.get("Android_NoImage")
+    }
+    public var imageVersion: String { hasImage ? (info?.version ?? "") : "" }
     public var buildId: String { info?.buildId ?? text.get("Android_Unknown") }
     public var securityPatch: String { info?.securityPatch ?? text.get("Android_Unknown") }
     public var supportedText: String {

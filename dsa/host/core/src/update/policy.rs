@@ -27,6 +27,12 @@ impl InstalledImage {
     pub fn order(&self) -> (u32, u64, u64, u64) {
         image_order(self.android_major, self.build, &self.version)
     }
+
+    /// Whether this is no image at all: the name an installer without a bundled image records
+    /// (`none`, Android 0) until the first image is downloaded.
+    pub fn is_none(&self) -> bool {
+        self.android_major == 0
+    }
 }
 
 /// Where `entry` stands among other images, newest last ([`image_order`]).
@@ -41,9 +47,14 @@ pub enum Decision {
     UpToDate,
     /// Move to this image.
     Apply(ImageEntry),
-    /// Nothing to move to, and the installed image is no longer supported. The text says
-    /// so in words a person can act on.
+    /// Nothing to move to, and the installed image is no longer supported (or there is none).
+    /// The text says so in words a person can act on.
     Unsupported(String),
+    /// Nothing to move to although the installed image needs replacing (it is no longer
+    /// supported, or there is none), because every image that would replace it failed to
+    /// start on this computer. The images, newest first; the caller words it with why each
+    /// failed, which the store keeps.
+    FailedHere(Vec<ImageEntry>),
 }
 
 /// Checks that moving from `installed` to `image` is allowed. The reason names the rule.
@@ -156,7 +167,7 @@ fn decide_among(
     release: Option<ReleaseChannel>,
 ) -> Decision {
     let target = target_major(channel, &manifest.supported_majors);
-    let newest = manifest
+    let offered: Vec<&ImageEntry> = manifest
         .images
         .iter()
         .filter(|image| match release {
@@ -167,19 +178,41 @@ fn decide_among(
             Channel::Latest => true,
             Channel::Major(_) => Some(image.android_major) == target,
         })
+        .collect();
+    let newest = offered
+        .iter()
         .filter(|image| check_for(installed, image, manifest, failed, older_allowed).is_ok())
         .max_by_key(|image| order_of(image));
-    match newest {
-        Some(image) => Decision::Apply(image.clone()),
-        None if !manifest.supported_majors.contains(&installed.android_major) => {
-            Decision::Unsupported(format!(
-                "Android {} ({}) is no longer supported (supported: {}) and no image to move \
-                 to is available yet",
-                installed.android_major,
-                installed.version,
-                majors(manifest)
-            ))
-        }
-        None => Decision::UpToDate,
+    if let Some(image) = newest {
+        return Decision::Apply((*image).clone());
     }
+    if manifest.supported_majors.contains(&installed.android_major) {
+        return Decision::UpToDate;
+    }
+    // Refused only because they failed here: every other rule lets them in.
+    let mut failed_here: Vec<ImageEntry> = offered
+        .into_iter()
+        .filter(|image| failed.contains(&image.version))
+        .filter(|image| check_for(installed, image, manifest, &[], older_allowed).is_ok())
+        .cloned()
+        .collect();
+    if !failed_here.is_empty() {
+        failed_here.sort_by_key(|image| std::cmp::Reverse(order_of(image)));
+        return Decision::FailedHere(failed_here);
+    }
+    Decision::Unsupported(if installed.is_none() {
+        format!(
+            "No Android image is installed, and no image to install is available yet \
+             (supported: Android {}); the service keeps checking",
+            majors(manifest)
+        )
+    } else {
+        format!(
+            "Android {} ({}) is no longer supported (supported: {}) and no image to move \
+             to is available yet",
+            installed.android_major,
+            installed.version,
+            majors(manifest)
+        )
+    })
 }

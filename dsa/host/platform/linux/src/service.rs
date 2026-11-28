@@ -620,6 +620,13 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         Ok(updates) => (updates, None),
         Err(disabled) => (None, Some(disabled)),
     };
+    // Images an older build blamed for this computer's fault are tried again: a start that
+    // fails for the computer's sake now is not blamed on them.
+    if let Some(line) = updates.as_ref().and_then(|updates| {
+        dsa_host_core::update::service::retry_host_failures(&updates.store, true)
+    }) {
+        eprintln!("{build}: {line}");
+    }
     let direct_mapped = start_direct_mapped(&config, updates.as_ref(), build);
     check_raw_system_disk(&config, updates.as_ref(), build);
     if let (Some(updates), Some(settings)) = (&updates, config.update.clone()) {
@@ -655,7 +662,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
     let android_version: Option<dsa_host_core::host_api::AndroidVersionSource> =
         updates.as_ref().map(|updates| {
             let store = Arc::clone(&updates.store);
-            Arc::new(move || store.state().ok().map(|state| state.current.version))
+            Arc::new(move || store.installed_version())
                 as dsa_host_core::host_api::AndroidVersionSource
         });
     // Every user's Android follows the computer's power and sleep.

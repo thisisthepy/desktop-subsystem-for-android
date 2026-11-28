@@ -403,6 +403,45 @@ fn fr17_dsa_status_gives_each_mapped_code_its_sentence() {
 }
 
 #[test]
+fn fr14_dsa_status_says_virtualization_is_off_and_how_to_turn_it_on() {
+    use dsa_host_core::host_api::Status;
+    use dsa_host_core::start_failure::{host_problem, HYPERVISOR_NOT_RUNNING};
+    // The start the host refused on every attempt, as the session reports it, and the
+    // service's own finding at its start that no hypervisor runs.
+    let refused = "HcsCreateComputeSystem failed (HRESULT 0x80370102): {\"Error\":-2143878910,\
+        \"ErrorMessage\":\"The virtual machine could not be started because a required feature \
+        is not installed.\",\"ErrorEvents\":[{\"Message\":\"Cannot create system 'dsa-android' \
+        since Hyper-V is not installed on the host.\"}]}";
+    for why in [refused, HYPERVISOR_NOT_RUNNING] {
+        let line = dsa_cli::describe(&Status {
+            state: SessionState::Stopped,
+            last_reason: Some(format!("{}\nconsole tail", host_problem(why))),
+            update_notice: None,
+            problem: None,
+            program_update: None,
+        });
+        let first = line.lines().next().unwrap();
+        for words in [
+            "virtualization is off",
+            "VT-x",
+            "AMD-V",
+            "Virtualization: Enabled",
+            "Virtual Machine Platform",
+            "hypervisorlaunchtype",
+            "The Android version in use is kept",
+        ] {
+            assert!(first.contains(words), "{words:?} in {line}");
+        }
+        assert!(!first.contains("no Android image"), "{line}");
+        // The raw account is still there, below the sentence.
+        assert!(
+            line.contains(&format!("details: {}", host_problem(why))),
+            "{line}"
+        );
+    }
+}
+
+#[test]
 fn fr2_dsa_says_what_keeps_a_stalled_android_from_being_ready() {
     use dsa_host_core::host_api::Status;
     let status = Status {
@@ -4213,6 +4252,61 @@ fn fr14_dsa_android_shows_the_version_and_moves_down_only_with_erase_data() {
     assert_eq!(parsed.android, Some(Channel::Latest));
     assert!(parse(&args("android use seventeen")).is_err());
     assert!(parse(&args("android use")).is_err());
+}
+
+/// Android versions of an installation that bundled no image and has none yet.
+struct NoImageVersions;
+
+impl dsa_host_core::update::versions::AndroidVersions for NoImageVersions {
+    fn needs_administrator(&self) -> bool {
+        false
+    }
+    fn report(&self) -> Result<dsa_host_core::update::versions::VersionReport, String> {
+        use dsa_host_core::update::versions::{Channel, VersionReport};
+        Ok(VersionReport {
+            version: "none".into(),
+            android_major: 0,
+            build: 0,
+            build_id: None,
+            security_patch: None,
+            channel: Channel::Latest,
+            supported_majors: vec![16, 17],
+            target_major: 17,
+            on_trial: false,
+            notice: Some("No Android image is installed, because the images failed".into()),
+            restart_pending: None,
+        })
+    }
+    fn choose(
+        &self,
+        _: dsa_host_core::update::versions::Channel,
+        _: bool,
+    ) -> Result<
+        dsa_host_core::update::versions::VersionReport,
+        dsa_host_core::update::versions::ChooseError,
+    > {
+        self.report()
+            .map_err(dsa_host_core::update::versions::ChooseError::Store)
+    }
+}
+
+#[test]
+fn fr14_dsa_android_version_with_no_image_says_none_is_installed() {
+    use dsa_host_core::host_api::HostApiService;
+    let ((listener, _, _), endpoint) = local_pair();
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_android_versions(Arc::new(NoImageVersions));
+    let _service = RunningService::start_service(listener, service);
+
+    let shown = stdout(&dsa(&endpoint, "android version"));
+    assert!(
+        shown.starts_with("No Android image is installed\n"),
+        "{shown}"
+    );
+    assert!(!shown.contains("Android 0"), "{shown}");
+    assert!(!shown.contains("(none)"), "{shown}");
+    assert!(!shown.contains("unknown"), "{shown}");
+    assert!(shown.contains("Supported: Android 16, 17"), "{shown}");
 }
 
 #[test]

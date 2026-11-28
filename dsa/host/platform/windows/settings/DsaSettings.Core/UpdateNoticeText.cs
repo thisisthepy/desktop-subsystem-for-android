@@ -18,6 +18,9 @@ public static partial class UpdateNoticeText
     public const string AndroidRolledBackNotReady = "UpdateNotice_AndroidRolledBackNotReady";
     public const string AndroidGaveUp = "UpdateNotice_AndroidGaveUp";
     public const string AndroidOnTrial = "UpdateNotice_AndroidOnTrial";
+    public const string AndroidFailedHere = "UpdateNotice_AndroidFailedHere";
+    public const string AndroidNoImageAvailable = "UpdateNotice_AndroidNoImageAvailable";
+    public const string AndroidRetried = "UpdateNotice_AndroidRetried";
     public const string DsaUpdated = "UpdateNotice_DsaUpdated";
     public const string DsaDownloaded = "UpdateNotice_DsaDownloaded";
     public const string DsaInstalling = "UpdateNotice_DsaInstalling";
@@ -33,6 +36,9 @@ public static partial class UpdateNoticeText
         [AndroidRolledBackNotReady] = 4,
         [AndroidGaveUp] = 2,
         [AndroidOnTrial] = 2,
+        [AndroidFailedHere] = 2,
+        [AndroidNoImageAvailable] = 1,
+        [AndroidRetried] = 1,
         [DsaUpdated] = 1,
         [DsaDownloaded] = 1,
         [DsaInstalling] = 1,
@@ -46,6 +52,12 @@ public static partial class UpdateNoticeText
         (new(@"^Android was updated to (\S+)$"), AndroidUpdated),
         (new(@"^Android (\S+) is installed$"), AndroidInstalled),
         (new(@"^Android (\S+) is chosen; "), AndroidChosen),
+        (new(@"^Android (.+) did not start on this computer before and is tried again: "), AndroidRetried),
+        // Which images failed and why stays in the service's words, as every reason does.
+        (new(@"^No Android image is installed, because the images available for this computer failed to start on it\. (.*) The service does not download them again by itself\. .*`dsa android use ([^`\s]+)`"),
+            AndroidFailedHere),
+        (new(@"^No Android image is installed, and no image to install is available yet \(supported: Android ([^)]*)\); the service keeps checking$"),
+            AndroidNoImageAvailable),
         (new(@"^Android (\S+) did not start \((.*)\), so Android (\S+) is in use again, but it has not finished starting yet \((.*)\)\. "),
             AndroidRolledBackNotReady),
         (new(@"^Android (\S+) did not start \((.*)\), so Android (\S+) is in use again\. "), AndroidRolledBack),

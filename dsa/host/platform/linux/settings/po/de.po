@@ -27,6 +27,9 @@ msgstr "Die Einstellung wurde nicht geändert, weil keine Administratorberechtig
 msgid "Unknown"
 msgstr "Unbekannt"
 
+msgid "No Android image is installed"
+msgstr "Kein Android-Abbild ist installiert"
+
 msgid "Stopped"
 msgstr "Gestoppt"
 

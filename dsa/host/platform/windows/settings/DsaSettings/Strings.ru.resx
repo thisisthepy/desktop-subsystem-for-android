@@ -76,7 +76,7 @@
     <value>DSA обновляется. Запустите Android снова, когда обновление завершится.</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>Виртуализация выключена или нет Hyper-V. Включите «Платформу виртуальной машины» и перезагрузите компьютер.</value>
+    <value>Этот компьютер не может запустить Android, потому что виртуализация выключена. Используемая версия Android сохраняется. Проверьте три пункта и перезагрузите компьютер: 1. Включите виртуализацию (Intel VT-x или AMD-V) в настройках UEFI/BIOS компьютера; когда она включена, диспетчер задач показывает «Виртуализация: Включено» в разделе «Производительность», «ЦП». 2. Включите компонент Windows «Платформа виртуальной машины» (Включение или отключение компонентов Windows). 3. Гипервизор не должен быть отключён в конфигурации загрузки: если bcdedit показывает «hypervisorlaunchtype Off», выполните «bcdedit /set hypervisorlaunchtype auto» от имени администратора.</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>Windows отклонила параметры виртуальной машины Android. Обновите или переустановите DSA.</value>
@@ -119,7 +119,7 @@
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>Android {0} не запустился ({1}), поэтому снова используется Android {2}.
-Android {0} будет испробован снова, когда выйдет его новая сборка или новая версия DSA.</value>
+Android {0} будет испробован снова, когда выйдет его новая сборка или новая версия DSA, либо когда вы снова выберете его версию или нажмёте «Проверить сейчас».</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>Android {0} не запустился ({1}), поэтому снова используется Android {2}.
@@ -127,10 +127,20 @@ Android {2} ещё не завершил запуск ({3}). Запустите 
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>Android {0} не запустился ({1}), а другой образ не установлен.
-DSA скачает другой образ, если он есть. Следующая версия DSA попробует этот образ снова.</value>
+DSA скачает другой образ, если он есть. Чтобы попробовать этот образ снова, выберите его версию или нажмите «Проверить сейчас». Следующая версия DSA тоже попробует его снова.</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} остаётся на испытании и не является причиной: {1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>Образ Android не установлен: доступные для этого компьютера образы на нём не запустились: {0}
+Чтобы попробовать снова, выберите версию или нажмите «Проверить сейчас» (или выполните dsa android use {1}). Если снова не получится, соберите журналы командой dsa logs collect -o dsa-logs.zip и приложите файл к сообщению.</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>Образ Android не установлен, и образа для установки пока нет (поддерживаются: Android {0}). DSA продолжает проверять.</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>Android {0} раньше не запустился на этом компьютере и будет испробован снова. DSA сейчас скачивает его, он будет использоваться при следующем запуске Android; если он снова не запустится, DSA вернётся к прежнему.</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>DSA обновлена до версии {0}.</value>
@@ -2150,6 +2160,9 @@ Android сейчас остановится, а при следующем зап
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>Неизвестно</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>Образ Android не установлен</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>Поддерживаемые версии: Android {0}</value>

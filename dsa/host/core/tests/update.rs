@@ -402,6 +402,44 @@ fn fr14_an_image_that_failed_under_another_dsa_build_is_tried_again() {
     assert!(next.state().unwrap().failed.is_empty());
 }
 
+#[test]
+fn fr14_a_failed_image_keeps_why_it_failed_until_it_is_tried_again() {
+    let (store, root, _) = staged_store();
+    let mut guest = FakeGuest {
+        broken: vec!["16.0.2".into()],
+        booted: vec![],
+        halts: 0,
+    };
+    trial::start(&store, &mut guest, Duration::from_secs(120)).unwrap();
+    let state = store.state().unwrap();
+    assert_eq!(state.failed, ["16.0.2"]);
+    assert_eq!(
+        state.failed_reasons.get("16.0.2").map(String::as_str),
+        Some("the agent did not connect within 120 s")
+    );
+
+    // Only the first line is kept: the lines after it are the console's tail, which the log
+    // has in full.
+    let (store, _, _) = staged_store();
+    store
+        .roll_back_because("the guest ended while booting\nconsole: line 1\nconsole: line 2")
+        .unwrap();
+    let state = store.state().unwrap();
+    assert_eq!(
+        state.failed_reasons.get("16.0.2").map(String::as_str),
+        Some("the guest ended while booting")
+    );
+
+    // A new build tries the image again, and forgets why it failed with the failure.
+    let first = installed("ignored", 1, 1);
+    let next = ImageStore::open_as(&root, &first, "dsa-hostd 0.1.2").unwrap();
+    let state = next.state().unwrap();
+    assert!(
+        state.failed.is_empty() && state.failed_reasons.is_empty(),
+        "{state:?}"
+    );
+}
+
 /// An image folder made the way make-image.py lays one out, with a real VHDX signature when
 /// `real` is set and a stand-in's text otherwise.
 fn put_image(root: &Path, version: &str, major: u32, build: u64, real: bool) {

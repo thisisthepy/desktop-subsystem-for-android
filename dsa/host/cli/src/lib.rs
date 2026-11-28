@@ -3408,13 +3408,17 @@ pub fn android_versions_json(report: &VersionReport) -> Value {
 
 /// The version report in words.
 pub fn android_versions_text(report: &VersionReport) -> String {
-    let mut lines = vec![format!(
-        "Android {} ({}), build {}, security patch {}",
-        report.android_major,
-        report.version,
-        report.build_id.as_deref().unwrap_or("unknown"),
-        report.security_patch.as_deref().unwrap_or("unknown"),
-    )];
+    let mut lines = vec![if report.has_image() {
+        format!(
+            "Android {} ({}), build {}, security patch {}",
+            report.android_major,
+            report.version,
+            report.build_id.as_deref().unwrap_or("unknown"),
+            report.security_patch.as_deref().unwrap_or("unknown"),
+        )
+    } else {
+        "No Android image is installed".to_string()
+    }];
     lines.push(match report.channel {
         Channel::Latest => format!(
             "Follows: the newest supported version (Android {})",
@@ -4145,10 +4149,20 @@ pub fn describe_tasks(list: &TaskList) -> String {
 
 /// What a start failure's first line means for the user, when it holds an error code or says
 /// that the host cannot run VMs. Other reasons are already plain and stay as they are. The codes
-/// arrive as text, so this names no host API.
-fn plain_start_failure(first_line: &str) -> Option<&'static str> {
-    const VIRTUALIZATION: &str = "virtualization is off or Hyper-V is missing; \
-        turn on Virtual Machine Platform, then restart the PC";
+/// arrive as text, so this names no host API. Virtualization being off is read by core
+/// ([`dsa_host_core::start_failure::virtualization_off`]), as every other surface reads it.
+fn plain_start_failure(first_line: &str) -> Option<String> {
+    use dsa_host_core::start_failure::{virtualization_off, virtualization_off_text};
+    if virtualization_off(first_line) {
+        return Some(virtualization_off_text(
+            dsa_host_core::ui_language::UiLanguage::English,
+        ));
+    }
+    plain_error_code(first_line).map(str::to_string)
+}
+
+/// [`plain_start_failure`] for the error codes other than virtualization's.
+fn plain_error_code(first_line: &str) -> Option<&'static str> {
     const CONFIGURATION: &str = "the host refused the settings for Android's virtual machine; \
         update or reinstall DSA";
     const MEMORY: &str = "there is not enough memory to start Android; \
@@ -4157,9 +4171,6 @@ fn plain_start_failure(first_line: &str) -> Option<&'static str> {
         free up space or check the drive, then try again";
     const GENERAL: &str = "Android could not start; \
         try again, and check the details if it keeps failing";
-    if first_line.contains("Host Compute System is not available") {
-        return Some(VIRTUALIZATION);
-    }
     let codes: Vec<String> = first_line
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|token| {
@@ -4170,7 +4181,6 @@ fn plain_start_failure(first_line: &str) -> Option<&'static str> {
         .map(str::to_ascii_lowercase)
         .collect();
     let known = codes.iter().find_map(|code| match code.as_str() {
-        "0x80370102" | "0xc0351000" => Some(VIRTUALIZATION),
         "0x80070057" | "0x8037010d" => Some(CONFIGURATION),
         "0x8007000e" | "0x80070008" | "0x800705aa" | "0x800705af" => Some(MEMORY),
         "0x80070070" | "0x80070027" | "0x80070017" | "0x8007045d" => Some(DISK),
@@ -4190,19 +4200,25 @@ pub fn describe(status: &Status) -> String {
     if let Some(reason) = &status.last_reason {
         let mut lines = reason.lines();
         let first = lines.next().unwrap_or_default();
-        let host = dsa_host_core::start_failure::host_problem_reason(first).map(|why| {
-            dsa_host_core::start_failure::host_problem_text(
-                dsa_host_core::ui_language::UiLanguage::English,
-                plain_start_failure(why).unwrap_or(why),
-            )
-        });
+        // Virtualization being off says on its own that the computer cannot run Android, and
+        // what to turn on.
+        let host = if dsa_host_core::start_failure::virtualization_off(first) {
+            plain_start_failure(first)
+        } else {
+            dsa_host_core::start_failure::host_problem_reason(first).map(|why| {
+                dsa_host_core::start_failure::host_problem_text(
+                    dsa_host_core::ui_language::UiLanguage::English,
+                    plain_start_failure(why).as_deref().unwrap_or(why),
+                )
+            })
+        };
         // A crash reads as the sentence the user's notice says, with the account below it.
         let crash = dsa_host_core::guest_crash::localized_crash(
             dsa_host_core::ui_language::UiLanguage::English,
             first,
         );
-        let host = host.or(crash);
-        match host.as_deref().or_else(|| plain_start_failure(first)) {
+        let sentence = host.or(crash).or_else(|| plain_start_failure(first));
+        match sentence.as_deref() {
             Some(sentence) => {
                 let _ = write!(line, " (last stopped: {sentence})\ndetails: {first}");
             }

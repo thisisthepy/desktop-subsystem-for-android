@@ -6893,7 +6893,11 @@ impl HostApiService {
                             Channel::Latest => "latest".to_string(),
                             Channel::Major(major) => major.to_string(),
                         },
-                        report.android_major,
+                        if report.has_image() {
+                            format!("Android {}", report.android_major)
+                        } else {
+                            "no image".to_string()
+                        },
                         report.target_major
                     )
                 }),

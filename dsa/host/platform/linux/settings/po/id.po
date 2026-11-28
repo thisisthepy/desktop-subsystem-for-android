@@ -27,6 +27,9 @@ msgstr "Pengaturan tidak diubah karena izin administrator tidak diberikan."
 msgid "Unknown"
 msgstr "Tidak diketahui"
 
+msgid "No Android image is installed"
+msgstr "Tidak ada image Android yang terinstal"
+
 msgid "Stopped"
 msgstr "Berhenti"
 

@@ -610,6 +610,11 @@ pub fn create_user_android(
         Arc::new(crate::dns_resolver::WindowsResolver),
         build,
     );
+    // A computer that runs no hypervisor cannot start Android at all: the status says so, and
+    // how to turn virtualization on, before the user's first start is refused for it.
+    if hypervisor_present() == Some(false) {
+        session.report_host_unready(dsa_host_core::start_failure::HYPERVISOR_NOT_RUNNING);
+    }
     let session = Arc::new(session);
     {
         let (watched, user_name) = (Arc::downgrade(&session), sid.to_string());
@@ -948,6 +953,29 @@ fn give_back_mapped_pages(
     }
 }
 
+/// Whether a hypervisor runs on this computer, as the processor tells Windows: once Hyper-V is
+/// up, Windows itself runs on it, and CPUID leaf 1 sets bit 31 of ECX (what
+/// `Win32_ComputerSystem.HypervisorPresent` reports too). It reads no service and takes no
+/// time, so the service asks it at its start and for each user's Android. `None` where the
+/// processor has no such bit to read (ARM64); HCS's own answer at the first start says it there.
+///
+/// A computer inside another hypervisor sees that one and reads as having one; HCS then refuses
+/// the VM at the start, and that refusal is read the same way.
+pub fn hypervisor_present() -> Option<bool> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: every x86_64 processor has CPUID leaf 1. Newer toolchains take the call as
+        // safe, hence the allowance.
+        #[allow(unused_unsafe)]
+        let leaf = unsafe { std::arch::x86_64::__cpuid(1) };
+        Some(leaf.ecx & (1 << 31) != 0)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        None
+    }
+}
+
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
     // A service, yet every pointer event passes through this process.
@@ -1003,6 +1031,27 @@ where
         Ok(updates) => (updates, None),
         Err(disabled) => (None, Some(disabled)),
     };
+    // Whether this computer can run a VM at all, read once: a hypervisor does not come or go
+    // without a restart of the computer.
+    let hypervisor = hypervisor_present();
+    if hypervisor == Some(false) {
+        eprintln!(
+            "{build}: {}; Android cannot start until virtualization is turned on in the \
+             computer's firmware, the Windows feature Virtual Machine Platform is on, and the \
+             boot configuration does not turn the hypervisor off (hypervisorlaunchtype)",
+            dsa_host_core::start_failure::HYPERVISOR_NOT_RUNNING
+        );
+    }
+    // Images an older build blamed for this computer's fault are tried again once it can run
+    // VMs.
+    if let Some(line) = updates.as_ref().and_then(|updates| {
+        dsa_host_core::update::service::retry_host_failures(
+            &updates.store,
+            hypervisor != Some(false),
+        )
+    }) {
+        eprintln!("{build}: {line}");
+    }
     let image_updates_available = updates.is_some() && config.image_updates_available();
     let direct_mapped = start_direct_mapped(&config, updates.as_ref(), build);
     if let (Some(updates), Some(settings)) = (&updates, config.update.clone()) {
@@ -1051,7 +1100,7 @@ where
     let android_version: Option<dsa_host_core::host_api::AndroidVersionSource> =
         updates.as_ref().map(|updates| {
             let store = Arc::clone(&updates.store);
-            Arc::new(move || store.state().ok().map(|state| state.current.version))
+            Arc::new(move || store.installed_version())
                 as dsa_host_core::host_api::AndroidVersionSource
         });
     let program_status = Arc::new(ProgramStatus::default());

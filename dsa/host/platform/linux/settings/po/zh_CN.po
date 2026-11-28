@@ -27,6 +27,9 @@ msgstr "未获得管理员权限，因此设置未更改。"
 msgid "Unknown"
 msgstr "未知"
 
+msgid "No Android image is installed"
+msgstr "未安装 Android 映像"
+
 msgid "Stopped"
 msgstr "已停止"
 

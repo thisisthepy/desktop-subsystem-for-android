@@ -76,7 +76,7 @@ Uygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın.
     <value>DSA güncelleniyor. Güncelleme bitince Android'i yeniden başlatın.</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>Sanallaştırma kapalı veya Hyper-V yok. Sanal Makine Platformu'nu açın, ardından bilgisayarı yeniden başlatın.</value>
+    <value>Sanallaştırma kapalı olduğu için bu bilgisayar Android'i çalıştıramıyor. Kullanılan Android sürümü korunur. Şu üç noktayı denetleyin, ardından bilgisayarı yeniden başlatın: 1. Bilgisayarın UEFI/BIOS ayarlarında sanallaştırmayı (Intel VT-x veya AMD-V) açın; açıkken Görev Yöneticisi Performans, CPU altında "Sanallaştırma: Etkin" gösterir. 2. "Sanal Makine Platformu" Windows özelliğini açın (Windows özelliklerini aç veya kapat). 3. Hipervizör önyükleme yapılandırmasında kapatılmamış olmalıdır: bcdedit "hypervisorlaunchtype Off" gösteriyorsa "bcdedit /set hypervisorlaunchtype auto" komutunu yönetici olarak çalıştırın.</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>Windows, Android'in sanal makinesi için ayarları reddetti. DSA'yı güncelleyin veya yeniden yükleyin.</value>
@@ -119,7 +119,7 @@ Uygulama pencereleri kapanır. Başladıktan sonra uygulamaları yeniden açın.
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>Android {0} başlamadı ({1}), bu nedenle yeniden Android {2} kullanılıyor.
-Android {0}, yeni bir derlemesi veya yeni bir DSA sürümü çıktığında yeniden denenir.</value>
+Android {0}, yeni bir derlemesi veya yeni bir DSA sürümü çıktığında ya da sürümünü yeniden seçtiğinizde veya Şimdi denetle'yi seçtiğinizde yeniden denenir.</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>Android {0} başlamadı ({1}), bu nedenle yeniden Android {2} kullanılıyor.
@@ -127,10 +127,20 @@ Android {2} henüz başlamayı bitirmedi ({3}). Önyüklemek için Android'i yen
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>Android {0} başlamadı ({1}) ve yüklü başka bir görüntü yok.
-Varsa DSA başka bir görüntü indirir. Sonraki DSA sürümü bunu yeniden dener.</value>
+Varsa DSA başka bir görüntü indirir. Bunu yeniden denemek için sürümünü seçin veya Şimdi denetle'yi seçin. Sonraki DSA sürümü de bunu yeniden dener.</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} denemede tutuluyor ve sorunun nedeni değil: {1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>Bu bilgisayar için kullanılabilen görüntüler burada başlamadığından yüklü Android görüntüsü yok: {0}
+Yeniden denemek için bir sürüm seçin veya Şimdi denetle'yi seçin (ya da dsa android use {1} komutunu çalıştırın). Yeniden başarısız olursa günlükleri dsa logs collect -o dsa-logs.zip ile toplayın ve dosyayı raporunuza ekleyin.</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>Yüklü Android görüntüsü yok ve henüz yüklenecek bir görüntü de yok (desteklenen: Android {0}). DSA denetlemeyi sürdürüyor.</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>Android {0} bu bilgisayarda daha önce başlamadı ve yeniden deneniyor. DSA şimdi indiriyor ve Android bir sonraki başlatılışında kullanılacak; yeniden başarısız olursa DSA geri döner.</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>DSA şu sürüme güncellendi: {0}.</value>
@@ -2150,6 +2160,9 @@ Bu işlem geri alınamaz.</value>
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>Bilinmiyor</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>Yüklü Android görüntüsü yok</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>Desteklenen sürümler: Android {0}</value>

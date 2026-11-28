@@ -35,6 +35,10 @@ public static partial class StopReasonText
     {
         ("host compute system is not available", Virtualization),
         ("virtual machine platform", Virtualization),
+        // HCS's own words when no hypervisor runs, and the service's account of finding that
+        // at its start, before any start of Android.
+        ("hyper-v is not installed", Virtualization),
+        ("the hypervisor is not running on this computer", Virtualization),
         ("out of memory", OutOfMemory),
         ("not enough memory", OutOfMemory),
         ("cannot allocate memory", OutOfMemory),

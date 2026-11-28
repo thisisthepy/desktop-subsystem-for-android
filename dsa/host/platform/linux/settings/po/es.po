@@ -27,6 +27,9 @@ msgstr "No se cambió la configuración porque no se concedió el permiso de adm
 msgid "Unknown"
 msgstr "Desconocido"
 
+msgid "No Android image is installed"
+msgstr "No hay ninguna imagen de Android instalada"
+
 msgid "Stopped"
 msgstr "Detenido"
 

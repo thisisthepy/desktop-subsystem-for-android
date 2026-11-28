@@ -2162,6 +2162,19 @@ impl Session {
         self.shared.problem()
     }
 
+    /// Reports that the host cannot run the guest, found before any start: `why` becomes the
+    /// last reason of a session that has not stopped for any other reason yet, as a host-side
+    /// failure ([`StopReason::HostFailed`]). A start replaces it with how that start ended.
+    pub fn report_host_unready(&self, why: &str) {
+        let mut status = self.shared.status.lock().unwrap_or_else(|e| e.into_inner());
+        if status.0 == SessionState::Stopped && status.1.is_none() {
+            status.1 = Some(StopReason::HostFailed {
+                why: why.to_string(),
+                diagnostics: None,
+            });
+        }
+    }
+
     /// The runtime ID of the guest, if running.
     pub fn vm_id(&self) -> Option<String> {
         self.shared
@@ -6778,7 +6791,13 @@ impl Worker {
             .unwrap_or_else(|e| e.into_inner()) = Some(secret.clone());
         self.secret = Some(secret);
         if let Err(why) = started {
-            let side = self.launcher.failure_side();
+            // A computer whose virtualization is off ran nothing of the image, whatever the
+            // launcher could tell about the boot.
+            let side = if crate::start_failure::virtualization_off(&why) {
+                crate::start_failure::FailureSide::Host
+            } else {
+                self.launcher.failure_side()
+            };
             // The launcher may have got part of the way; make sure nothing is left behind.
             let _ = self.launcher.stop(self.config.stop_timeout);
             let reason = match side {

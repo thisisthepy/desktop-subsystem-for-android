@@ -612,8 +612,12 @@ fn android_groups(ctx: &Shared, page: &Rc<Page>, image: &adw::PreferencesGroup) 
         Rc::new(move |r: Result<AndroidVersion, crate::api::Failure>| {
             page.show_failure(&tr("The setting was not changed"), r.as_ref().err());
             let Ok(version) = r else { return };
-            version_label.set_label(&trf("Android {0}", &[&version.major.to_string()]));
-            version_row.set_subtitle(&version.version);
+            // Without an image there is no version, build or security patch to show.
+            let has_image = view::android_has_image(&version);
+            version_label.set_label(&view::android_version_title(&version));
+            version_row.set_subtitle(if has_image { &version.version } else { "" });
+            build_row.set_visible(has_image);
+            patch_row.set_visible(has_image);
             build_label.set_label(&version.build_id.clone().unwrap_or_else(|| tr("Unknown")));
             patch_label.set_label(
                 &version

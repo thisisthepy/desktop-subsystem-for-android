@@ -415,6 +415,22 @@ pub fn android_choice_index(info: &AndroidVersion) -> usize {
         .unwrap_or(0)
 }
 
+/// Whether an Android image is installed. An installation without a bundled image reports the
+/// name `none` with Android 0 until its first image is downloaded; that is no Android version.
+pub fn android_has_image(info: &AndroidVersion) -> bool {
+    info.major > 0
+}
+
+/// The version that runs, as the page's first row says it: "Android 17", or that no Android
+/// image is installed (never "Android 0").
+pub fn android_version_title(info: &AndroidVersion) -> String {
+    if android_has_image(info) {
+        trf("Android {0}", &[&info.major.to_string()])
+    } else {
+        tr("No Android image is installed")
+    }
+}
+
 /// The version the image updates follow: the newest supported one, or one major version and
 /// its security updates.
 pub fn android_channel_text(info: &AndroidVersion) -> String {

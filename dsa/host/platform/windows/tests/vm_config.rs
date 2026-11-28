@@ -1116,3 +1116,106 @@ fn pr3_the_gpu_assignment_request_gives_the_vm_every_host_gpu() {
     // acceleration off, so they are never sent.
     assert_eq!(settings.len(), 2, "{request}");
 }
+
+/// What HCS answered on each attempt in #1065, on a computer where no hypervisor ran.
+const HYPER_V_NOT_INSTALLED: &str = "HcsCreateComputeSystem failed (HRESULT 0x80370102): \
+    {\"Error\":-2143878910,\"ErrorMessage\":\"The virtual machine could not be started because \
+    a required feature is not installed.\",\"ErrorEvents\":[{\"Message\":\"Cannot create system \
+    'dsa-android' since Hyper-V is not installed on the host.\"}]}";
+
+/// Runs [`start_dropping_shared_memory`] with the regions given, on a host that answers each
+/// attempt from `answers` in turn. Returns the attempts made, the log, and the result.
+fn start_against(
+    graphics: bool,
+    pictures: bool,
+    answers: &[Result<(), &str>],
+) -> (
+    Vec<dsa_host_windows::vm::StartAttempt>,
+    Vec<String>,
+    Result<(), String>,
+) {
+    use dsa_host_windows::vm::start_dropping_shared_memory;
+    let mut attempts = Vec::new();
+    let mut log = Vec::new();
+    let result = start_dropping_shared_memory(
+        "dsa-android-test",
+        graphics,
+        pictures,
+        &mut |attempt| {
+            let answer = answers[attempts.len()];
+            attempts.push(attempt);
+            answer.map_err(str::to_string)
+        },
+        &mut |line| log.push(line.to_string()),
+    );
+    (attempts, log, result)
+}
+
+#[test]
+fn fr14_a_vm_the_host_refuses_on_every_attempt_is_logged_and_keeps_its_first_and_last_reason() {
+    use dsa_host_core::start_failure::virtualization_off;
+    use dsa_host_windows::vm::StartAttempt;
+    // #1065: refused with the memory shared for graphics, without it, and without the memory
+    // for decoded video pictures. 1.0.0 logged only the first two.
+    let refused = Err(HYPER_V_NOT_INSTALLED);
+    let (attempts, log, result) = start_against(true, true, &[refused, refused, refused]);
+    assert_eq!(
+        attempts,
+        [
+            StartAttempt::AsConfigured,
+            StartAttempt::WithoutGraphicsMemory,
+            StartAttempt::WithoutPictureMemory
+        ]
+    );
+    assert_eq!(
+        log.len(),
+        3,
+        "every attempt's reason is in the log: {log:?}"
+    );
+    assert!(log[0].contains("memory shared for graphics") && log[0].contains("0x80370102"));
+    assert!(log[1].contains("decoded video pictures") && log[1].contains("0x80370102"));
+    assert_eq!(
+        log[2],
+        format!("dsa-android-test: Android did not start ({HYPER_V_NOT_INSTALLED})")
+    );
+    let why = result.unwrap_err();
+    assert!(why.starts_with(HYPER_V_NOT_INSTALLED), "{why}");
+    assert!(why.contains("all 3 attempts"), "{why}");
+    assert!(virtualization_off(&why), "{why}");
+
+    // Different reasons: the session's reason keeps the first beside the last.
+    let (_, log, result) = start_against(
+        true,
+        true,
+        &[
+            Err("HcsCreateComputeSystem failed (HRESULT 0x8037010d)"),
+            Err("HcsCreateComputeSystem failed (HRESULT 0x8037010d)"),
+            refused,
+        ],
+    );
+    assert_eq!(log.len(), 3);
+    let why = result.unwrap_err();
+    assert!(
+        why.starts_with(HYPER_V_NOT_INSTALLED),
+        "the last first: {why}"
+    );
+    assert!(
+        why.contains(
+            "the first attempt, with shared memory, failed with: \
+             HcsCreateComputeSystem failed (HRESULT 0x8037010d)"
+        ),
+        "{why}"
+    );
+
+    // A VM that starts once the graphics memory is left out says only what was left out.
+    let (attempts, log, result) = start_against(true, true, &[refused, Ok(())]);
+    assert!(result.is_ok());
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(log.len(), 1, "{log:?}");
+
+    // Without shared memory there is one attempt, and its reason as it is.
+    let (attempts, log, result) = start_against(false, false, &[refused]);
+    assert_eq!(attempts, [StartAttempt::AsConfigured]);
+    assert_eq!(log.len(), 1);
+    assert_eq!(result.unwrap_err(), HYPER_V_NOT_INSTALLED);
+}

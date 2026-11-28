@@ -76,7 +76,7 @@ As janelas dos apps são fechadas. Abra os apps novamente quando ele tiver inici
     <value>O DSA está sendo atualizado. Inicie o Android novamente quando a atualização terminar.</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>A virtualização está desativada ou o Hyper-V não está presente. Ative a Plataforma de Máquina Virtual e reinicie o PC.</value>
+    <value>Este computador não pode executar o Android porque a virtualização está desativada. A versão do Android em uso é mantida. Verifique estes três itens e reinicie o computador: 1. Ative a virtualização (Intel VT-x ou AMD-V) nas configurações UEFI/BIOS do computador; quando ativada, o Gerenciador de Tarefas mostra "Virtualização: Habilitado" em Desempenho, CPU. 2. Ative o recurso do Windows "Plataforma de Máquina Virtual" (Ativar ou desativar recursos do Windows). 3. O hipervisor não pode estar desativado na configuração de inicialização: se bcdedit mostrar "hypervisorlaunchtype Off", execute "bcdedit /set hypervisorlaunchtype auto" como administrador.</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>O Windows recusou as configurações da máquina virtual do Android. Atualize ou reinstale o DSA.</value>
@@ -119,7 +119,7 @@ As janelas dos apps são fechadas. Abra os apps novamente quando ele tiver inici
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>O Android {0} não iniciou ({1}), então o Android {2} voltou a ser usado.
-O Android {0} será tentado novamente quando sair uma compilação mais nova dele ou uma nova versão do DSA.</value>
+O Android {0} será tentado novamente quando sair uma compilação mais nova dele ou uma nova versão do DSA, ou quando você escolher a versão dele de novo ou selecionar Verificar agora.</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>O Android {0} não iniciou ({1}), então o Android {2} voltou a ser usado.
@@ -127,10 +127,20 @@ O Android {2} ainda não terminou de iniciar ({3}). Inicie o Android novamente p
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>O Android {0} não iniciou ({1}), e nenhuma outra imagem está instalada.
-O DSA baixa outra imagem, se houver uma. A próxima versão do DSA tentará esta novamente.</value>
+O DSA baixa outra imagem, se houver uma. Para tentar esta novamente, escolha a versão dela ou selecione Verificar agora. A próxima versão do DSA também tentará esta novamente.</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>O Android {0} continua em teste e não é o culpado: {1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>Nenhuma imagem do Android está instalada, porque as imagens disponíveis para este computador não iniciaram nele: {0}
+Para tentar novamente, escolha uma versão ou selecione Verificar agora (ou execute dsa android use {1}). Se falhar de novo, colete os logs com dsa logs collect -o dsa-logs.zip e anexe o arquivo ao seu relato.</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>Nenhuma imagem do Android está instalada, e ainda não há nenhuma disponível para instalar (compatíveis: Android {0}). O DSA continua verificando.</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>O Android {0} não iniciou antes neste computador e será tentado novamente. O DSA o baixa agora, e ele será usado na próxima vez que o Android iniciar; se falhar de novo, o DSA volta atrás.</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>O DSA foi atualizado para {0}.</value>
@@ -2150,6 +2160,9 @@ Isso não pode ser desfeito.</value>
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>Desconhecida</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>Nenhuma imagem do Android está instalada</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>Versões compatíveis: Android {0}</value>

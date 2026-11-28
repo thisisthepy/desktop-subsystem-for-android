@@ -17,9 +17,11 @@ use dsa_host_core::update::manifest::{self, FileEntry, ImageEntry, Manifest, FOR
 use dsa_host_core::update::policy::InstalledImage;
 use dsa_host_core::update::program::ReleaseChannel;
 use dsa_host_core::update::service::{
-    check, check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
+    check, check_reporting, next_image_check, CheckNow, Download, StoreVersions, UpdateNotices,
+    UpdatingAndroid,
 };
 use dsa_host_core::update::store::{Fetch, ImageStore};
+use dsa_host_core::update::versions::{AndroidVersions, Channel};
 use dsa_host_core::update::UpdateError;
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::Role;
@@ -1061,6 +1063,478 @@ fn fr14_a_first_image_that_does_not_boot_is_given_up_without_booting_the_placeho
     .unwrap();
     assert!(next.unwrap_or_default().contains("16.0.1"));
     done.store(true, Ordering::Relaxed);
+}
+
+/// Starts a guest whose next start the host refuses, and whose agent never connects
+/// otherwise.
+struct HostThenSilentGuest {
+    refuse_next: Arc<AtomicBool>,
+    refused: bool,
+}
+
+impl GuestLauncher for HostThenSilentGuest {
+    fn start(&mut self, _: &BootSecret) -> Result<(), String> {
+        self.refused = self.refuse_next.swap(false, Ordering::SeqCst);
+        if self.refused {
+            return Err("the hypervisor refused to create the VM".into());
+        }
+        Ok(())
+    }
+    fn stop(&mut self, _: Duration) -> Result<(), String> {
+        Ok(())
+    }
+    fn failure_side(&mut self) -> FailureSide {
+        if self.refused {
+            FailureSide::Host
+        } else {
+            FailureSide::Guest
+        }
+    }
+}
+
+#[test]
+fn fr14_a_host_failure_of_an_earlier_start_does_not_excuse_the_next_trial() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let refuse_next = Arc::new(AtomicBool::new(true));
+    let (listener, _connector) = memory::pair();
+    let session = Arc::new(Session::new(
+        HostThenSilentGuest {
+            refuse_next: Arc::clone(&refuse_next),
+            refused: false,
+        },
+        Box::new(listener),
+        ControlHandshake::new("test host", WAIT),
+        SessionConfig {
+            connect_timeout: Duration::from_secs(60),
+            stop_timeout: WAIT,
+            ..SessionConfig::default()
+        },
+    ));
+    let android = UpdatingAndroid {
+        session,
+        store: Arc::clone(&store),
+        notices: Arc::new(UpdateNotices::default()),
+        boot_timeout: Duration::from_secs(2),
+        trial_running: Arc::new(AtomicBool::new(false)),
+        rollback: Default::default(),
+        image_restart: Default::default(),
+    };
+    let wait_for = |what: &str| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let notice = android.update_notice().unwrap_or_default();
+            if notice.contains(what) && !android.trial_running.load(Ordering::SeqCst) {
+                return notice;
+            }
+            assert!(Instant::now() < deadline, "no {what:?}: {notice}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    };
+
+    // The host refuses the first start: the image is not to blame.
+    android.start();
+    wait_for("16.0.2 is kept on trial");
+    assert!(store.state().unwrap().failed.is_empty());
+    assert!(android.session.wait_for(SessionState::Stopped, WAIT));
+
+    // The next start runs the guest, which never finishes booting: that is the image's, even
+    // though the reason the session last stopped for is still the host's refusal.
+    android.start();
+    let notice = wait_for("16.0.2 did not start");
+    assert!(
+        notice.contains("Android 16.0.1 is in use again"),
+        "{notice}"
+    );
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.1");
+    assert_eq!(state.failed, ["16.0.2"]);
+}
+
+/// What the Windows host's start says when its hypervisor service refuses the VM on all three
+/// attempts (with the memory shared for graphics, without it, and without the memory for
+/// decoded video pictures) because no hypervisor runs, as the logs of #1065 show it.
+const REFUSED_WITHOUT_HYPERVISOR: &str = "HcsCreateComputeSystem failed (HRESULT 0x80370102): \
+    {\"Error\":-2143878910,\"ErrorMessage\":\"The virtual machine could not be started because \
+    a required feature is not installed.\",\"ErrorEvents\":[{\"Message\":\"Cannot create system \
+    'dsa-android' since Hyper-V is not installed on the host.\",\"EventId\":11008}]} (on all 3 \
+    attempts, with and without shared memory)";
+
+/// A computer whose virtualization is off: every start is refused before the guest runs.
+struct VirtualizationOff {
+    /// What the launcher says about the side of its failure. A launcher that cannot tell
+    /// says the guest's; the refusal still says it was the host's.
+    side: FailureSide,
+    /// The starts asked of it.
+    starts: Arc<AtomicU32>,
+}
+
+impl GuestLauncher for VirtualizationOff {
+    fn start(&mut self, _: &BootSecret) -> Result<(), String> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        Err(REFUSED_WITHOUT_HYPERVISOR.into())
+    }
+    fn stop(&mut self, _: Duration) -> Result<(), String> {
+        Ok(())
+    }
+    fn failure_side(&mut self) -> FailureSide {
+        self.side
+    }
+}
+
+/// A user's Android over `store` on a computer whose virtualization is off.
+fn android_without_virtualization(
+    store: &Arc<ImageStore>,
+    side: FailureSide,
+) -> (UpdatingAndroid, Arc<AtomicU32>) {
+    let starts = Arc::new(AtomicU32::new(0));
+    let (listener, _connector) = memory::pair();
+    let session = Arc::new(Session::new(
+        VirtualizationOff {
+            side,
+            starts: Arc::clone(&starts),
+        },
+        Box::new(listener),
+        ControlHandshake::new("test host", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            ..SessionConfig::default()
+        },
+    ));
+    (
+        UpdatingAndroid {
+            session,
+            store: Arc::clone(store),
+            notices: Arc::new(UpdateNotices::default()),
+            boot_timeout: Duration::from_secs(5),
+            trial_running: Arc::new(AtomicBool::new(false)),
+            rollback: Default::default(),
+            image_restart: Default::default(),
+        },
+        starts,
+    )
+}
+
+/// Starts `android` and waits until its trial is over; returns the trial's notice.
+fn trial_over(android: &UpdatingAndroid) -> String {
+    android.start();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let notice = android.update_notice().unwrap_or_default();
+        if !notice.is_empty() && !android.trial_running.load(Ordering::SeqCst) {
+            return notice;
+        }
+        assert!(Instant::now() < deadline, "the trial did not end: {notice}");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn fr14_a_computer_with_virtualization_off_keeps_the_new_image_on_trial() {
+    use dsa_host_core::start_failure::{localized_host_problem, virtualization_off};
+    // #1065 on 1.0.0: an installation without a bundled image downloads Android 17, and its
+    // first start is refused by the host three times over (0x80370102). 1.0.0 put the image on
+    // the failed list and went back to `none`. Both launchers are covered: one that says the
+    // host refused (as the Windows launcher does when no VM was made) and one that cannot tell.
+    for side in [FailureSide::Host, FailureSide::Guest] {
+        let store = store_without_an_image();
+        check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+        assert_eq!(store.state().unwrap().current.version, "17.0.0-1");
+        let (android, starts) = android_without_virtualization(&store, side);
+
+        let notice = trial_over(&android);
+        assert!(
+            notice.contains("17.0.0-1 is kept on trial"),
+            "{side:?}: {notice}"
+        );
+        // The user tries again: the same.
+        trial_over(&android);
+        assert_eq!(starts.load(Ordering::SeqCst), 2, "{side:?}");
+
+        let state = store.state().unwrap();
+        assert_eq!(
+            state.current.version, "17.0.0-1",
+            "{side:?}: the store did not go back"
+        );
+        assert!(state.on_trial, "{side:?}: still on trial");
+        assert!(state.failed.is_empty(), "{side:?}: not on the failed list");
+        assert!(state.failed_reasons.is_empty(), "{side:?}");
+        assert!(store.has_image("17.0.0-1"), "{side:?}: its files are kept");
+        // The next check leaves it there instead of moving on to Android 16.
+        check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+        assert_eq!(
+            store.state().unwrap().current.version,
+            "17.0.0-1",
+            "{side:?}"
+        );
+
+        // The status says virtualization is off, and how to turn it on.
+        assert_eq!(android.state(), SessionState::Stopped);
+        let reason = android.last_reason().unwrap();
+        assert!(virtualization_off(&reason), "{side:?}: {reason}");
+        let shown = localized_host_problem(UiLanguage::English, &reason).unwrap();
+        for words in [
+            "virtualization is off",
+            "Virtual Machine Platform",
+            "hypervisorlaunchtype",
+        ] {
+            assert!(shown.contains(words), "{side:?}: {words:?} in {shown}");
+        }
+    }
+}
+
+#[test]
+fn fr14_virtualization_off_found_at_the_services_start_is_said_before_any_image_is_there() {
+    use dsa_host_core::start_failure::{virtualization_off, HYPERVISOR_NOT_RUNNING};
+    let store = store_without_an_image();
+    let (android, starts) = android_without_virtualization(&store, FailureSide::Host);
+    // Before the service has found anything, the status says no image is there yet.
+    let reason = android.last_reason().unwrap_or_default();
+    assert!(
+        reason.contains("no Android image is installed yet"),
+        "{reason}"
+    );
+    // The service found at its start that no hypervisor runs.
+    android.session.report_host_unready(HYPERVISOR_NOT_RUNNING);
+    for _ in 0..2 {
+        let reason = android.last_reason().unwrap_or_default();
+        assert!(virtualization_off(&reason), "{reason}");
+        assert!(!reason.contains("no Android image"), "{reason}");
+        assert_eq!(android.state(), SessionState::Stopped);
+        // A start while no image is there boots nothing and says the same.
+        android.start();
+    }
+    assert_eq!(starts.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn fr14_images_that_failed_only_because_of_the_host_are_tried_again_once_it_can_run_vms() {
+    use dsa_host_core::start_failure::host_problem;
+    use dsa_host_core::update::service::retry_host_failures;
+    // A failed list left by a build that blamed the image for the host's refusal (17), beside
+    // an image that did fail on its own (16).
+    let store = store_without_an_image();
+    check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+    store
+        .roll_back_because(&format!(
+            "the guest did not start: {REFUSED_WITHOUT_HYPERVISOR}"
+        ))
+        .unwrap();
+    check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+    store
+        .roll_back_because("16.0.0-1 did not finish booting within 300 seconds")
+        .unwrap();
+    assert_eq!(store.state().unwrap().failed, ["17.0.0-1", "16.0.0-1"]);
+
+    // While the computer still cannot run a VM, nothing changes.
+    assert_eq!(retry_host_failures(&store, false), None);
+    assert_eq!(store.state().unwrap().failed, ["17.0.0-1", "16.0.0-1"]);
+
+    // Once it can, the host's failures are tried again, and the image's own failure is not.
+    let line = retry_host_failures(&store, true).unwrap();
+    assert!(
+        line.contains("17.0.0-1") && !line.contains("16.0.0-1"),
+        "{line}"
+    );
+    let state = store.state().unwrap();
+    assert_eq!(state.failed, ["16.0.0-1"]);
+    assert!(!state.failed_reasons.contains_key("17.0.0-1"));
+    let news = check(&store, &both_majors(), "mem://list.json", &trusted())
+        .unwrap()
+        .unwrap();
+    assert!(news.contains("17.0.0-1 is downloaded"), "{news}");
+    // Nothing more to try again.
+    assert_eq!(retry_host_failures(&store, true), None);
+
+    // A failure the session reported as the host's is the host's too.
+    let store = store_without_an_image();
+    check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+    store
+        .roll_back_because(&host_problem(
+            "the network service refused the VM's adapter",
+        ))
+        .unwrap();
+    assert!(retry_host_failures(&store, true).is_some());
+    assert!(store.state().unwrap().failed.is_empty());
+}
+
+/// What an installation without a bundled image finds: Android 17 and Android 16 offered.
+fn both_majors() -> MemoryFetch {
+    server(
+        &[16, 17],
+        &[("17.0.0-1", 17, 1), ("16.0.0-1", 16, 1)],
+        &key(),
+    )
+}
+
+/// Boots the image on trial in `store` on a guest where the images in `broken` do not start,
+/// and waits until the trial is over.
+fn run_trial(store: &Arc<ImageStore>, broken: &[&str]) -> String {
+    let (android, done) = updating_android(store, broken);
+    android.start();
+    let notice = wait_for_notice(&android);
+    let deadline = Instant::now() + WAIT;
+    while android.trial_running.load(Ordering::SeqCst) {
+        assert!(Instant::now() < deadline, "the trial did not end");
+        thread::sleep(Duration::from_millis(10));
+    }
+    done.store(true, Ordering::Relaxed);
+    notice
+}
+
+#[test]
+fn fr14_when_every_image_failed_here_the_check_says_which_why_and_how_to_try_again() {
+    // #1065: the first image (17) failed its first boot, then the next one (16) did too.
+    let store = store_without_an_image();
+    let broken = ["17.0.0-1", "16.0.0-1"];
+    check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+    assert_eq!(store.state().unwrap().current.version, "17.0.0-1");
+    run_trial(&store, &broken);
+    check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+    assert_eq!(store.state().unwrap().current.version, "16.0.0-1");
+    run_trial(&store, &broken);
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "none");
+    assert_eq!(state.failed, ["17.0.0-1", "16.0.0-1"]);
+
+    let notice = check(&store, &both_majors(), "mem://list.json", &trusted())
+        .unwrap()
+        .unwrap();
+    assert!(
+        notice.starts_with("No Android image is installed"),
+        "{notice}"
+    );
+    for said in [
+        // Which versions failed here, and why each did.
+        "Android 17.0.0-1 did not start",
+        "17.0.0-1 does not boot",
+        "Android 16.0.0-1 did not start",
+        "16.0.0-1 does not boot",
+        // How to try again, and how to report it.
+        "settings app",
+        "dsa android use 17",
+        "dsa logs collect -o",
+    ] {
+        assert!(notice.contains(said), "{said:?} is missing: {notice}");
+    }
+    assert!(
+        !notice.contains("Android 0") && !notice.contains("(none)"),
+        "{notice}"
+    );
+
+    // The periodic check does not download them again on its own, and says the same.
+    let again = check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+    assert_eq!(again.as_deref(), Some(notice.as_str()));
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "none");
+    assert_eq!(state.failed, ["17.0.0-1", "16.0.0-1"]);
+}
+
+#[test]
+fn fr14_with_no_image_and_none_offered_nothing_says_android_0() {
+    let store = store_without_an_image();
+    let notice = check(
+        &store,
+        &server(&[16, 17], &[], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        notice.starts_with("No Android image is installed"),
+        "{notice}"
+    );
+    assert!(
+        !notice.contains("Android 0") && !notice.contains("(none)"),
+        "{notice}"
+    );
+}
+
+/// A store where both images of [`both_majors`] failed their first boot, as in #1065.
+fn store_where_every_image_failed() -> Arc<ImageStore> {
+    let store = store_without_an_image();
+    for version in ["17.0.0-1", "16.0.0-1"] {
+        check(&store, &both_majors(), "mem://list.json", &trusted()).unwrap();
+        assert_eq!(store.state().unwrap().current.version, version);
+        store
+            .roll_back_because(&format!("{version} does not boot"))
+            .unwrap();
+    }
+    store
+}
+
+fn versions_of(store: &Arc<ImageStore>, check_now: &Arc<CheckNow>) -> StoreVersions {
+    StoreVersions {
+        store: Arc::clone(store),
+        notices: Arc::new(UpdateNotices::default()),
+        check_now: Arc::clone(check_now),
+        shared_by_users: true,
+    }
+}
+
+#[test]
+fn fr14_choosing_a_version_tries_its_failed_images_again() {
+    let store = store_where_every_image_failed();
+    let check_now = Arc::new(CheckNow::default());
+    // "Version to use: Android 16" in the settings app, or `dsa android use 16`.
+    let report = versions_of(&store, &check_now)
+        .choose(Channel::Major(16), false)
+        .unwrap();
+    let state = store.state().unwrap();
+    assert_eq!(
+        state.failed,
+        ["17.0.0-1"],
+        "only the images of the chosen version are tried again"
+    );
+    assert!(!state.failed_reasons.contains_key("16.0.0-1"));
+    let notice = report.notice.unwrap_or_default();
+    assert!(notice.contains("Android 16"), "{notice}");
+    assert!(check_now.take(), "the service checks at once");
+
+    let news = check(&store, &both_majors(), "mem://list.json", &trusted())
+        .unwrap()
+        .unwrap();
+    assert!(news.contains("16.0.0-1 is downloaded"), "{news}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.0-1");
+    assert!(state.on_trial, "it boots on trial again, with the rollback");
+}
+
+#[test]
+fn fr14_check_now_on_the_newest_version_tries_its_failed_images_again() {
+    let store = store_where_every_image_failed();
+    let check_now = Arc::new(CheckNow::default());
+    // The settings app's Check now chooses the version already followed: the newest.
+    versions_of(&store, &check_now)
+        .choose(Channel::Latest, false)
+        .unwrap();
+    assert_eq!(store.state().unwrap().failed, ["16.0.0-1"]);
+    let news = check(&store, &both_majors(), "mem://list.json", &trusted())
+        .unwrap()
+        .unwrap();
+    assert!(news.contains("17.0.0-1 is downloaded"), "{news}");
+}
+
+#[test]
+fn fr14_with_no_image_installed_no_android_version_is_reported() {
+    let store = store_without_an_image();
+    assert_eq!(store.installed_version(), None, "`none` is not a version");
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    assert_eq!(store.installed_version().as_deref(), Some("16.0.2"));
 }
 
 #[test]

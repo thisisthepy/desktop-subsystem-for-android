@@ -668,6 +668,13 @@ pub fn serve(
         Ok(updates) => (updates, None),
         Err(disabled) => (None, Some(disabled)),
     };
+    // Images an older build blamed for this computer's fault are tried again: a start that
+    // fails for the computer's sake now is not blamed on them.
+    if let Some(line) = updates.as_ref().and_then(|updates| {
+        dsa_host_core::update::service::retry_host_failures(&updates.store, true)
+    }) {
+        eprintln!("{build}: {line}");
+    }
     if let (Some(updates), Some(update)) = (&updates, config.update.clone()) {
         let check = UpdateCheck {
             settings: update,
@@ -839,9 +846,7 @@ pub fn serve(
             shared_by_users: false,
         }));
         let store = Arc::clone(&updates.store);
-        service = service.with_android_version(Arc::new(move || {
-            store.state().ok().map(|state| state.current.version)
-        }));
+        service = service.with_android_version(Arc::new(move || store.installed_version()));
     } else if let Some(disabled) = updates_disabled {
         service = service.with_android_versions(Arc::new(disabled));
     }

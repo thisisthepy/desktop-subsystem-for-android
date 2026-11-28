@@ -315,6 +315,75 @@ pub fn shared_memory_regions_supported(build: u32) -> bool {
     build >= IRON_BUILD
 }
 
+/// One attempt at creating and starting the VM, by what it leaves out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartAttempt {
+    /// The VM as configured.
+    AsConfigured,
+    /// Without the memory shared for graphics.
+    WithoutGraphicsMemory,
+    /// Without the memory shared for decoded video pictures as well.
+    WithoutPictureMemory,
+}
+
+/// Creates and starts the VM named `vm` through `attempt`. A Windows build whose HCS does not
+/// take the shared memory regions refuses the whole VM: Android then starts without the
+/// graphics region first (when `graphics` is configured), then without the pictures region
+/// (when `pictures` is), and what they would carry goes through the sockets.
+///
+/// Every refusal goes to `log` with its reason, the last one too. When every attempt was
+/// refused, the error is the last attempt's reason together with the first one's, so the
+/// reason the session reports keeps both: the first says what the VM as configured met, the
+/// last what was left once nothing more could be left out.
+pub fn start_dropping_shared_memory(
+    vm: &str,
+    graphics: bool,
+    pictures: bool,
+    attempt: &mut dyn FnMut(StartAttempt) -> Result<(), String>,
+    log: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    let mut reasons = Vec::new();
+    let mut started = attempt(StartAttempt::AsConfigured);
+    if let (Err(why), true) = (&started, graphics) {
+        log(&format!(
+            "{vm}: Android did not start with memory shared for graphics ({why}); it starts \
+             without it"
+        ));
+        reasons.push(why.clone());
+        started = attempt(StartAttempt::WithoutGraphicsMemory);
+    }
+    if let (Err(why), true) = (&started, pictures) {
+        log(&format!(
+            "{vm}: Android did not start with memory shared for decoded video pictures ({why}); \
+             it starts without it"
+        ));
+        reasons.push(why.clone());
+        started = attempt(StartAttempt::WithoutPictureMemory);
+    }
+    let Err(last) = started else {
+        return Ok(());
+    };
+    log(&format!("{vm}: Android did not start ({last})"));
+    reasons.push(last);
+    Err(refused_start(&reasons))
+}
+
+/// The reason of a start every attempt of which was refused, from each attempt's reason in
+/// order.
+fn refused_start(reasons: &[String]) -> String {
+    match reasons {
+        [] => String::new(),
+        [only] => only.clone(),
+        [.., last] if reasons.iter().all(|why| why == last) => format!(
+            "{last} (on all {} attempts, with and without shared memory)",
+            reasons.len()
+        ),
+        [first, .., last] => {
+            format!("{last} (the first attempt, with shared memory, failed with: {first})")
+        }
+    }
+}
+
 /// The suffix DSA gives its memory process, which Task Manager then shows as `VmmemDSA`.
 pub const HOSTING_PROCESS_NAME_SUFFIX: &str = "DSA";
 

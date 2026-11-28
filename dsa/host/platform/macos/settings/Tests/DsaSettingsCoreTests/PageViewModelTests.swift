@@ -471,6 +471,23 @@ final class PageViewModelTests: XCTestCase {
         XCTAssertFalse(android.isSwitching)
     }
 
+    func test_fr14_with_no_image_the_page_says_none_is_installed_not_android_0() async {
+        let cli = FakeCli()
+        cli.answer("android version --json", #"{"version":"none","android_major":0,"channel":"latest","supported_majors":[16,17],"target_major":17}"#)
+        let android = AndroidVersionViewModel(cli: cli, text: KeyText())
+        await android.load()
+        XCTAssertFalse(android.hasImage)
+        XCTAssertEqual(android.versionText, "Android_NoImage")
+        XCTAssertEqual(android.imageVersion, "")
+
+        let running = FakeCli()
+        running.answer("android version --json", #"{"version":"16.0.1","android_major":16,"channel":"latest","supported_majors":[15,16],"target_major":16}"#)
+        let shown = AndroidVersionViewModel(cli: running, text: KeyText())
+        await shown.load()
+        XCTAssertTrue(shown.hasImage)
+        XCTAssertEqual(shown.imageVersion, "16.0.1")
+    }
+
     func test_fr14_a_downloaded_image_is_applied_without_the_user_restarting() async {
         let cli = FakeCli()
         let idle = #"{"version":"16.0.1","android_major":16,"channel":"latest","supported_majors":[15,16],"target_major":16}"#

@@ -54,6 +54,33 @@ public class StopReasonTextTests
         Assert.Equal(key, (await General(reason)).LastReason);
     }
 
+    [Theory]
+    // #1065: HCS refused the VM on every attempt because no hypervisor ran.
+    [InlineData("HcsCreateComputeSystem failed (HRESULT 0x80370102): {\"ErrorEvents\":[{\"Message\":\"Cannot create system 'dsa-android' since Hyper-V is not installed on the host.\"}]} (on all 3 attempts, with and without shared memory)")]
+    // The service found at its start that no hypervisor runs.
+    [InlineData("the hypervisor is not running on this computer, so virtualization is off")]
+    // HCS's words without the code.
+    [InlineData("Cannot create system 'dsa-android' since Hyper-V is not installed on the host.")]
+    public async Task Fr14_a_host_problem_from_virtualization_being_off_says_how_to_turn_it_on(string why)
+    {
+        var reason = StopReasonText.HostPrefix + why;
+        var vm = await General(reason);
+        Assert.Equal(StopReasonText.Virtualization, vm.LastReason);
+        Assert.Equal(reason, vm.LastReasonDetail);
+    }
+
+    [Theory]
+    [MemberData(nameof(StringTables.Files), MemberType = typeof(StringTables))]
+    public void Fr14_every_language_names_the_three_causes_of_virtualization_being_off(string file)
+    {
+        // The firmware's virtualization, the Windows feature, and the boot configuration.
+        var text = TableText.Of(file).Get(StopReasonText.Virtualization);
+        foreach (var words in new[] { "VT-x", "AMD-V", "UEFI/BIOS", "Windows", "hypervisorlaunchtype Off", "bcdedit /set hypervisorlaunchtype auto" })
+        {
+            Assert.True(text.Contains(words, StringComparison.Ordinal), $"{file} lacks {words}: {text}");
+        }
+    }
+
     [Fact]
     public async Task Fr14_a_start_the_host_refused_reads_as_a_host_problem()
     {

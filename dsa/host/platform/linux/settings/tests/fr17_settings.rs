@@ -1294,6 +1294,26 @@ fn fr14_the_updates_page_shows_the_version_followed_and_the_download_with_its_pr
 }
 
 #[test]
+fn fr14_with_no_image_the_updates_page_says_none_is_installed_not_android_0() {
+    let read = |value: serde_json::Value| dsa_settings_linux::model::AndroidVersion::read(&value);
+    let none = read(json!({
+        "version": "none", "android_major": 0, "channel": "latest",
+        "supported_majors": [16, 17], "target_major": 17
+    }));
+    assert!(!view::android_has_image(&none));
+    assert_eq!(
+        view::android_version_title(&none),
+        "No Android image is installed"
+    );
+    let running = read(json!({
+        "version": "17.0.0-1", "android_major": 17, "channel": "latest",
+        "supported_majors": [16, 17], "target_major": 17
+    }));
+    assert!(view::android_has_image(&running));
+    assert_eq!(view::android_version_title(&running), "Android 17");
+}
+
+#[test]
 fn fr14_a_downloaded_image_is_applied_without_the_user_restarting() {
     let read = |value: serde_json::Value| dsa_settings_linux::model::AndroidVersion::read(&value);
     let waiting = read(json!({

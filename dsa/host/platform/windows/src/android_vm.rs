@@ -25,7 +25,9 @@ use crate::console_log::{boot_header, ConsoleLog, BOOT_WORDS};
 use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
-use crate::vm::{gpu_assignment_request, AndroidVmConfig, GuestArch};
+use crate::vm::{
+    gpu_assignment_request, start_dropping_shared_memory, AndroidVmConfig, GuestArch, StartAttempt,
+};
 use crate::vm_listener::VmIdSlot;
 use dsa_host_core::start_failure::FailureSide;
 
@@ -775,47 +777,36 @@ impl GuestLauncher for AndroidVmLauncher {
         }
         self.make_picture_section(&mut config);
         self.make_graphics_sections(&mut config);
-        let mut started = self.create_and_start(&config, &boot);
         // A Windows build whose HCS does not take the shared memory regions refuses the whole
-        // VM: Android then starts without the graphics regions first, then without any, and
-        // what they would carry goes through the sockets.
-        let refused = started
-            .as_ref()
-            .err()
-            .filter(|_| config.graphics_region.is_some())
-            .cloned();
-        if let Some(why) = refused {
-            eprintln!(
-                "{}: Android did not start with memory shared for graphics ({why}); it starts \
-                 without it",
-                self.id
-            );
-            config.graphics_region = None;
-            self.graphics_sections = None;
-            self.renew_network(&mut config);
-            started = self.create_and_start(&config, &boot);
-        }
-        let refused = started
-            .as_ref()
-            .err()
-            .filter(|_| config.picture_region.is_some())
-            .cloned();
-        if let Some(why) = refused {
-            eprintln!(
-                "{}: Android did not start with memory shared for decoded video pictures ({why}); \
-                 it starts without it",
-                self.id
-            );
-            config.picture_region = None;
-            self.picture_section = None;
-            self.renew_network(&mut config);
-            started = self.create_and_start(&config, &boot);
-        }
-        // The last attempt's reason is the one the session reports, and it is logged here too
-        // so every attempt's reason is in the log.
-        if let Err(why) = &started {
-            eprintln!("{}: Android did not start ({why})", self.id);
-        }
+        // VM: Android then starts without the graphics regions first, then without any. Every
+        // attempt's reason goes to the log, and the session reports the first and the last.
+        let id = self.id.clone();
+        let (graphics, pictures) = (
+            config.graphics_region.is_some(),
+            config.picture_region.is_some(),
+        );
+        let started = start_dropping_shared_memory(
+            &id,
+            graphics,
+            pictures,
+            &mut |attempt| {
+                match attempt {
+                    StartAttempt::AsConfigured => {}
+                    StartAttempt::WithoutGraphicsMemory => {
+                        config.graphics_region = None;
+                        self.graphics_sections = None;
+                        self.renew_network(&mut config);
+                    }
+                    StartAttempt::WithoutPictureMemory => {
+                        config.picture_region = None;
+                        self.picture_section = None;
+                        self.renew_network(&mut config);
+                    }
+                }
+                self.create_and_start(&config, &boot)
+            },
+            &mut |line| eprintln!("{line}"),
+        );
         // A VM that did not come up leaves no network behind, whether or not the session
         // stops it afterwards.
         if started.is_err() {
@@ -878,15 +869,16 @@ impl GuestLauncher for AndroidVmLauncher {
 
     /// A start that returned an error never ran the guest: HCS or HCN refused the VM, or its
     /// files could not be prepared. A VM that ended during boot failed on the host when its
-    /// kernel printed nothing on the console, as when the VM worker process dies at start.
+    /// kernel printed nothing on the console, as when the VM worker process dies at start, and
+    /// when no console could be kept for the boot, since then nothing shows the kernel ran.
     fn failure_side(&mut self) -> FailureSide {
         if self.system.is_none() {
             return FailureSide::Host;
         }
-        FailureSide::from_guest_output(
+        FailureSide::from_console(
             self.console
                 .as_ref()
-                .is_none_or(crate::console_pipe::ConsoleCapture::guest_printed),
+                .map(crate::console_pipe::ConsoleCapture::guest_printed),
         )
     }
 

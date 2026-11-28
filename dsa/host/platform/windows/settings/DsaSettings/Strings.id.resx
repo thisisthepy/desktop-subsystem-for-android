@@ -76,7 +76,7 @@ Jendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai.
     <value>DSA sedang diperbarui. Mulai Android lagi setelah pembaruan selesai.</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>Virtualisasi nonaktif atau Hyper-V tidak ada. Aktifkan Platform Mesin Virtual, lalu mulai ulang PC.</value>
+    <value>Komputer ini tidak dapat menjalankan Android karena virtualisasi mati. Versi Android yang digunakan tetap dipertahankan. Periksa tiga hal ini, lalu mulai ulang komputer: 1. Aktifkan virtualisasi (Intel VT-x atau AMD-V) di pengaturan UEFI/BIOS komputer; jika sudah aktif, Pengelola Tugas menampilkan "Virtualisasi: Diaktifkan" di Kinerja, CPU. 2. Aktifkan fitur Windows "Platform Mesin Virtual" (Aktifkan atau nonaktifkan fitur Windows). 3. Hypervisor tidak boleh dimatikan di konfigurasi boot: jika bcdedit menampilkan "hypervisorlaunchtype Off", jalankan "bcdedit /set hypervisorlaunchtype auto" sebagai administrator.</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>Windows menolak pengaturan untuk mesin virtual Android. Perbarui atau instal ulang DSA.</value>
@@ -119,7 +119,7 @@ Jendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai.
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>Android {0} tidak dapat dimulai ({1}), jadi Android {2} digunakan lagi.
-Android {0} dicoba lagi setelah build yang lebih baru darinya atau versi DSA baru tersedia.</value>
+Android {0} dicoba lagi setelah build yang lebih baru darinya atau versi DSA baru tersedia, atau saat Anda memilih versinya lagi atau memilih Periksa sekarang.</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>Android {0} tidak dapat dimulai ({1}), jadi Android {2} digunakan lagi.
@@ -127,10 +127,20 @@ Android {2} belum selesai dimulai ({3}). Mulai Android lagi untuk mem-boot-nya.<
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>Android {0} tidak dapat dimulai ({1}), dan tidak ada image lain yang terinstal.
-DSA mengunduh image lain jika ada. Versi DSA berikutnya mencoba image ini lagi.</value>
+DSA mengunduh image lain jika ada. Untuk mencoba image ini lagi, pilih versinya atau pilih Periksa sekarang. Versi DSA berikutnya juga mencobanya lagi.</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} tetap dalam masa uji dan bukan penyebabnya: {1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>Tidak ada image Android yang terinstal, karena image yang tersedia untuk komputer ini tidak dapat dimulai di sini: {0}
+Untuk mencoba lagi, pilih versi atau pilih Periksa sekarang (atau jalankan dsa android use {1}). Jika gagal lagi, kumpulkan log dengan dsa logs collect -o dsa-logs.zip dan lampirkan filenya ke laporan Anda.</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>Tidak ada image Android yang terinstal, dan belum ada image yang tersedia untuk diinstal (didukung: Android {0}). DSA terus memeriksa.</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>Android {0} sebelumnya tidak dapat dimulai di komputer ini dan dicoba lagi. DSA mengunduhnya sekarang, dan versi ini digunakan saat Android dimulai berikutnya; jika gagal lagi, DSA kembali ke sebelumnya.</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>DSA telah diperbarui ke {0}.</value>
@@ -2150,6 +2160,9 @@ Tindakan ini tidak dapat dibatalkan.</value>
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>Tidak diketahui</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>Tidak ada image Android yang terinstal</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>Versi yang didukung: Android {0}</value>

@@ -76,7 +76,7 @@
     <value>DSA 正在更新。更新完成後，請再次啟動 Android。</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>虛擬化已關閉或缺少 Hyper-V。請開啟「虛擬機器平台」，然後重新啟動電腦。</value>
+    <value>這台電腦的虛擬化已關閉，因此無法執行 Android。正在使用的 Android 版本會保留。請檢查以下三項，然後重新啟動電腦：1. 在電腦的 UEFI/BIOS 設定中開啟虛擬化（Intel VT-x 或 AMD-V）。開啟後，工作管理員的「效能」&gt;「CPU」中會顯示「虛擬化: 已啟用」。2. 開啟 Windows 功能「虛擬機器平台」（開啟或關閉 Windows 功能）。3. 開機設定中不能關閉 Hypervisor：如果 bcdedit 顯示「hypervisorlaunchtype Off」，請以系統管理員身分執行「bcdedit /set hypervisorlaunchtype auto」。</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>Windows 拒絕了 Android 虛擬機器的設定。請更新或重新安裝 DSA。</value>
@@ -119,7 +119,7 @@
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>Android {0} 無法啟動 ({1})，因此已改回使用 Android {2}。
-等 Android {0} 推出較新的組建或 DSA 推出新版本後，會再試一次。</value>
+等 Android {0} 推出較新的組建或 DSA 推出新版本後，或是您再次選擇它的版本或選取「立即檢查」時，會再試一次。</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>Android {0} 無法啟動 ({1})，因此已改回使用 Android {2}。
@@ -127,10 +127,20 @@ Android {2} 尚未完成啟動 ({3})。請再次啟動 Android 以將其開機�
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>Android {0} 無法啟動 ({1})，且未安裝其他映像。
-若有其他映像，DSA 會下載它。下一個 DSA 版本會再試一次此映像。</value>
+若有其他映像，DSA 會下載它。若要再試一次此映像，請選擇它的版本或選取「立即檢查」。下一個 DSA 版本也會再試一次。</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} 仍保持試用狀態，問題並非由它造成：{1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>未安裝 Android 映像，因為這台電腦可用的映像都無法在其上啟動：{0}
+若要重試，請選擇一個版本或選取「立即檢查」(或執行 dsa android use {1})。如果再次失敗，請用 dsa logs collect -o dsa-logs.zip 收集記錄，並將該檔案附加到您的回報中。</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>未安裝 Android 映像，目前也沒有可安裝的映像（支援：Android {0}）。DSA 會繼續檢查。</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>Android {0} 先前無法在這台電腦上啟動，現在會再試一次。DSA 現在會下載它，並在下次啟動 Android 時使用；如果再次失敗，DSA 會退回。</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>DSA 已更新為 {0}。</value>
@@ -2150,6 +2160,9 @@ Android 會立即停止，下次啟動時會回到初次安裝時的狀態。And
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>未知</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>未安裝 Android 映像</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>支援的版本：Android {0}</value>

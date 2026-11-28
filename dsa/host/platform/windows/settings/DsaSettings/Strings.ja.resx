@@ -76,7 +76,7 @@
     <value>DSA を更新しています。更新が終わったら Android を再び開始してください。</value>
   </data>
   <data name="LastReason_Virtualization" xml:space="preserve">
-    <value>仮想化がオフになっているか、Hyper-V がありません。仮想マシン プラットフォームをオンにしてから、PC を再起動してください。</value>
+    <value>仮想化がオフになっているため、このコンピューターで Android を実行できません。使用中の Android のバージョンはそのまま保たれます。次の 3 つを確認してから、コンピューターを再起動してください。1. コンピューターの UEFI/BIOS 設定で仮想化 (Intel VT-x または AMD-V) をオンにします。オンのときは、タスク マネージャーの [パフォーマンス] の CPU に「仮想化: 有効」と表示されます。2. Windows の機能「仮想マシン プラットフォーム」をオンにします ([Windows の機能の有効化または無効化])。3. ブート構成でハイパーバイザーがオフになっていてはいけません。bcdedit に「hypervisorlaunchtype Off」と表示される場合は、管理者として「bcdedit /set hypervisorlaunchtype auto」を実行します。</value>
   </data>
   <data name="LastReason_InvalidConfiguration" xml:space="preserve">
     <value>Windows が Android の仮想マシンの設定を拒否しました。DSA を更新するか、再インストールしてください。</value>
@@ -119,7 +119,7 @@
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
     <value>Android {0} が起動しなかったため ({1})、Android {2} を再び使っています。
-Android {0} は、その新しいビルドか DSA の新しいバージョンが出たときにもう一度試します。</value>
+Android {0} は、その新しいビルドか DSA の新しいバージョンが出たとき、またはそのバージョンをもう一度選ぶか [今すぐ確認] を選んだときにもう一度試します。</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
     <value>Android {0} が起動しなかったため ({1})、Android {2} を再び使っています。
@@ -127,10 +127,20 @@ Android {2} はまだ起動を完了していません ({3})。Android を再び
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
     <value>Android {0} が起動せず ({1})、ほかのイメージはインストールされていません。
-ほかのイメージがあれば DSA がダウンロードします。次の DSA のバージョンで、このイメージをもう一度試します。</value>
+ほかのイメージがあれば DSA がダウンロードします。このイメージをもう一度試すには、そのバージョンを選ぶか [今すぐ確認] を選んでください。次の DSA のバージョンでももう一度試します。</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} は試用中のままで、問題の原因ではありません: {1}</value>
+  </data>
+  <data name="UpdateNotice_AndroidFailedHere" xml:space="preserve">
+    <value>このコンピューターで使えるイメージが起動しなかったため、Android のイメージがインストールされていません: {0}
+もう一度試すには、バージョンを選ぶか [今すぐ確認] を選んでください (または dsa android use {1} を実行します)。再び失敗したら、dsa logs collect -o dsa-logs.zip でログを集め、そのファイルを報告に添付してください。</value>
+  </data>
+  <data name="UpdateNotice_AndroidNoImageAvailable" xml:space="preserve">
+    <value>Android のイメージがインストールされておらず、インストールできるイメージもまだありません (対応: Android {0})。DSA は確認を続けます。</value>
+  </data>
+  <data name="UpdateNotice_AndroidRetried" xml:space="preserve">
+    <value>Android {0} は以前このコンピューターで起動しなかったため、もう一度試します。DSA が今すぐダウンロードし、次に Android を開始するときに使います。再び失敗した場合は元に戻します。</value>
   </data>
   <data name="UpdateNotice_DsaUpdated" xml:space="preserve">
     <value>DSA を {0} に更新しました。</value>
@@ -2150,6 +2160,9 @@ Android は今すぐ停止し、次回は最初にインストールしたとき
   </data>
   <data name="Android_Unknown" xml:space="preserve">
     <value>不明</value>
+  </data>
+  <data name="Android_NoImage" xml:space="preserve">
+    <value>Android のイメージがインストールされていません</value>
   </data>
   <data name="Android_Supported" xml:space="preserve">
     <value>対応バージョン: Android {0}</value>

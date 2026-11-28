@@ -27,6 +27,9 @@ msgstr "Yönetici izni verilmediği için ayar değiştirilmedi."
 msgid "Unknown"
 msgstr "Bilinmiyor"
 
+msgid "No Android image is installed"
+msgstr "Yüklü Android görüntüsü yok"
+
 msgid "Stopped"
 msgstr "Durduruldu"
 

@@ -277,8 +277,11 @@ struct UpdatesPage: View {
                     }
                     Text(android.imageVersion).foregroundStyle(.secondary).textSelection(.enabled)
                 }
-                LabeledContent(T("AndroidBuildCard.Header"), value: android.buildId)
-                LabeledContent(T("AndroidPatchCard.Header"), value: android.securityPatch)
+                // Without an image there is no build or security patch to show.
+                if android.hasImage {
+                    LabeledContent(T("AndroidBuildCard.Header"), value: android.buildId)
+                    LabeledContent(T("AndroidPatchCard.Header"), value: android.securityPatch)
+                }
                 LabeledContent(T("AndroidFollowsCard.Header"), value: android.channelText)
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {

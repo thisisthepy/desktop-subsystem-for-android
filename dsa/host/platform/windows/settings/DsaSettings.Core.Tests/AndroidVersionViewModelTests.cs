@@ -11,6 +11,31 @@ public class AndroidVersionViewModelTests
 
     private static FakeCli Cli() => new FakeCli().Answer("android version --json", Running17);
 
+    /// <summary>An installation that bundled no image, before any image has started (#1065).</summary>
+    private const string NoImage =
+        "{\"version\":\"none\",\"android_major\":0,\"build\":0,\"build_id\":null,\"security_patch\":null," +
+        "\"channel\":\"latest\",\"supported_majors\":[16,17],\"target_major\":17,\"on_trial\":false," +
+        "\"notice\":\"No Android image is installed, and no image to install is available yet (supported: Android 16, 17); " +
+        "the service keeps checking\"}";
+
+    [Fact]
+    public async Task Fr14_with_no_image_the_page_says_none_is_installed_without_android_0_or_unknown_rows()
+    {
+        var vm = new AndroidVersionViewModel(new FakeCli().Answer("android version --json", NoImage), new KeyText());
+        await vm.LoadAsync();
+        Assert.False(vm.HasError, vm.Error);
+        Assert.False(vm.HasImage);
+        Assert.Equal("Android_NoImage", vm.VersionText);
+        Assert.Equal("", vm.ImageVersion);
+        // The service's news is shown in the app's language.
+        Assert.Equal("UpdateNotice_AndroidNoImageAvailable", vm.UpdateStatusText);
+
+        var running = new AndroidVersionViewModel(Cli(), new KeyText());
+        await running.LoadAsync();
+        Assert.True(running.HasImage);
+        Assert.Equal("17.0.0-16373615-8", running.ImageVersion);
+    }
+
     [Fact]
     public async Task Fr14_the_page_shows_the_running_version_build_and_security_patch()
     {

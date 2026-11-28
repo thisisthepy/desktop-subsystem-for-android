@@ -12,6 +12,7 @@
 //! replaced atomically (written beside, then renamed), so a crash leaves either the old
 //! state or the new one.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -67,6 +68,11 @@ pub struct State {
     /// Versions that failed to boot here and are not tried again by the same build.
     #[serde(default)]
     pub failed: Vec<String>,
+    /// Why each version in `failed` did not start, when that was recorded: the first line of
+    /// the trial's reason. Left out of the file while empty, so a store without failures reads
+    /// the same to a build from before it was kept.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub failed_reasons: BTreeMap<String, String>,
     /// The DSA build that saw them fail. A failure can be the host's fault rather than the
     /// image's, so a new build of the host tries those images again.
     #[serde(default)]
@@ -96,6 +102,22 @@ impl State {
     pub fn pinned_major(&self) -> Option<u32> {
         self.preset_major
             .filter(|major| self.channel == Channel::Major(*major))
+    }
+
+    /// Forgets the failures of the images of Android `major`, so they are downloaded and tried
+    /// again. Returns the versions forgotten.
+    fn forget_failures_of(&mut self, major: u32) -> Vec<String> {
+        let (forgotten, kept): (Vec<String>, Vec<String>) = std::mem::take(&mut self.failed)
+            .into_iter()
+            .partition(|version| versions::major_of_version(version) == Some(major));
+        self.failed = kept;
+        let failed = &self.failed;
+        self.failed_reasons
+            .retain(|version, _| failed.contains(version));
+        if self.failed.is_empty() {
+            self.failed_build = None;
+        }
+        forgotten
     }
 }
 
@@ -227,6 +249,7 @@ impl ImageStore {
         let mut state = store.state()?;
         if !state.failed.is_empty() && state.failed_build.as_deref() != Some(build) {
             state.failed.clear();
+            state.failed_reasons.clear();
             state.failed_build = None;
             store.write_state(&state)?;
         }
@@ -254,6 +277,7 @@ impl ImageStore {
                 previous: None,
                 on_trial: false,
                 failed: Vec::new(),
+                failed_reasons: BTreeMap::new(),
                 failed_build: None,
                 channel: Channel::Latest,
                 older_allowed: false,
@@ -278,6 +302,16 @@ impl ImageStore {
     /// image records a first image by name only, and nothing can boot from that.
     pub fn has_image(&self, version: &str) -> bool {
         self.image_dir(version).is_dir()
+    }
+
+    /// The version of the image the next start boots, or `None` while no image is installed:
+    /// the current image is only a name (`none`, from an installer without an image), whose
+    /// files are not here.
+    pub fn installed_version(&self) -> Option<String> {
+        self.state()
+            .ok()
+            .map(|state| state.current.version)
+            .filter(|version| self.has_image(version))
     }
 
     pub fn state(&self) -> Result<State, UpdateError> {
@@ -440,7 +474,23 @@ impl ImageStore {
     /// Chooses which images this computer takes. A channel that leads to an older major than
     /// the current image is taken only with `erase_data`, since Android cannot read data a
     /// newer major wrote.
+    ///
+    /// A choice is the user asking for that version, so the images of the major it leads to
+    /// that failed to start here are forgotten: the next check downloads them and boots them on
+    /// trial again, rolling back as before when they fail. Only a choice does this; the
+    /// periodic check keeps skipping them. Choosing the version already followed (the settings
+    /// app's Check now) counts as asking again.
     pub fn choose(&self, channel: Channel, erase_data: bool) -> Result<(), ChooseError> {
+        self.choose_retrying(channel, erase_data).map(|_| ())
+    }
+
+    /// [`choose`](Self::choose), returning the versions that failed here before and are now
+    /// tried again.
+    pub fn choose_retrying(
+        &self,
+        channel: Channel,
+        erase_data: bool,
+    ) -> Result<Vec<String>, ChooseError> {
         let store = |e: UpdateError| ChooseError::Store(e.to_string());
         let supported = self.supported_majors().map_err(store)?;
         let list = supported
@@ -470,7 +520,9 @@ impl ImageStore {
         }
         state.channel = channel;
         state.older_allowed = older;
-        self.write_state(&state).map_err(store)
+        let retried = state.forget_failures_of(target);
+        self.write_state(&state).map_err(store)?;
+        Ok(retried)
     }
 
     /// The Android version as a user sees it, reading the build ID and security patch from
@@ -544,6 +596,50 @@ impl ImageStore {
     /// Goes back to the previous image after the current one failed to boot. The failed
     /// version is remembered and its files removed. Returns the image now current.
     pub fn roll_back(&self) -> Result<InstalledImage, UpdateError> {
+        self.give_up(None)
+    }
+
+    /// Forgets the failures whose recorded reason says the host, not the image, kept the image
+    /// from starting ([`crate::start_failure::host_side_reason`]), so they are downloaded and
+    /// tried again. A host's service calls this when it starts on a computer that can run VMs
+    /// again: an older build, or one that could not tell the sides apart, blamed those images
+    /// for the computer's fault, and the user would otherwise be left with no image to start.
+    /// Returns the versions forgotten.
+    pub fn forget_host_failures(&self) -> Result<Vec<String>, UpdateError> {
+        let mut state = self.state()?;
+        let host_side: Vec<String> = state
+            .failed
+            .iter()
+            .filter(|version| {
+                state
+                    .failed_reasons
+                    .get(*version)
+                    .is_some_and(|reason| crate::start_failure::host_side_reason(reason))
+            })
+            .cloned()
+            .collect();
+        if host_side.is_empty() {
+            return Ok(host_side);
+        }
+        state.failed.retain(|version| !host_side.contains(version));
+        let failed = &state.failed;
+        state
+            .failed_reasons
+            .retain(|version, _| failed.contains(version));
+        if state.failed.is_empty() {
+            state.failed_build = None;
+        }
+        self.write_state(&state)?;
+        Ok(host_side)
+    }
+
+    /// [`roll_back`](Self::roll_back), keeping `reason` (its first line) as why the image
+    /// failed, so the user can still be told once later news has replaced the trial's.
+    pub fn roll_back_because(&self, reason: &str) -> Result<InstalledImage, UpdateError> {
+        self.give_up(Some(reason))
+    }
+
+    fn give_up(&self, reason: Option<&str>) -> Result<InstalledImage, UpdateError> {
         let mut state = self.state()?;
         let previous = state.previous.take().ok_or_else(|| {
             UpdateError::Store(format!(
@@ -552,7 +648,21 @@ impl ImageStore {
             ))
         })?;
         let failed = std::mem::replace(&mut state.current, previous);
-        state.failed.push(failed.version.clone());
+        if !state.failed.contains(&failed.version) {
+            state.failed.push(failed.version.clone());
+        }
+        let first_line =
+            reason.and_then(|reason| reason.lines().map(str::trim).find(|line| !line.is_empty()));
+        match first_line {
+            Some(line) => {
+                state
+                    .failed_reasons
+                    .insert(failed.version.clone(), line.to_string());
+            }
+            None => {
+                state.failed_reasons.remove(&failed.version);
+            }
+        }
         state.failed_build = self.build.clone();
         state.on_trial = false;
         self.write_state(&state)?;
