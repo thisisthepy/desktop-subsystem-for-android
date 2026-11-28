@@ -23,7 +23,9 @@
 //! process is paged out at most every [`PageoutPolicy::min_interval`] (a resident service every
 //! [`PageoutPolicy::resident_min_interval`]), only after it has grown by
 //! [`PageoutPolicy::min_growth_kb`] since the last time, and one process at most per look, so
-//! the daemon never competes with the apps for the CPU.
+//! the daemon never competes with the apps for the CPU. A process that reads back all a
+//! pageout took at its next wake waits twice as long for the next, up to
+//! [`PageoutPolicy::max_interval`]: those are the pages it touches on every wake.
 //!
 //! Never a process that is exiting (state `X` or `Z`, or no address space left): paging out
 //! the memory of a process the kernel is tearing down raced with its exit, and the kernel then
@@ -176,6 +178,14 @@ pub struct PageoutPolicy {
     pub min_growth_kb: u64,
     /// The most processes paged out at one look.
     pub per_look: usize,
+    /// The longest a process's wait between two pageouts grows to. A process that reads back
+    /// all a pageout took (nine tenths or more of it) at its next wake touches those pages on
+    /// every wake: paging them out again only makes it read them from zram once more. So its
+    /// wait doubles each time, from `min_interval` (or `resident_min_interval`) up to this, and
+    /// goes back to the start after a pageout of which less comes back. On the owner's PC
+    /// (1.0.1-dev.39) Google Play services was paged out from 9 to 6 MiB after six of its wakes
+    /// in ten minutes, and read the same 3 MiB back each time.
+    pub max_interval: Duration,
 }
 
 impl Default for PageoutPolicy {
@@ -186,6 +196,7 @@ impl Default for PageoutPolicy {
             resident_min_interval: Duration::from_secs(5 * 60),
             min_growth_kb: 2 * 1024,
             per_look: 1,
+            max_interval: Duration::from_secs(16 * 60),
         }
     }
 }
@@ -201,6 +212,15 @@ struct Tracked {
     /// Its resident anonymous memory just after the last pageout, in KiB.
     rss_after_kb: u64,
     last_pageout: Option<Duration>,
+    /// Its resident anonymous memory when the last pageout was chosen, in KiB.
+    rss_before_kb: u64,
+    /// What the last pageout took, in KiB ([`Pageout::paged`]); 0 until it is known.
+    took_kb: u64,
+    /// Nearly all the last pageout took has come back, and its wait has doubled for it.
+    came_back: bool,
+    /// Its wait between two pageouts now, once it has grown past the policy's
+    /// ([`PageoutPolicy::max_interval`]).
+    interval: Option<Duration>,
 }
 
 /// Decides, at each look, which quiet process to page out.
@@ -254,34 +274,54 @@ impl Pageout {
                 woke: true,
                 rss_after_kb: 0,
                 last_pageout: None,
+                rss_before_kb: 0,
+                took_kb: 0,
+                came_back: false,
+                interval: None,
             });
             if sample.cpu_ticks != tracked.cpu_ticks {
                 tracked.cpu_ticks = sample.cpu_ticks;
                 tracked.last_active = now;
                 tracked.woke = true;
             }
+            let resident = is_resident_service(&sample.name);
+            let base_interval = if resident {
+                self.policy.resident_min_interval
+            } else {
+                self.policy.min_interval
+            };
+            let grown_kb = sample.rss_anon_kb.saturating_sub(tracked.rss_after_kb);
+            if !tracked.came_back
+                && tracked.took_kb > 0
+                && grown_kb.saturating_mul(10) >= tracked.took_kb.saturating_mul(9)
+            {
+                // It read back (nearly) all the last pageout took: the next one waits longer.
+                tracked.came_back = true;
+                tracked.interval = Some(
+                    tracked
+                        .interval
+                        .unwrap_or(base_interval)
+                        .saturating_mul(2)
+                        .min(self.policy.max_interval)
+                        .max(base_interval),
+                );
+            }
             if !tracked.woke || !eligible(sample, windows) {
                 continue;
             }
-            let resident = is_resident_service(&sample.name);
             if resident && self.residents_stopped {
                 continue;
             }
             if now.saturating_sub(tracked.last_active) < self.policy.quiet {
                 continue;
             }
-            let min_interval = if resident {
-                self.policy.resident_min_interval
-            } else {
-                self.policy.min_interval
-            };
+            let min_interval = tracked.interval.unwrap_or(base_interval);
             if tracked
                 .last_pageout
                 .is_some_and(|at| now.saturating_sub(at) < min_interval)
             {
                 continue;
             }
-            let grown_kb = sample.rss_anon_kb.saturating_sub(tracked.rss_after_kb);
             if grown_kb < self.policy.min_growth_kb {
                 // The wake brought little back: nothing to do until the next one.
                 tracked.woke = false;
@@ -300,19 +340,44 @@ impl Pageout {
         due.truncate(self.policy.per_look);
         for target in &due {
             if let Some(tracked) = self.tracked.get_mut(&target.pid) {
+                if tracked.took_kb > 0 && !tracked.came_back {
+                    // Less of the last pageout came back than it took: it lasted, and the wait
+                    // starts over.
+                    tracked.interval = None;
+                }
                 tracked.woke = false;
                 tracked.last_pageout = Some(now);
+                tracked.rss_before_kb = tracked.rss_after_kb.saturating_add(target.grown_kb);
+                tracked.took_kb = 0;
+                tracked.came_back = false;
             }
         }
         due
     }
 
     /// The process `pid` was paged out and keeps `rss_anon_kb` resident: the next pageout waits
-    /// until it has grown past that again.
+    /// until it has grown past that again, and longer if it reads all of it back
+    /// ([`PageoutPolicy::max_interval`]).
     pub fn paged(&mut self, pid: i32, rss_anon_kb: u64) {
         if let Some(tracked) = self.tracked.get_mut(&pid) {
+            tracked.took_kb = tracked.rss_before_kb.saturating_sub(rss_anon_kb);
             tracked.rss_after_kb = rss_anon_kb;
         }
+    }
+
+    /// How long `pid` now waits between two pageouts, for the log: longer than the policy's
+    /// while it keeps reading back all a pageout takes. `None` for a process not tracked.
+    pub fn interval(&self, pid: i32) -> Option<Duration> {
+        let tracked = self.tracked.get(&pid)?;
+        Some(
+            tracked
+                .interval
+                .unwrap_or(if is_resident_service(&tracked.name) {
+                    self.policy.resident_min_interval
+                } else {
+                    self.policy.min_interval
+                }),
+        )
     }
 }
 

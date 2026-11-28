@@ -611,11 +611,20 @@ mod daemon {
                 );
             }
             let vmstat = vmstat.ok();
+            let backoff_before = reclaimer.trim_backoff();
             if let Some(refaults) = vmstat
                 .as_deref()
                 .and_then(|text| file_refaults_kb(text, page_kb))
             {
                 reclaimer.refaults(refaults);
+            }
+            if reclaimer.trim_backoff() > backoff_before {
+                say!(
+                    "the last trim is being read back ({tasks} tasks in use): the next trim waits \
+                     {} s after it, working set target {} MiB",
+                    reclaimer.trim_backoff().as_secs(),
+                    reclaimer.working_set_target_kb() / 1024
+                );
             }
             if reclaimer.learns_working_set() != learnt_before {
                 say!(
@@ -678,9 +687,15 @@ mod daemon {
                 // often the idle reclaim runs again and what each run costs.
                 let repeat = match (reason, reclaimer.idle_grew_from_kb()) {
                     (Reason::Idle, Some(floor)) => format!(
-                        "; again in this idle stretch, {} MiB reclaimable grown from a low of {} MiB",
+                        "; again in this idle stretch, {} MiB reclaimable grown from a low of {} \
+                         MiB, first found grown back {} s after the last reclaim; the next repeat \
+                         waits at least {} s",
                         memory.reclaimable_kb() / 1024,
-                        floor / 1024
+                        floor / 1024,
+                        reclaimer
+                            .idle_regrown_after()
+                            .map_or(0, |after| after.as_secs()),
+                        reclaimer.idle_repeat_wait().as_secs()
                     ),
                     _ => String::new(),
                 };
@@ -874,10 +889,15 @@ mod daemon {
                 match page_out(&target) {
                     Ok(done) => {
                         pageout.paged(target.pid, done.after.rss_anon_kb);
+                        // The wait grows while each wake reads back all a pageout took.
+                        let wait = pageout
+                            .interval(target.pid)
+                            .map_or(0, |wait| wait.as_secs());
                         say!(
                             "paged out {} (pid {}, oom_score_adj {}{}) after it woke: resident \
                              anonymous {} -> {} MiB, swapped out {} -> {} MiB, {} MiB asked for, \
-                             {} ranges refused, {} ms",
+                             {} ranges refused, {} ms; the next pageout of it waits at least \
+                             {wait} s",
                             target.name,
                             target.pid,
                             target.oom_score_adj,

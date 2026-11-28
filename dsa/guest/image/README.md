@@ -69,7 +69,8 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   minimized), or most of its memory is cache, the control daemon sets
   `vendor.dsa.memory.reclaim`. Once boot has finished, init moves cold pages to zram, drops the
   clean caches and compacts memory, which free page reporting then hands back to Hyper-V.
-  While idle it does so again when memory has grown back, and then has the kernel report
+  While idle it does so again when memory has grown back, no sooner than three minutes after
+  the last time and twice as long each time memory came straight back, and then has the kernel report
   every free page to the host again (`page_reporting.rereport`). What stays cold in zram goes
   on to a backing file on the data disk (`/data/per_boot/zram_swap`, 512 MiB, made again each
   boot): once no app has been open for ten minutes, at most every ten minutes, the daemon has

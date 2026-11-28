@@ -283,7 +283,9 @@ fn nfr1_resident_services_are_paged_out_after_they_wake_like_google_play_service
     // a woken one waits longer than Play services before it is paged out again.
     assert!(policy.resident_min_interval >= policy.min_interval);
     assert_eq!(policy.resident_min_interval, secs(300));
-    let woke = [ext(1, 10), media(2, 14), network(1, 11)];
+    // The wake reads back part of what the pageout took (7 of 9 MiB), so the wait stays at five
+    // minutes; one that reads it all back waits longer (see the test of Play services below).
+    let woke = [ext(1, 10), media(2, 10), network(1, 11)];
     pageout.look(secs(20), &woke, &no_windows());
     let between = pageout.look(secs(60), &woke, &no_windows());
     assert!(between.iter().all(|t| t.pid != 1160), "{between:?}");
@@ -472,4 +474,41 @@ fn nfr2_a_process_that_used_the_cpu_within_the_grace_period_is_not_paged_out() {
     )
     .unwrap()
     .contains("more important"));
+}
+
+#[test]
+fn nfr2_a_process_that_reads_back_all_a_pageout_took_is_paged_out_less_often() {
+    // The owner's PC, 1.0.1-dev.39, no app open: Google Play services (pid 1137) was paged out
+    // after six of its wakes in ten minutes, each time "resident anonymous 9 -> 6 MiB, swapped
+    // out 98 -> 101 MiB": the same 3 MiB, read back from zram at its next wake. Here it wakes
+    // every 30 s and reads all of it back each time.
+    let policy = PageoutPolicy::default();
+    assert_eq!(policy.max_interval, secs(16 * 60));
+    let mut pageout = Pageout::new(policy);
+    let mut cpu = 0;
+    let mut rss = 9;
+    let mut paged_at = Vec::new();
+    for t in (0..3600).step_by(2) {
+        if t > 0 && t % 30 == 0 {
+            cpu += 1;
+            rss = 9;
+        }
+        let due = pageout.look(secs(t), &[gms(cpu, rss)], &no_windows());
+        if !due.is_empty() {
+            paged_at.push(t);
+            rss = 6;
+            pageout.paged(700, rss * MIB);
+        }
+    }
+    // Every wake would be 120 in the hour. The wait doubles each time all of it comes back, up
+    // to 16 minutes.
+    assert_eq!(paged_at, [6, 66, 186, 426, 906, 1866, 2826]);
+
+    // A wake that reads back only part of it keeps the half-minute wait.
+    let mut partly = Pageout::new(policy);
+    partly.look(secs(0), &[gms(0, 9)], &no_windows());
+    assert_eq!(partly.look(secs(6), &[gms(0, 9)], &no_windows()).len(), 1);
+    partly.paged(700, 6 * MIB);
+    partly.look(secs(30), &[gms(1, 8)], &no_windows());
+    assert_eq!(partly.look(secs(36), &[gms(1, 8)], &no_windows()).len(), 1);
 }

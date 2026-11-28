@@ -98,7 +98,9 @@ on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
 
 # The working set trim: dsa-channeld sets this on the first look that finds page cache grown
 # past the guest's working set (an app closed, or files were read), while the guest is not
-# under memory pressure, whether or not the host is short. vendor.dsa.memory.trim_size says
+# under memory pressure, whether or not the host is short. When what the last trim took is
+# being read back, with apps open or none, the next waits a minute, twice as long each time
+# it happens again (up to ten minutes). vendor.dsa.memory.trim_size says
 # how many MiB: all of the excess at once. The kernel takes them from the
 # root cgroup, which every process's memory is charged under, coldest pages first.
 # vendor.dsa.memory.trim_swappiness says how: 0 while a window is shown, so the trim takes page
