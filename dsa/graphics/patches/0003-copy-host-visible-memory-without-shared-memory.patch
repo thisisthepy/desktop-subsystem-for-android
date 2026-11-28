@@ -4,7 +4,7 @@ index 4e0dc43c892..530b8c9b23c 100644
 +++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
 @@ -6,6 +6,11 @@
  #include "ResourceTracker.h"
-
+ 
 +#include "dsa_shadow_blocks.h"
 +#if DETECT_OS_ANDROID
 +#include <sys/system_properties.h>
@@ -249,7 +249,7 @@ index 1462a7bf02f..2222d637ea2 100644
 +
  namespace gfxstream {
  namespace vk {
-
+ 
 @@ -546,6 +546,8 @@ class ResourceTracker {
      void setThreadingCallbacks(const ThreadingCallbacks& callbacks);
      bool hostSupportsVulkan() const;
@@ -268,7 +268,7 @@ index 1462a7bf02f..2222d637ea2 100644
 +        bool shadowed = false;
 +        // Which blocks of that copy changed since the host last had them.
 +        std::shared_ptr<dsa::ShadowBlocks> shadowBlocks;
-
+ 
          uint64_t blobId = 0;
          uint64_t allocationSize = 0;
 diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp

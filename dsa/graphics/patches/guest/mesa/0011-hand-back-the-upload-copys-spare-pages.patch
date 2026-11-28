@@ -14,7 +14,7 @@ diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/gues
 +++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
 @@ -28,4 +28,5 @@
  #include <vector>
-
+ 
  #include "VirtGpu.h"
 +#include "dsa_spare_pages.h"
  #include "util/log.h"

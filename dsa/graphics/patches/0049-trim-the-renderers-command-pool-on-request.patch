@@ -4,7 +4,7 @@ diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations
 @@ -4049,6 +4049,17 @@
      releaseStagingLocked();
  }
-
+ 
 +void VkEmulation::trimCommandPool() {
 +    // The pool's command buffers are recorded and allocated under mMutex, which is all the
 +    // external synchronization vkTrimCommandPool asks for; pending ones are not affected.
@@ -25,7 +25,7 @@ diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
 @@ -529,6 +529,11 @@
      // one makes it again.
      void releaseIdleStaging(std::chrono::steady_clock::duration idle);
-
+ 
 +    // DSA: gives the memory the renderer's command pool keeps for command buffers it no longer
 +    // records back to the driver (vkTrimCommandPool). The command buffers stay, and the next
 +    // recording takes memory again. An embedder calls it after a guest's device went away.
@@ -33,4 +33,4 @@ diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
 +
     private:
      VkEmulation() = default;
-
+ 

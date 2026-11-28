@@ -48,8 +48,9 @@ class AllocationReasonsPatchTests(unittest.TestCase):
             self.assertIn(f"dsa::noteAllocation(dsa::AllocationWhy::{why});", self.body, why)
 
     def test_nfr1_the_grant_is_noted_just_before_its_import(self):
-        granted = self.body.index("dsa::noteAllocation(dsa::AllocationWhy::Granted);")
-        imported = self.body.index("if (vk->vkAllocateMemory(device, &info, pAllocator, pMemory)")
+        # The import is a context line of the patch, so it is looked up in the whole patch.
+        granted = self.patch.index("dsa::noteAllocation(dsa::AllocationWhy::Granted);")
+        imported = self.patch.index("if (vk->vkAllocateMemory(device, &info, pAllocator, pMemory)")
         self.assertLess(granted, imported)
 
     def test_nfr1_the_hook_takes_the_note_and_lists_each_guest_allocation(self):

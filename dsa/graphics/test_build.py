@@ -74,6 +74,24 @@ class GraphicsBuildTests(unittest.TestCase):
         vulkan = VULKAN_FILE.read_text()
         self.assertIn('if(ANDROID_ABI STREQUAL "x86_64")', vulkan)
 
+    def test_pr3_every_patch_line_in_a_hunk_starts_with_its_marker(self):
+        # A Windows checkout turns the patches' line endings into CRLF. git apply reads an
+        # empty line in a hunk as an empty context line only while it is truly empty; with a
+        # carriage return on it the patch is "corrupt" and the renderer build stops there.
+        for patch in sorted((HERE / "patches").rglob("*.patch")):
+            in_hunk = False
+            for number, line in enumerate(patch.read_text().splitlines(), start=1):
+                if line.startswith("@@"):
+                    in_hunk = True
+                elif line.startswith("diff --git") or line.startswith("-- "):
+                    in_hunk = False
+                elif in_hunk:
+                    self.assertTrue(
+                        line[:1] in (" ", "+", "-", "\\"),
+                        f"{patch.name}:{number} is an empty line in a hunk; "
+                        "a context line needs its leading space",
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,10 +4,10 @@ diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalS
 @@ -13,6 +13,7 @@
  // limitations under the License.
  #include "VkDecoderGlobalState.h"
-
+ 
 +#include "dsa_allocation_note.h"
  #include "dsa_graphics_memory.h"
-
+ 
  #include <algorithm>
 @@ -5726,8 +5727,19 @@
          std::optional<dsa::GraphicsGrant> dsaGrant;
