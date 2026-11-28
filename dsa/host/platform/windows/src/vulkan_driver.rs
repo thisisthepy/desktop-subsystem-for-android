@@ -500,6 +500,66 @@ fn choose(setting: VulkanDriverSetting, found: &Found, request: &GpuRequest) -> 
     }
 }
 
+/// The Vulkan loader's filter that keeps only the drivers whose manifest file names it lists
+/// (Khronos loader 1.3.234 and later; an older loader ignores it and loads every driver, as
+/// before).
+pub const DRIVERS_SELECT: &str = "VK_LOADER_DRIVERS_SELECT";
+
+/// The [`DRIVERS_SELECT`] value that keeps only the driver manifests `manifests` (paths or file
+/// names): their file names, each once, comma-separated. `None` when there is none.
+pub fn drivers_select(manifests: &[String]) -> Option<String> {
+    let mut names: Vec<String> = Vec::new();
+    for manifest in manifests {
+        // Split on both separators: a Windows path, whichever system reads it.
+        let name = manifest
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        // A comma or a glob character would make the filter mean something else.
+        if name.is_empty() || name.contains([',', '*']) {
+            continue;
+        }
+        if !names.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+            names.push(name.to_string());
+        }
+    }
+    (!names.is_empty()).then(|| names.join(","))
+}
+
+/// Whether a look made with the loader kept to the requested adapter's own drivers serves the
+/// request for `luid`: it listed a native device on that adapter, which the plan then picks as
+/// a look at every driver would. A look that failed, or one whose drivers the environment
+/// names, does not.
+pub fn narrowed_look_serves(found: &Found, luid: Luid) -> bool {
+    found.failure.is_none()
+        && found.driver_override.is_none()
+        && found
+            .devices
+            .iter()
+            .any(|device| device.is_native() && device.luid == Some(luid))
+}
+
+/// Keeps gfxstream's loader to the drivers `select` names (the GPU's own, as a narrowed look
+/// found it), so no other GPU's driver is loaded into the renderer: on a computer with two
+/// GPUs, the one it does not render on kept its driver's data in the renderer's memory and
+/// could be woken. Only a native plan is kept so, and never one whose environment already
+/// names the drivers. Returns whether it was.
+pub fn keep_only(plan: &mut DriverPlan, select: &str) -> bool {
+    if plan.outcome != DriverOutcome::Native
+        || select.is_empty()
+        || plan
+            .env
+            .iter()
+            .any(|(name, _)| name == "VK_DRIVER_FILES" || name == "VK_ICD_FILENAMES")
+    {
+        return false;
+    }
+    plan.env
+        .push((DRIVERS_SELECT.to_string(), select.to_string()));
+    true
+}
+
 /// What the renderer runs on once gfxstream has chosen its device (`gpu_name`, `gpu_luid`):
 /// the plan's outcome, corrected by the device it actually took.
 pub fn outcome_for(
@@ -596,7 +656,9 @@ pub fn pack_loader(root: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-pub use probe::{find_compatibility_pack, look, look_with, runs_elevated};
+pub use probe::{
+    adapter_driver_manifests, find_compatibility_pack, look, look_for, look_with, runs_elevated,
+};
 
 #[cfg(windows)]
 mod probe {
@@ -608,8 +670,11 @@ mod probe {
     use windows_sys::Win32::Foundation::{FreeLibrary, HMODULE};
     use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
-    use super::{find_pack_manifest, pack_loader, Found, PackIcd, VulkanDevice, PACK_FAMILY};
-    use crate::render_gpu::Luid;
+    use super::{
+        drivers_select, find_pack_manifest, narrowed_look_serves, pack_loader, Found, PackIcd,
+        VulkanDevice, VulkanDriverSetting, DRIVERS_SELECT, PACK_FAMILY,
+    };
+    use crate::render_gpu::{GpuRequest, Luid};
 
     type VkInstance = *mut c_void;
     type VkPhysicalDevice = *mut c_void;
@@ -1211,6 +1276,187 @@ mod probe {
         found.loader = loader;
         found
     }
+
+    /// The Vulkan driver manifests the display driver of the adapter `luid` registers for
+    /// itself (the `VulkanDriverName` value of the adapter's registry key), read as the Vulkan
+    /// loader reads them: through D3DKMT, by the adapter. Empty when the adapter registers none
+    /// (a driver registered under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` instead) or cannot be
+    /// asked; the renderer then looks at every driver, as before.
+    pub fn adapter_driver_manifests(luid: Luid) -> Vec<String> {
+        /// `D3DKMT_OPENADAPTERFROMLUID`.
+        #[repr(C)]
+        struct OpenAdapterFromLuid {
+            luid_low: u32,
+            luid_high: i32,
+            adapter: u32,
+        }
+        /// `D3DKMT_QUERYADAPTERINFO`.
+        #[repr(C)]
+        struct QueryAdapterInfo {
+            adapter: u32,
+            kind: i32,
+            data: *mut c_void,
+            size: u32,
+        }
+        /// `D3DKMT_CLOSEADAPTER`.
+        #[repr(C)]
+        struct CloseAdapter {
+            adapter: u32,
+        }
+        type OpenFromLuid = unsafe extern "system" fn(*mut OpenAdapterFromLuid) -> i32;
+        type QueryInfo = unsafe extern "system" fn(*const QueryAdapterInfo) -> i32;
+        type Close = unsafe extern "system" fn(*const CloseAdapter) -> i32;
+        /// `KMTQAITYPE_QUERYREGISTRY`.
+        const QUERY_REGISTRY: i32 = 48;
+        /// `D3DDDI_QUERYREGISTRY_ADAPTERKEY`.
+        const ADAPTER_KEY: u32 = 1;
+        /// `D3DDDI_QUERYREGISTRY_FLAGS::TranslatePath`: a DriverStore path as a full path.
+        const TRANSLATE_PATH: u32 = 1;
+        /// `REG_MULTI_SZ`.
+        const MULTI_SZ: u32 = 7;
+        /// `D3DDDI_QUERYREGISTRY_STATUS`.
+        const STATUS_SUCCESS: u32 = 0;
+        const STATUS_BUFFER_OVERFLOW: u32 = 1;
+        // `D3DDDI_QUERYREGISTRY_INFO`: QueryType and QueryFlags, ValueName (MAX_PATH UTF-16
+        // units), ValueType, PhysicalAdapterIndex, OutputValueSize and Status, then the output
+        // (a union with a 64-bit member, so the head is 552 bytes).
+        const NAME_AT: usize = 8;
+        const VALUE_TYPE_AT: usize = NAME_AT + 260 * 2;
+        const OUTPUT_SIZE_AT: usize = VALUE_TYPE_AT + 8;
+        const STATUS_AT: usize = OUTPUT_SIZE_AT + 4;
+        const OUTPUT_AT: usize = STATUS_AT + 4;
+        const HEAD: usize = OUTPUT_AT + 8;
+        // The 64-bit loader reads this value; a 32-bit one reads `VulkanDriverNameWow`.
+        const VALUE_NAME: &str = if cfg!(target_pointer_width = "64") {
+            "VulkanDriverName"
+        } else {
+            "VulkanDriverNameWow"
+        };
+
+        fn put(bytes: &mut [u8], at: usize, value: u32) {
+            bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        fn get(bytes: &[u8], at: usize) -> u32 {
+            u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap_or([0; 4]))
+        }
+        // The query's buffer is of u64s, so the head's 64-bit output is aligned; these view
+        // it as the bytes it is.
+        fn bytes_mut(words: &mut [u64]) -> &mut [u8] {
+            // SAFETY: u8 has no alignment and no invalid value; the view covers the words.
+            unsafe { std::slice::from_raw_parts_mut(words.as_mut_ptr().cast(), words.len() * 8) }
+        }
+        fn bytes(words: &[u64]) -> &[u8] {
+            // SAFETY: as in `bytes_mut`.
+            unsafe { std::slice::from_raw_parts(words.as_ptr().cast(), words.len() * 8) }
+        }
+
+        let gdi = wide("gdi32.dll");
+        // SAFETY: a NUL-terminated UTF-16 name; gdi32 is a system library.
+        let module = unsafe { LoadLibraryW(gdi.as_ptr()) };
+        if module.is_null() {
+            return Vec::new();
+        }
+        let library = Library(module);
+        // SAFETY: D3DKMT entry points gdi32 exports from Windows 8, looked up by name and cast
+        // to their declared signatures.
+        let (open, query, close) = unsafe {
+            let find = |name: &std::ffi::CStr| GetProcAddress(library.0, name.as_ptr().cast());
+            match (
+                find(c"D3DKMTOpenAdapterFromLuid"),
+                find(c"D3DKMTQueryAdapterInfo"),
+                find(c"D3DKMTCloseAdapter"),
+            ) {
+                (Some(open), Some(query), Some(close)) => (
+                    std::mem::transmute::<unsafe extern "system" fn() -> isize, OpenFromLuid>(open),
+                    std::mem::transmute::<unsafe extern "system" fn() -> isize, QueryInfo>(query),
+                    std::mem::transmute::<unsafe extern "system" fn() -> isize, Close>(close),
+                ),
+                _ => return Vec::new(),
+            }
+        };
+        let mut opened = OpenAdapterFromLuid {
+            luid_low: u32::from_le_bytes([luid.0[0], luid.0[1], luid.0[2], luid.0[3]]),
+            luid_high: i32::from_le_bytes([luid.0[4], luid.0[5], luid.0[6], luid.0[7]]),
+            adapter: 0,
+        };
+        // SAFETY: a structure of the layout the call fills.
+        if unsafe { open(&mut opened) } != 0 || opened.adapter == 0 {
+            return Vec::new();
+        }
+
+        // Asks with the head alone, to learn the value's size, then with room for it.
+        let ask = |buffer: &mut [u64]| -> Option<u32> {
+            let view = bytes_mut(buffer);
+            let info = QueryAdapterInfo {
+                adapter: opened.adapter,
+                kind: QUERY_REGISTRY,
+                data: view.as_mut_ptr().cast(),
+                size: view.len() as u32,
+            };
+            // SAFETY: the query reads and writes only the buffer it is given, of the size given.
+            let status = unsafe { query(&info) };
+            (status == 0).then(|| get(view, STATUS_AT))
+        };
+        let mut head = vec![0u64; HEAD / 8];
+        {
+            let view = bytes_mut(&mut head);
+            put(view, 0, ADAPTER_KEY);
+            put(view, 4, TRANSLATE_PATH);
+            for (i, unit) in VALUE_NAME.encode_utf16().enumerate() {
+                view[NAME_AT + i * 2..NAME_AT + i * 2 + 2].copy_from_slice(&unit.to_le_bytes());
+            }
+            put(view, VALUE_TYPE_AT, MULTI_SZ);
+        }
+        let mut manifests = Vec::new();
+        if ask(&mut head) == Some(STATUS_BUFFER_OVERFLOW) {
+            let wanted = get(bytes(&head), OUTPUT_SIZE_AT) as usize;
+            if wanted > 0 && wanted <= 64 * 1024 {
+                let mut full = head.clone();
+                full.resize((HEAD + wanted).div_ceil(8), 0);
+                if ask(&mut full) == Some(STATUS_SUCCESS) {
+                    let view = bytes(&full);
+                    let units: Vec<u16> = view[OUTPUT_AT..(OUTPUT_AT + wanted).min(view.len())]
+                        .chunks_exact(2)
+                        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                        .collect();
+                    manifests = units
+                        .split(|&unit| unit == 0)
+                        .filter(|path| !path.is_empty())
+                        .map(String::from_utf16_lossy)
+                        .collect();
+                }
+            }
+        }
+        let closing = CloseAdapter {
+            adapter: opened.adapter,
+        };
+        // SAFETY: the adapter opened above, closed once.
+        unsafe { close(&closing) };
+        manifests
+    }
+
+    /// [`look`], with the loader kept to the requested GPU's own drivers when that is enough:
+    /// for a request that names a GPU (the default, the GPU of the main display), the drivers
+    /// that GPU's display driver registers are found ([`adapter_driver_manifests`]), and when a
+    /// look with only those finds a native device on that GPU, the look stands, and the filter
+    /// that made it is returned for gfxstream's loader too ([`super::keep_only`]). Then no
+    /// other GPU's driver is ever loaded into the renderer, not even for the look. Otherwise,
+    /// and for the `dozen` setting, every driver is looked at, as before.
+    pub fn look_for(setting: VulkanDriverSetting, request: &GpuRequest) -> (Found, Option<String>) {
+        let pack = find_compatibility_pack();
+        if setting != VulkanDriverSetting::Dozen {
+            if let GpuRequest::Luid(luid) = request {
+                if let Some(select) = drivers_select(&adapter_driver_manifests(*luid)) {
+                    let narrowed =
+                        with_variable(DRIVERS_SELECT, &select, || look_with(pack.clone()));
+                    if narrowed_look_serves(&narrowed, *luid) {
+                        return (narrowed, Some(select));
+                    }
+                }
+            }
+        }
+        (look_with(pack), None)
+    }
 }
 
 #[cfg(test)]
@@ -1255,6 +1501,93 @@ mod tests {
             .iter()
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.as_str())
+    }
+
+    #[test]
+    fn nfr1_the_loader_filter_names_the_gpus_own_manifests_once() {
+        let manifests = vec![
+            r"C:\Windows\System32\DriverStore\FileRepository\iigd_dch.inf_amd64_9a6d\igvk64.json"
+                .to_string(),
+            r"C:\Windows\System32\DriverStore\FileRepository\iigd_dch.inf_amd64_9a6d\IGVK64.json"
+                .to_string(),
+            "igvk32.json".to_string(),
+        ];
+        assert_eq!(
+            drivers_select(&manifests).as_deref(),
+            Some("igvk64.json,igvk32.json")
+        );
+        assert_eq!(drivers_select(&[]), None);
+        // Nothing that would change what the filter means.
+        assert_eq!(
+            drivers_select(&["".to_string(), "a,b.json".to_string(), "*.json".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn nfr1_a_look_kept_to_the_gpus_drivers_stands_only_when_it_found_that_gpu() {
+        let arc = native("Intel(R) Arc(TM) Graphics", ARC, DEVICE_TYPE_INTEGRATED);
+        let found = Found {
+            devices: vec![arc.clone()],
+            ..Found::default()
+        };
+        assert!(narrowed_look_serves(&found, ARC));
+        // Another GPU's device, or only Dozen on that GPU, would not be what the full look picks.
+        assert!(!narrowed_look_serves(&found, RTX));
+        let only_dozen = Found {
+            devices: vec![dozen(
+                "Intel(R) Arc(TM) Graphics",
+                ARC,
+                DEVICE_TYPE_INTEGRATED,
+            )],
+            ..Found::default()
+        };
+        assert!(!narrowed_look_serves(&only_dozen, ARC));
+        let failed = Found {
+            devices: vec![arc.clone()],
+            failure: Some("no Vulkan loader".into()),
+            ..Found::default()
+        };
+        assert!(!narrowed_look_serves(&failed, ARC));
+        let named = Found {
+            devices: vec![arc],
+            driver_override: Some(r"C:\lavapipe\lvp_icd.json".into()),
+            ..Found::default()
+        };
+        assert!(!narrowed_look_serves(&named, ARC));
+    }
+
+    #[test]
+    fn nfr1_only_the_gpus_own_driver_reaches_gfxstreams_loader() {
+        // Intel renders; NVIDIA's driver is never loaded into the renderer.
+        let found = Found {
+            devices: vec![native(
+                "Intel(R) Arc(TM) Graphics",
+                ARC,
+                DEVICE_TYPE_INTEGRATED,
+            )],
+            ..Found::default()
+        };
+        let mut native_plan = plan(VulkanDriverSetting::Auto, &found, &GpuRequest::Luid(ARC));
+        let reason = native_plan.reason.clone();
+        assert!(keep_only(&mut native_plan, "igvk64.json"));
+        assert_eq!(env_of(&native_plan, DRIVERS_SELECT), Some("igvk64.json"));
+        // The reason the user is shown stays as it was.
+        assert_eq!(native_plan.reason, reason);
+        assert_eq!(native_plan.outcome, DriverOutcome::Native);
+
+        // Dozen, or drivers the environment names, are left as they are.
+        let mut dozen_plan = DriverPlan {
+            outcome: DriverOutcome::Dozen,
+            ..native_plan.clone()
+        };
+        dozen_plan.env.clear();
+        assert!(!keep_only(&mut dozen_plan, "igvk64.json"));
+        assert!(dozen_plan.env.is_empty());
+        let mut named = native_plan.clone();
+        named.env = vec![("VK_DRIVER_FILES".into(), r"C:\Pack\dzn_icd.json".into())];
+        assert!(!keep_only(&mut named, "igvk64.json"));
+        assert_eq!(env_of(&named, DRIVERS_SELECT), None);
     }
 
     #[test]

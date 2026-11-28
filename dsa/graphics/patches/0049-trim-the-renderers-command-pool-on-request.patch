@@ -1,0 +1,36 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -4049,6 +4049,17 @@
+     releaseStagingLocked();
+ }
+
++void VkEmulation::trimCommandPool() {
++    // The pool's command buffers are recorded and allocated under mMutex, which is all the
++    // external synchronization vkTrimCommandPool asks for; pending ones are not affected.
++    std::lock_guard<std::mutex> lock(mMutex);
++    if (!mDvk || mDevice == VK_NULL_HANDLE || mCommandPool == VK_NULL_HANDLE ||
++        !mDvk->vkTrimCommandPool) {
++        return;
++    }
++    mDvk->vkTrimCommandPool(mDevice, mCommandPool, 0);
++}
++
+ void VkEmulation::destroyRetiredLocked(RetiredResource* resource) {
+     auto vk = mDvk;
+     if (resource->imageView != VK_NULL_HANDLE) {
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -529,6 +529,11 @@
+     // one makes it again.
+     void releaseIdleStaging(std::chrono::steady_clock::duration idle);
+
++    // DSA: gives the memory the renderer's command pool keeps for command buffers it no longer
++    // records back to the driver (vkTrimCommandPool). The command buffers stay, and the next
++    // recording takes memory again. An embedder calls it after a guest's device went away.
++    void trimCommandPool();
++
+    private:
+     VkEmulation() = default;
+

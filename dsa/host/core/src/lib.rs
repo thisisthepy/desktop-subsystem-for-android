@@ -69,6 +69,8 @@
 //!   which window each task and each frame goes to.
 //! - [`renderer`]: the graphics renderer in a process of its own (`dsa-gfx`), which the
 //!   window manager starts, supervises and starts again when it ends.
+//! - [`loaded_modules`]: which libraries a process loaded at each stage of its start, for its
+//!   log.
 //! - [`host_keys`]: the secrets the host's credential store keeps for each user, and
 //!   [`backup`], [`passkeys`] and [`keymint_root`], the system services that use them: app data
 //!   backups in an encrypted folder of the user's, passkeys through the host's authenticator,
@@ -149,6 +151,7 @@ pub mod keymint_root;
 pub mod keys;
 pub mod language;
 pub mod links;
+pub mod loaded_modules;
 pub mod location;
 pub mod memory;
 pub mod native_abi;

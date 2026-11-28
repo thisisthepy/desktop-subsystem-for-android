@@ -20,6 +20,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
+use dsa_host_core::loaded_modules::ModuleWatch;
 use dsa_host_core::renderer::{
     address_from, adopted_started, adoption_refusal, adoption_wait, follow_device_state,
     open_renderer, HeldTargets, RendererProcessMemory, ServedVm, WindowManagerLeft,
@@ -29,10 +30,10 @@ use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Note, 
 use dsa_protocol::renderer::{decode_body, send};
 use dsa_transport::local::LocalListener;
 use dsa_transport::{Connection, Connector, Listener, TransportError};
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HMODULE};
 use windows_sys::Win32::System::ProcessStatus::{
-    K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
-    PROCESS_MEMORY_COUNTERS_EX,
+    K32EmptyWorkingSet, K32EnumProcessModules, K32GetModuleBaseNameW, K32GetProcessMemoryInfo,
+    PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 
@@ -180,6 +181,49 @@ fn own_memory_kb() -> (Option<u64>, Option<u64>) {
         Some(counters.WorkingSetSize as u64 / 1024),
         Some(counters.PrivateUsage as u64 / 1024),
     )
+}
+
+/// The file names of the libraries loaded in this process now, for [`ModuleWatch`]. Empty
+/// when Windows does not list them.
+fn loaded_modules() -> Vec<String> {
+    // SAFETY: our own process's pseudo handle.
+    let process = unsafe { GetCurrentProcess() };
+    let mut handles: Vec<HMODULE> = vec![std::ptr::null_mut(); 512];
+    let width = std::mem::size_of::<HMODULE>();
+    loop {
+        let mut needed = 0u32;
+        // SAFETY: room for `handles.len()` handles, as the size given says.
+        let listed = unsafe {
+            K32EnumProcessModules(
+                process,
+                handles.as_mut_ptr(),
+                (handles.len() * width) as u32,
+                &mut needed,
+            )
+        };
+        if listed == 0 {
+            return Vec::new();
+        }
+        let count = needed as usize / width;
+        if count <= handles.len() {
+            handles.truncate(count);
+            break;
+        }
+        // More libraries than room: again with room for them, and for a few loaded meanwhile.
+        handles.resize(count + 64, std::ptr::null_mut());
+    }
+    handles
+        .iter()
+        .filter_map(|&module| {
+            let mut name = [0u16; 260];
+            // SAFETY: a module of this process (one unloaded meanwhile only fails), and a
+            // buffer of the length given.
+            let length = unsafe {
+                K32GetModuleBaseNameW(process, module, name.as_mut_ptr(), name.len() as u32)
+            } as usize;
+            (length > 0).then(|| String::from_utf16_lossy(&name[..length.min(name.len())]))
+        })
+        .collect()
 }
 
 /// What this process holds, with the renderer's own count.
@@ -348,14 +392,30 @@ pub fn run(args: &[String]) -> ! {
         link.note(&why);
     }
 
+    // Which libraries each stage of the start loads, so the log shows what brought in a
+    // driver the renderer does not render with.
+    let mut modules = ModuleWatch::new(loaded_modules());
+
     // Which Vulkan: a native driver, or Dozen from the Compatibility Pack where no GPU has
     // one. What the choice needs of the Vulkan loader goes into this process's environment
-    // before gfxstream loads the loader, and nowhere else.
+    // before gfxstream loads the loader, and nowhere else. The loader is kept to the GPU's own
+    // driver where that finds the GPU, so another GPU's driver is never loaded here.
     let vulkan = vulkan_driver_of(&start);
-    let found = vulkan_driver::look();
-    let plan = vulkan_driver::plan(vulkan, &found, &request_of(&start));
+    let (found, select) = vulkan_driver::look_for(vulkan, &request_of(&start));
+    let mut plan = vulkan_driver::plan(vulkan, &found, &request_of(&start));
+    if let Some(select) = select.as_deref() {
+        if vulkan_driver::keep_only(&mut plan, select) {
+            link.note(&format!(
+                "the renderer loads only the Vulkan driver of the GPU it renders on ({select}); \
+                 no other GPU's driver is loaded"
+            ));
+        }
+    }
     for (name, value) in &plan.env {
         std::env::set_var(name, value);
+    }
+    if let Some(line) = modules.note("looking at the Vulkan drivers", loaded_modules()) {
+        link.note(&line);
     }
     let request = plan.request.clone().unwrap_or_else(|| request_of(&start));
     // `GFXSTREAM_BACKEND_PATH` names another backend library, as the renderer's tests do;
@@ -370,6 +430,9 @@ pub fn run(args: &[String]) -> ! {
     } else {
         GfxstreamAdapter::on_gpu_with(backend, &request, &plan.features)
     });
+    if let Some(line) = modules.note("gfxstream started on its device", loaded_modules()) {
+        link.note(&line);
+    }
     let mut started = Started {
         process_id: std::process::id(),
         notes: adapter.notes().to_vec(),
@@ -422,6 +485,9 @@ pub fn run(args: &[String]) -> ! {
         FramePath::Nowhere
     };
     started.frame_path = frame_path as i32;
+    if let Some(line) = modules.note("the frame presentation started", loaded_modules()) {
+        link.note(&line);
+    }
     started.adapter_luid = DisplayPresenter::adapter_luid(&*adapter)
         .map(|luid| luid.to_vec())
         .unwrap_or_default();
@@ -473,7 +539,15 @@ pub fn run(args: &[String]) -> ! {
     // manager, as before.
     let adoptable = args.iter().any(|arg| arg == WINDOW_MANAGER_ARGUMENT);
     loop {
-        let left = serve_window_manager(&mut *connection, &link, &adapter, &sink, &vm, &mut served);
+        let left = serve_window_manager(
+            &mut *connection,
+            &link,
+            &adapter,
+            &sink,
+            &vm,
+            &mut served,
+            &mut modules,
+        );
         let Some(wait) = adoption_wait(left).filter(|_| adoptable) else {
             break;
         };
@@ -555,6 +629,7 @@ fn serve_window_manager(
     sink: &Arc<RemoteSink>,
     vm: &VmIdSlot,
     served: &mut ServedVm,
+    modules: &mut ModuleWatch,
 ) -> WindowManagerLeft {
     loop {
         let frame = match connection.recv(None) {
@@ -627,6 +702,11 @@ fn serve_window_manager(
                 // Every color buffer, for the memory snapshot and the diagnostics archive.
                 if let Err(why) = save_color_buffers(adapter) {
                     link.note(&format!("could not save the color buffer list: {why}"));
+                }
+                // Libraries the guest's work brought in since the start (a driver's video or
+                // Direct3D parts that the first app's frames needed).
+                if let Some(line) = modules.note("serving the guest", loaded_modules()) {
+                    link.note(&line);
                 }
             }
             Body::Stop(_) => return WindowManagerLeft::Stopped,

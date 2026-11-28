@@ -93,6 +93,7 @@ if(TARGET gfxstream_backend)
         "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_backend.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_display.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_memory.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_heap_trim.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_shared_memory.cpp")
     target_include_directories(gfxstream_backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     # The presentation cuts its copies into bands (dsa_copy_bands.h) and follows the device's

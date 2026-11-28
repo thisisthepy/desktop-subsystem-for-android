@@ -1,0 +1,107 @@
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -13,6 +13,7 @@
+ // limitations under the License.
+ #include "VkDecoderGlobalState.h"
+
++#include "dsa_allocation_note.h"
+ #include "dsa_graphics_memory.h"
+
+ #include <algorithm>
+@@ -5726,8 +5727,19 @@
+         std::optional<dsa::GraphicsGrant> dsaGrant;
+         if (isExport && hostVisible && !createBlobInfoPtr && !importHostInfo &&
+             !exportAllocateInfo) {
++            // Notes why when it allocates nothing, for the allocation below.
+             dsaGrant = dsaAllocateShared(device, vk, localAllocInfo, pAllocator, pMemory,
+                                          &mappedPtr);
++        } else if (isImport) {
++            dsa::noteAllocation(dsa::AllocationWhy::Imported);
++        } else if (!hostVisible) {
++            dsa::noteAllocation(dsa::AllocationWhy::GpuOnly);
++        } else {
++            // Host-visible memory a gfxstream feature allocates itself: it used to be left out
++            // of the shared memory without a word.
++            dsaSayCopied(5, "a gfxstream feature (system blob, external blob or host memory "
++                            "import) allocates it");
++            dsa::noteAllocation(dsa::AllocationWhy::FeatureAllocates);
+         }
+         VkResult result = VK_SUCCESS;
+         if (dsaGrant) {
+@@ -5873,11 +5885,18 @@
+                                                         VkDeviceMemory* pMemory,
+                                                         void** mappedPtr) {
+         uint64_t owner = 0;
++        bool maps = false;
+         {
+             std::lock_guard<std::mutex> lock(mMutex);
+             auto* deviceInfo = android::base::find(mDeviceInfo, device);
+-            if (!deviceInfo || !deviceInfo->dsaMapsSharedMemory) return std::nullopt;
+-            owner = deviceInfo->dsaGuestProcess;
++            maps = deviceInfo && deviceInfo->dsaMapsSharedMemory;
++            owner = maps ? deviceInfo->dsaGuestProcess : 0;
++        }
++        if (!maps) {
++            // This one used to go without a word.
++            dsaSayCopied(4, "the guest never said the device maps the shared graphics memory");
++            dsa::noteAllocation(dsa::AllocationWhy::DeviceNotShared);
++            return std::nullopt;
+         }
+         // Only what an import may carry: allocation flags, and a dedicated buffer, which is a
+         // hint the shared memory leaves out. An image cannot be bound to imported host memory.
+@@ -5893,29 +5912,34 @@
+                     VK_NULL_HANDLE) {
+                     dsaSayCopied(0, "an image has the memory to itself, and an image cannot "
+                                     "be bound to imported host memory");
++                    dsa::noteAllocation(dsa::AllocationWhy::DedicatedImage);
+                     return std::nullopt;
+                 }
+             } else {
+                 dsaSayCopied(1, "the allocation asks for more than imported host memory gives "
+                                 "(an opaque capture address or another import)");
++                dsa::noteAllocation(dsa::AllocationWhy::MoreThanImportGives);
+                 return std::nullopt;
+             }
+         }
+         if (!m_vkEmulation->supportsExternalMemoryHostProperties() ||
+             !vk->vkGetMemoryHostPointerPropertiesEXT) {
+             dsaSayCopied(2, "the driver cannot import host memory (VK_EXT_external_memory_host)");
++            dsa::noteAllocation(dsa::AllocationWhy::NoHostImport);
+             return std::nullopt;
+         }
+         const VkDeviceSize alignment =
+             m_vkEmulation->externalMemoryHostProperties().minImportedHostPointerAlignment;
+         if (alignment == 0 || dsa::kGraphicsGranule % alignment != 0) {
+             dsaSayCopied(3, "the driver imports host memory only in pieces larger than 64 KiB");
++            dsa::noteAllocation(dsa::AllocationWhy::ImportAlignment);
+             return std::nullopt;
+         }
+         dsa::GrantRefusal why = dsa::GrantRefusal::NotRefused;
+         auto grant = dsa::graphicsMemory().allocate(allocInfo.allocationSize, owner, &why);
+         if (!grant) {
+             dsaSayCopied(10 + static_cast<int>(why), dsa::grantRefusalText(why));
++            dsa::noteAllocation(dsa::AllocationWhy::RegionRefused);
+             return std::nullopt;
+         }
+         void* at = dsa::graphicsMemory().pointer(grant->offset);
+@@ -5928,6 +5952,7 @@
+             dsa::graphicsMemory().release(grant->offset);
+             dsaSayCopied(8, "the driver does not take the shared memory for the memory type "
+                             "asked for");
++            dsa::noteAllocation(dsa::AllocationWhy::TypeRefused);
+             return std::nullopt;
+         }
+         VkImportMemoryHostPointerInfoEXT import = {
+@@ -5940,9 +5965,11 @@
+         VkMemoryAllocateInfo info = allocInfo;
+         info.pNext = &import;
+         info.allocationSize = grant->length;
++        dsa::noteAllocation(dsa::AllocationWhy::Granted);
+         if (vk->vkAllocateMemory(device, &info, pAllocator, pMemory) != VK_SUCCESS) {
+             dsa::graphicsMemory().release(grant->offset);
+             dsaSayCopied(9, "the driver refused to import the shared memory");
++            dsa::noteAllocation(dsa::AllocationWhy::ImportRefused);
+             return std::nullopt;
+         }
+         *mappedPtr = at;

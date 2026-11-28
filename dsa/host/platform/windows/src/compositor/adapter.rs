@@ -133,6 +133,39 @@ impl Default for GuestDeviceRaw {
 type GetGuestDevicesFn = unsafe extern "C" fn(*mut GuestDeviceRaw, u32, *mut u32) -> c_int;
 type DescribeColorBuffersFn = unsafe extern "C" fn(*mut c_char, usize) -> usize;
 
+/// The text one of the backend's `dsa_gfx_describe_*` calls writes, or `None` when the
+/// renderer is not running.
+fn describe_text(describe: DescribeColorBuffersFn) -> Option<String> {
+    // SAFETY: a null buffer of no bytes only asks for the size.
+    let mut needed = unsafe { describe(std::ptr::null_mut(), 0) };
+    // What it lists may grow between the two calls: room for a few more lines.
+    for _ in 0..3 {
+        if needed == 0 {
+            return None;
+        }
+        let mut text = vec![0u8; needed + 4096];
+        // SAFETY: `text` has the length the call is given.
+        needed = unsafe { describe(text.as_mut_ptr().cast(), text.len()) };
+        if needed <= text.len() {
+            text.truncate(needed.saturating_sub(1));
+            return Some(String::from_utf8_lossy(&text).into_owned());
+        }
+    }
+    None
+}
+
+/// The renderer's list of ColorBuffers, followed by each allocation on the guests' devices
+/// and why it is not shared, when the backend lists them: the memory snapshot takes the one
+/// file.
+fn color_buffers_with_allocations(colors: String, allocations: Option<String>) -> String {
+    match allocations {
+        Some(allocations) => {
+            format!("{colors}\n# The guest devices' Vulkan allocations.\n{allocations}")
+        }
+        None => colors,
+    }
+}
+
 fn guest_device(raw: &GuestDeviceRaw) -> GuestDevice {
     let end = raw
         .name
@@ -454,6 +487,9 @@ pub struct NativeBackend {
     fn_get_memory_owners: Option<GetMemoryOwnersFn>,
     fn_get_guest_devices: Option<GetGuestDevicesFn>,
     fn_describe_color_buffers: Option<DescribeColorBuffersFn>,
+    /// Absent from a backend built before it listed each guest allocation and why it was not
+    /// shared: the color buffer list then comes alone.
+    fn_describe_guest_allocations: Option<DescribeColorBuffersFn>,
     /// Absent from a backend built before it survived a GPU reset.
     fn_simulate_device_loss: Option<unsafe extern "C" fn() -> c_int>,
     fn_device_generation: Option<unsafe extern "C" fn() -> u64>,
@@ -543,6 +579,8 @@ impl NativeBackend {
                 Self::get_symbol(handle, b"dsa_gfx_get_guest_devices\0").ok();
             let fn_describe_color_buffers: Option<DescribeColorBuffersFn> =
                 Self::get_symbol(handle, b"dsa_gfx_describe_color_buffers\0").ok();
+            let fn_describe_guest_allocations: Option<DescribeColorBuffersFn> =
+                Self::get_symbol(handle, b"dsa_gfx_describe_guest_allocations\0").ok();
             let fn_simulate_device_loss =
                 Self::get_symbol(handle, b"dsa_gfx_simulate_device_loss\0").ok();
             let fn_device_generation =
@@ -599,6 +637,7 @@ impl NativeBackend {
                 fn_get_memory_owners,
                 fn_get_guest_devices,
                 fn_describe_color_buffers,
+                fn_describe_guest_allocations,
                 fn_simulate_device_loss,
                 fn_device_generation,
                 fn_device_losses,
@@ -872,23 +911,9 @@ impl GfxBackend for NativeBackend {
     }
 
     fn color_buffers(&self) -> Option<String> {
-        let describe = self.fn_describe_color_buffers?;
-        // SAFETY: a null buffer of no bytes only asks for the size.
-        let mut needed = unsafe { describe(std::ptr::null_mut(), 0) };
-        // ColorBuffers may come between the two calls: room for a few more lines.
-        for _ in 0..3 {
-            if needed == 0 {
-                return None;
-            }
-            let mut text = vec![0u8; needed + 4096];
-            // SAFETY: `text` has the length the call is given.
-            needed = unsafe { describe(text.as_mut_ptr().cast(), text.len()) };
-            if needed <= text.len() {
-                text.truncate(needed.saturating_sub(1));
-                return Some(String::from_utf8_lossy(&text).into_owned());
-            }
-        }
-        None
+        let colors = describe_text(self.fn_describe_color_buffers?)?;
+        let allocations = self.fn_describe_guest_allocations.and_then(describe_text);
+        Some(color_buffers_with_allocations(colors, allocations))
     }
 
     fn simulate_device_loss(&self) -> bool {
@@ -1323,6 +1348,41 @@ mod tests {
     use dsa_transport::memory;
     use dsa_transport::{Connector, Listener};
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    /// A backend's `dsa_gfx_describe_*` that writes one allocation line, as the C side does:
+    /// at most `capacity` bytes ended with a 0, and the bytes the whole text needs.
+    unsafe extern "C" fn fake_describe_allocations(out: *mut c_char, capacity: usize) -> usize {
+        let text = b"device\tprocess\tkind\tbytes\n0x1\tcom.android.settings (pid 981)\t\
+                     CPU-mapped\t6684672\n";
+        if !out.is_null() && capacity > 0 {
+            let n = text.len().min(capacity - 1);
+            // SAFETY: `out` holds `capacity` bytes, and at most `capacity` are written.
+            unsafe {
+                std::ptr::copy_nonoverlapping(text.as_ptr(), out.cast::<u8>(), n);
+                *out.add(n) = 0;
+            }
+        }
+        text.len() + 1
+    }
+
+    unsafe extern "C" fn fake_describe_nothing(_out: *mut c_char, _capacity: usize) -> usize {
+        0
+    }
+
+    #[test]
+    fn nfr1_the_guest_allocations_follow_the_color_buffers_in_the_snapshot_file() {
+        let allocations = describe_text(fake_describe_allocations).expect("a list");
+        assert!(allocations.ends_with("CPU-mapped\t6684672\n"));
+        assert_eq!(describe_text(fake_describe_nothing), None);
+        let file = color_buffers_with_allocations("# 3 ColorBuffers\n".into(), Some(allocations));
+        assert!(file.starts_with("# 3 ColorBuffers\n\n# The guest devices' Vulkan allocations.\n"));
+        assert!(file.contains("com.android.settings (pid 981)"));
+        // A backend that does not list them leaves the ColorBuffers as they were.
+        assert_eq!(
+            color_buffers_with_allocations("# 3 ColorBuffers\n".into(), None),
+            "# 3 ColorBuffers\n"
+        );
+    }
 
     struct TestFakeBackend {
         process_created: AtomicU64,

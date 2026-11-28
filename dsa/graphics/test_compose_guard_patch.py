@@ -70,7 +70,7 @@ class ComposeGuardPatchTests(unittest.TestCase):
         self.assertIn("Display %u's frames came in %zu ColorBuffer(s)", self.display)
 
     def test_nfr1_the_fetch_applies_0046_after_0045(self):
-        self.assertIn(" 0045 0046;", read(HOST / "fetch.sh"))
+        self.assertRegex(read(HOST / "fetch.sh"), r" 0045 0046[ ;]")
         self.assertIn('-Filter "0046-*.patch"', read(HOST / "fetch.ps1"))
 
 

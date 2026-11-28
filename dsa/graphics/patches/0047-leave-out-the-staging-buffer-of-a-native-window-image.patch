@@ -1,0 +1,18 @@
+diff --git a/host/vulkan/VkAndroidNativeBuffer.cpp b/host/vulkan/VkAndroidNativeBuffer.cpp
+--- a/host/vulkan/VkAndroidNativeBuffer.cpp
++++ b/host/vulkan/VkAndroidNativeBuffer.cpp
+@@ -366,7 +366,13 @@
+     // Allocate a staging memory and set up the staging buffer.
+     // TODO: Make this shared as well if we can get that to
+     // work on Windows with NVIDIA.
+-    {
++    //
++    // DSA: only an image whose release is copied back to the CPU reads the staging buffer
++    // (on_vkQueueSignalReleaseImageANDROID). One used as the native image never does, and every
++    // image of a Vulkan-only renderer is: the buffer, the size of the image, host visible and
++    // mapped for the image's whole life, held nothing but memory. A 1208x1383 window's four
++    // buffers kept about 26 MiB of the renderer's private memory that way, never written.
++    if (!out->mUseVulkanNativeImage) {
+         VkBufferCreateInfo stagingBufferCreateInfo = {
+             VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+             0,
