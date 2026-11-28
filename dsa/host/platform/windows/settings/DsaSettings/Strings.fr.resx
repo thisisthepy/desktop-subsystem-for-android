@@ -1094,6 +1094,15 @@ Il n'est ni affilié à Microsoft ou Google, ni approuvé ou parrainé par eux.<
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} a été retiré de votre bureau.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widgets</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Afficher {0} de plus</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Programme d'installation d'APK</value>
   </data>
@@ -2641,7 +2650,7 @@ Obtenez la version x86_64 ou arm64-v8a de l'application.</value>
     <value>Magasins alternatifs</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Un magasin se supprime depuis la liste des apps.</value>
+    <value>DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Les magasins installés apparaissent dans la liste des apps comme toute autre app, et vous les désinstallez depuis cette liste.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Non installé</value>
@@ -2663,5 +2672,39 @@ Obtenez la version x86_64 ou arm64-v8a de l'application.</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Ouvrir</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Jeux</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Jeux</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Actualiser</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Réglages pour mieux jouer dans DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Impossible de lire ou de modifier les réglages des jeux</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Confort de jeu</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Garder le focus du jeu</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Les apps activées ci-dessous continuent quand vous cliquez ailleurs, même un jeu qui se met en pause sans focus.
+Les touches et la saisie vont toujours seulement à la fenêtre que vous utilisez.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Tout sélectionner</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Aucune app n'est encore installée dans Android.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Jeu · {0}</value>
   </data>
 </root>

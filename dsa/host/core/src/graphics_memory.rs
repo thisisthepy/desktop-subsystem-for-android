@@ -30,7 +30,7 @@ pub const GRANT_ENTRY_BYTES: u64 = 32;
 
 /// The data region's size when the settings say nothing: room for a game's staging buffers.
 /// Its pages take memory only once the guest or the GPU writes them.
-pub const DEFAULT_DATA_BYTES: u64 = 256 * 1024 * 1024;
+pub const DEFAULT_DATA_BYTES: u64 = 512 * 1024 * 1024;
 
 /// The smallest data region worth making: its release slots and 16 MiB, the block a guest
 /// driver allocates host-visible memory in.

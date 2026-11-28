@@ -2955,6 +2955,91 @@ fn fr12_dsa_widgets_lists_adds_and_removes_widgets() {
 }
 
 #[test]
+fn fr12_dsa_widgets_lists_by_app_and_draws_the_previews_asked_for() {
+    use dsa_host_core::widgets::{PreviewSource, WidgetPreview};
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    offer_clock(&androids, &user);
+    androids
+        .of(&user)
+        .unwrap()
+        .widget_previews
+        .lock()
+        .unwrap()
+        .push(WidgetPreview {
+            provider: "com.example.clock/.ClockWidget".into(),
+            png: vec![0x89, b'P', b'N', b'G'],
+            source: PreviewSource::Layout,
+        });
+
+    let json = json_of(&dsa(&endpoint, "widgets list --by-app --json"));
+    let app = &json["apps"][0];
+    assert_eq!(app["package"], "com.example.clock");
+    assert_eq!(app["app"], "Clock App");
+    assert!(!app["icon_png"].as_str().unwrap().is_empty());
+    assert_eq!(
+        app["widgets"][0]["provider"],
+        "com.example.clock/.ClockWidget"
+    );
+    assert_eq!(app["widgets"][0]["preview_png"], "", "previews come later");
+    assert_eq!(app["widgets"][0]["default_width_dp"], 180);
+    assert_eq!(json["widgets"].as_array().unwrap().len(), 0);
+
+    let output = dsa(&endpoint, "widgets list --by-app");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("Clock App (com.example.clock): 1 widget"),
+        "{}",
+        stdout(&output)
+    );
+
+    let json = json_of(&dsa(
+        &endpoint,
+        "widgets previews com.example.clock/.ClockWidget --json",
+    ));
+    assert_eq!(
+        json["previews"][0]["provider"],
+        "com.example.clock/.ClockWidget"
+    );
+    assert_eq!(json["previews"][0]["source"], "layout");
+    assert_eq!(json["previews"][0]["preview_png"], "iVBORw==");
+}
+
+#[test]
+fn fr12_dsa_widgets_previews_and_by_app_are_parsed() {
+    use dsa_cli::WidgetAction;
+    assert_eq!(
+        parse(&args("widgets list --by-app --json"))
+            .unwrap()
+            .widgets,
+        Some(WidgetAction::ListByApp)
+    );
+    assert_eq!(
+        parse(&args("widgets --by-app")).unwrap().widgets,
+        Some(WidgetAction::ListByApp)
+    );
+    assert_eq!(
+        parse(&args("widgets previews com.a/.One com.b/.Two --json"))
+            .unwrap()
+            .widgets,
+        Some(WidgetAction::Previews(vec![
+            "com.a/.One".into(),
+            "com.b/.Two".into()
+        ]))
+    );
+    assert!(parse(&args("widgets previews")).is_err());
+    assert!(parse(&args("widgets previews clock")).is_err());
+    assert!(parse(&args("widgets add com.a/.One --by-app")).is_err());
+    let many = (0..=64)
+        .map(|i| format!("com.a/.W{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(parse(&args(&format!("widgets previews {many}"))).is_err());
+    assert!(dsa_cli::USAGE.contains("previews <provider>..."));
+}
+
+#[test]
 fn fr12_dsa_widgets_says_why_a_widget_was_not_placed() {
     let ((listener, _, user), endpoint) = local_pair();
     let androids = Arc::new(FakeAndroids::default());
@@ -3522,6 +3607,7 @@ fn fr30_dsa_app_window_is_parsed() {
             fullscreen: None,
             immersive: None,
             below_title_bar: None,
+            keep_focus: None,
         })
     );
     assert_eq!(
@@ -3536,6 +3622,7 @@ fn fr30_dsa_app_window_is_parsed() {
             fullscreen: None,
             immersive: None,
             below_title_bar: None,
+            keep_focus: None,
         })
     );
     assert_eq!(
@@ -3617,6 +3704,7 @@ fn fr4_dsa_app_window_dpi_scaling_is_parsed() {
                 fullscreen: None,
                 immersive: None,
                 below_title_bar: None,
+                keep_focus: None,
             })
         );
     }
@@ -3635,6 +3723,7 @@ fn fr4_dsa_app_window_dpi_scaling_is_parsed() {
             fullscreen: None,
             immersive: None,
             below_title_bar: None,
+            keep_focus: None,
         })
     );
     assert!(parse(&args("app-window com.example.notes --dpi-scaling enhanced")).is_err());
@@ -3647,8 +3736,8 @@ fn fr4_dsa_app_window_sets_and_keeps_an_apps_dpi_scaling() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = settings_service(listener);
     let none = json_of(&dsa(&endpoint, "app-window --json"));
-    // The forced way is stored but does not do what it says yet.
-    assert_eq!(none["system_forced_available"], false);
+    // The forced way does what it says.
+    assert_eq!(none["system_forced_available"], true);
     let set = json_of(&dsa(
         &endpoint,
         "app-window com.example.notes --dpi-scaling system --json",
@@ -3672,7 +3761,7 @@ fn fr4_dsa_app_window_sets_and_keeps_an_apps_dpi_scaling() {
         "app-window com.example.notes --dpi-scaling system-forced",
     );
     assert!(
-        stdout(&forced).contains("not available yet"),
+        stdout(&forced).contains("without a restart"),
         "{}",
         stdout(&forced)
     );
@@ -3701,6 +3790,7 @@ fn fr30_app_window_sets_and_shows_the_below_title_bar_switch() {
             fullscreen: None,
             immersive: None,
             below_title_bar: Some(true),
+            keep_focus: None,
         })
     );
     assert!(parse(&args(
@@ -3741,6 +3831,101 @@ fn fr30_app_window_sets_and_shows_the_below_title_bar_switch() {
     assert_eq!(off["apps"][0]["below_title_bar"], false);
     let listed = json_of(&dsa(&endpoint, "app-window --json"));
     assert_eq!(listed["apps"], serde_json::json!([]));
+}
+
+#[test]
+fn fr44_app_window_and_games_parse_the_keep_focus_switch() {
+    use dsa_cli::{AppWindowAction, GamesAction};
+    assert_eq!(
+        parse(&args("app-window com.ustwo.monumentvalley --keep-focus on"))
+            .unwrap()
+            .app_window,
+        Some(AppWindowAction::Set {
+            package: "com.ustwo.monumentvalley".into(),
+            fixed_size: None,
+            start_size: None,
+            dpi_scaling: None,
+            fullscreen: None,
+            immersive: None,
+            below_title_bar: None,
+            keep_focus: Some(true),
+        })
+    );
+    assert!(parse(&args("app-window com.example.chess --keep-focus maybe")).is_err());
+    assert!(parse(&args("app-window --keep-focus on")).is_err());
+    assert_eq!(
+        parse(&args("games")).unwrap().games,
+        Some(GamesAction::List)
+    );
+    assert_eq!(
+        parse(&args("games list --json")).unwrap().games,
+        Some(GamesAction::List)
+    );
+    assert_eq!(
+        parse(&args("games select-all --json")).unwrap().games,
+        Some(GamesAction::SelectAll)
+    );
+    assert_eq!(
+        parse(&args(
+            "games keep-focus off com.example.chess com.ustwo.monumentvalley --json"
+        ))
+        .unwrap()
+        .games,
+        Some(GamesAction::KeepFocus(
+            false,
+            vec![
+                "com.example.chess".to_string(),
+                "com.ustwo.monumentvalley".to_string()
+            ]
+        ))
+    );
+    assert!(parse(&args("games keep-focus on")).is_err());
+    assert!(parse(&args("games keep-focus sometimes com.example.chess")).is_err());
+    assert!(parse(&args("games keep-focus on not/a/package")).is_err());
+}
+
+#[test]
+fn fr44_keep_game_focus_is_off_by_default_and_stored_with_the_window_settings() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    // Off for an app the user set nothing for.
+    let none = json_of(&dsa(&endpoint, "app-window com.example.chess --json"));
+    assert_eq!(none["apps"][0]["keep_focus"], false);
+    // Turned on, it is kept by the service (as across a restart, with the other window
+    // settings), and the app's other settings stay.
+    let on = json_of(&dsa(
+        &endpoint,
+        "app-window com.example.chess --keep-focus on --fixed-size on --json",
+    ));
+    assert_eq!(on["apps"][0]["keep_focus"], true);
+    assert_eq!(on["apps"][0]["fixed_size"], true);
+    let kept = json_of(&dsa(
+        &endpoint,
+        "app-window com.example.chess --fixed-size off --json",
+    ));
+    assert_eq!(kept["apps"][0]["keep_focus"], true);
+    let output = dsa(&endpoint, "app-window com.example.chess");
+    assert!(
+        stdout(&output).contains("keeps its focus while another app's window has it"),
+        "{}",
+        stdout(&output)
+    );
+    // dsa games turns it off and on for the apps named.
+    let games = dsa(&endpoint, "games keep-focus off com.example.chess --json");
+    assert!(games.status.success(), "{}", stdout(&games));
+    assert!(json_of(&games)["apps"].is_array());
+    let off = json_of(&dsa(&endpoint, "app-window --json"));
+    assert_eq!(off["apps"], serde_json::json!([]));
+    let games = dsa(
+        &endpoint,
+        "games keep-focus on com.example.chess com.example.notes --json",
+    );
+    assert!(games.status.success(), "{}", stdout(&games));
+    let both = json_of(&dsa(&endpoint, "app-window --json"));
+    assert_eq!(both["apps"][0]["package"], "com.example.chess");
+    assert_eq!(both["apps"][0]["keep_focus"], true);
+    assert_eq!(both["apps"][1]["package"], "com.example.notes");
+    assert_eq!(both["apps"][1]["keep_focus"], true);
 }
 
 #[test]
@@ -3808,6 +3993,7 @@ fn fr30_an_apps_full_screen_choice_wins_over_the_default() {
             fullscreen: Some(FullScreenPlace::Window),
             immersive: Some(FullScreenPlace::Screen),
             below_title_bar: None,
+            keep_focus: None,
         })
     );
     assert!(parse(&args("app-window com.example.video --fullscreen monitor")).is_err());

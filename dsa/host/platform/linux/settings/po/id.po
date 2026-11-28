@@ -1845,8 +1845,8 @@ msgstr "Android berhenti lalu dimulai lagi.\n\nJendela aplikasinya ditutup. Buka
 msgid "Alternative stores"
 msgstr "Toko alternatif"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi."
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Toko yang terpasang muncul di daftar aplikasi seperti aplikasi lain, dan Anda mencopotnya dari sana."
 
 msgid "Installed, version {0}"
 msgstr "Terpasang, versi {0}"

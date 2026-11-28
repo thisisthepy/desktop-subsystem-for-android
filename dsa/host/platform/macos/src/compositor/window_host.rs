@@ -506,6 +506,7 @@ fn handle(message: ToHost) {
             if let Ok(mut state) = state.try_borrow_mut() {
                 if let Some(window) = state.windows.get_mut(&task_id) {
                     window.set_frame_scale(scale);
+                    window.set_frame_limit(max);
                 }
             }
         }),

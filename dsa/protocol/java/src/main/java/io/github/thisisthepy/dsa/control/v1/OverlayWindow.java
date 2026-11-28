@@ -18,7 +18,8 @@ package io.github.thisisthepy.dsa.control.v1;
  * the overlay's ID as `task_id`, the positions relative to the top left corner of `bounds`.
  * It never sends CloseTask, ResizeTask, SetTaskDensity, SetTaskCaption or SetTaskFullScreen
  * for one, and the agent ignores them: how an overlay moves, changes size and closes is its
- * app's.
+ * app's. The one thing it asks of an overlay is a density (SetOverlayDensity), and only for an
+ * app set to System (forced) scaling.
  * An overlay whose `bounds` cover the whole display (a screen filter, a dimmer) is reported
  * the same way. The host opens no window for it, because that window would cover the user's
  * desktop, and the hwcomposer composes it over every app task's frames instead, as it covers
@@ -163,6 +164,53 @@ public  final class OverlayWindow extends
     touchable_ = false;
   }
 
+  public static final int DENSITY_DPI_FIELD_NUMBER = 4;
+  private int densityDpi_;
+  /**
+   * <pre>
+   * The density the app draws this window at, in dots per inch, when the host gave the window
+   * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+   * window's size on the guest's display has changed since. 0 while the app draws it as the
+   * rest of its process, as every overlay the host gave no density.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 4;</code>
+   * @return The densityDpi.
+   */
+  @java.lang.Override
+  public int getDensityDpi() {
+    return densityDpi_;
+  }
+  /**
+   * <pre>
+   * The density the app draws this window at, in dots per inch, when the host gave the window
+   * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+   * window's size on the guest's display has changed since. 0 while the app draws it as the
+   * rest of its process, as every overlay the host gave no density.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 4;</code>
+   * @param value The densityDpi to set.
+   */
+  private void setDensityDpi(int value) {
+    
+    densityDpi_ = value;
+  }
+  /**
+   * <pre>
+   * The density the app draws this window at, in dots per inch, when the host gave the window
+   * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+   * window's size on the guest's display has changed since. 0 while the app draws it as the
+   * rest of its process, as every overlay the host gave no density.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 4;</code>
+   */
+  private void clearDensityDpi() {
+    
+    densityDpi_ = 0;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.OverlayWindow parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -259,7 +307,8 @@ public  final class OverlayWindow extends
    * the overlay's ID as `task_id`, the positions relative to the top left corner of `bounds`.
    * It never sends CloseTask, ResizeTask, SetTaskDensity, SetTaskCaption or SetTaskFullScreen
    * for one, and the agent ignores them: how an overlay moves, changes size and closes is its
-   * app's.
+   * app's. The one thing it asks of an overlay is a density (SetOverlayDensity), and only for an
+   * app set to System (forced) scaling.
    * An overlay whose `bounds` cover the whole display (a screen filter, a dimmer) is reported
    * the same way. The host opens no window for it, because that window would cover the user's
    * desktop, and the hwcomposer composes it over every app task's frames instead, as it covers
@@ -414,6 +463,55 @@ public  final class OverlayWindow extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The density the app draws this window at, in dots per inch, when the host gave the window
+     * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+     * window's size on the guest's display has changed since. 0 while the app draws it as the
+     * rest of its process, as every overlay the host gave no density.
+     * </pre>
+     *
+     * <code>uint32 density_dpi = 4;</code>
+     * @return The densityDpi.
+     */
+    @java.lang.Override
+    public int getDensityDpi() {
+      return instance.getDensityDpi();
+    }
+    /**
+     * <pre>
+     * The density the app draws this window at, in dots per inch, when the host gave the window
+     * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+     * window's size on the guest's display has changed since. 0 while the app draws it as the
+     * rest of its process, as every overlay the host gave no density.
+     * </pre>
+     *
+     * <code>uint32 density_dpi = 4;</code>
+     * @param value The densityDpi to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDensityDpi(int value) {
+      copyOnWrite();
+      instance.setDensityDpi(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The density the app draws this window at, in dots per inch, when the host gave the window
+     * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+     * window's size on the guest's display has changed since. 0 while the app draws it as the
+     * rest of its process, as every overlay the host gave no density.
+     * </pre>
+     *
+     * <code>uint32 density_dpi = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearDensityDpi() {
+      copyOnWrite();
+      instance.clearDensityDpi();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.OverlayWindow)
   }
   @java.lang.Override
@@ -433,10 +531,11 @@ public  final class OverlayWindow extends
             "windowType_",
             "focusable_",
             "touchable_",
+            "densityDpi_",
           };
           java.lang.String info =
-              "\u0000\u0003\u0000\u0000\u0001\u0003\u0003\u0000\u0000\u0000\u0001\u0004\u0002\u0007" +
-              "\u0003\u0007";
+              "\u0000\u0004\u0000\u0000\u0001\u0004\u0004\u0000\u0000\u0000\u0001\u0004\u0002\u0007" +
+              "\u0003\u0007\u0004\u000b";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

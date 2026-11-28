@@ -278,17 +278,22 @@ class GraphicsMemory {
     }
 
     // A grant of at least `size` bytes, in whole granules, for the guest process `owner`.
-    // Granules the guest has let go of since are taken back first.
+    // Granules the guest has let go of since are taken back first, and scrubbed before the
+    // grant is chosen, so this grant may use them.
     std::optional<GraphicsGrant> allocate(uint64_t size, uint64_t owner,
                                           GrantRefusal* why = nullptr) {
         std::vector<Range> scrubs;
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            if (mData) reclaimLocked(&scrubs);
+        }
+        runScrubs(scrubs);
         std::optional<GraphicsGrant> grant;
         GrantRefusal refusal = GrantRefusal::NotRefused;
         {
             std::lock_guard<std::mutex> lock(mMutex);
-            grant = allocateLocked(size, owner, &refusal, &scrubs);
+            grant = allocateLocked(size, owner, &refusal);
         }
-        runScrubs(scrubs);
         if (why) *why = refusal;
         return grant;
     }
@@ -392,7 +397,14 @@ class GraphicsMemory {
    private:
     // Unusable: a granule a renderer before this one granted that cannot be committed now, so
     // it is never scrubbed (that would touch it) nor handed out again.
-    enum class Granule : uint8_t { Free, Busy, Slots, Unusable };
+    //
+    // Scrubbing: taken back, and waiting for its scrub, which runs with no lock held. It becomes
+    // Free only once the scrub has finished. A granule marked Free before its scrub could be
+    // granted on another render thread meanwhile (the trim's reclaim runs once a second beside
+    // every allocation), and the late scrub then zeroed and discarded what the new owner had
+    // just written: a hwcomposer's packed video picture read as zeros (solid green), or an
+    // app's fresh vertex data as nothing.
+    enum class Granule : uint8_t { Free, Busy, Slots, Unusable, Scrubbing };
 
     struct Grant {
         uint64_t start = 0;  // in granules
@@ -406,6 +418,11 @@ class GraphicsMemory {
     struct Range {
         uint8_t* at;
         uint64_t length;
+        // The granules it covers, and the attach they belong to: they become Free once
+        // scrubbed, unless the region was taken over meanwhile.
+        uint64_t start;
+        uint64_t granules;
+        uint64_t generation;
     };
 
     uint8_t* entry(uint64_t index) const {
@@ -479,12 +496,15 @@ class GraphicsMemory {
         return sharedLoad(slot(index)) == slotValue(seq, kSlotBound);
     }
 
+    // Takes the grant's granules back. They stay out of every allocation until runScrubs has
+    // scrubbed them.
     void freeLocked(const Grant& grant, std::vector<Range>* scrubs) {
         for (uint64_t i = 0; i < grant.granules; ++i) {
-            mState[grant.start + i] = Granule::Free;
+            mState[grant.start + i] = Granule::Scrubbing;
         }
         scrubs->push_back(Range{mData + grant.start * kGraphicsGranule,
-                                grant.granules * kGraphicsGranule});
+                                grant.granules * kGraphicsGranule, grant.start, grant.granules,
+                                mGeneration});
     }
 
     void takeOverLocked(std::vector<Range>* scrubs) {
@@ -538,13 +558,11 @@ class GraphicsMemory {
     }
 
     std::optional<GraphicsGrant> allocateLocked(uint64_t size, uint64_t owner,
-                                                GrantRefusal* why,
-                                                std::vector<Range>* scrubs) {
+                                                GrantRefusal* why) {
         if (!mData) {
             *why = GrantRefusal::NoRegion;
             return std::nullopt;
         }
-        reclaimLocked(scrubs);
         const uint64_t count = size == 0 ? 1 : (size + kGraphicsGranule - 1) / kGraphicsGranule;
         if (count > mState.size()) {
             *why = GrantRefusal::TooLarge;
@@ -615,6 +633,17 @@ class GraphicsMemory {
                 scrub(context, range.at, range.length);
             } else {
                 std::memset(range.at, 0, range.length);
+            }
+        }
+        if (scrubs.empty()) return;
+        // Only now may the granules be granted again: whatever their next owner writes comes
+        // after the scrub, never before it.
+        std::lock_guard<std::mutex> lock(mMutex);
+        for (const Range& range : scrubs) {
+            if (range.generation != mGeneration) continue;
+            for (uint64_t i = range.start; i < range.start + range.granules && i < mState.size();
+                 ++i) {
+                if (mState[i] == Granule::Scrubbing) mState[i] = Granule::Free;
             }
         }
     }

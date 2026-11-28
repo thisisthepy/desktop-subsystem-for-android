@@ -80,6 +80,7 @@ class AndroidOverlayWindows(private val log: Log) : OverlaySource {
                 surface = TaskBounds(frame.left - inset, frame.top - inset, frame.right + inset, frame.bottom + inset),
                 // The name is the window's identity hash, a space, and its title.
                 title = name.substringAfter(' ', ""),
+                windowName = name.substringBefore(' '),
                 visible = handle.inputConfig and NOT_VISIBLE == 0 && handle.alpha > 0f && !frame.isEmpty,
                 focusable = handle.inputConfig and NOT_FOCUSABLE == 0,
                 touchable = handle.inputConfig and NOT_TOUCHABLE == 0,

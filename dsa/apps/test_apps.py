@@ -39,7 +39,9 @@ def changed_files(patch):
 
 class DefaultAppsTests(unittest.TestCase):
     def setUp(self):
+        # The default apps; the system screens have tests of their own (SystemScreensTests).
         self.manifest = apps.load()
+        self.manifest["apps"] = [a for a in self.manifest["apps"] if a.get("role") != "system"]
 
     def test_fr42_the_seven_apps_take_the_aosp_package_names(self):
         self.assertEqual({a["name"]: a["package"] for a in self.manifest["apps"]}, AOSP_PACKAGES)
@@ -97,6 +99,64 @@ class DefaultAppsTests(unittest.TestCase):
                 text = design[0].read_text()
                 self.assertIn("@style/DsaShape.Medium", text)
                 self.assertIn("@style/DsaCollapsingToolbar", text)
+
+    def test_fr42_the_clock_has_no_white_text_in_its_light_theme(self):
+        # Upstream's Clock is dark only. The design moves it to the day and night theme, so
+        # every text, tab and highlight colour that upstream has white must follow the theme,
+        # or it shows white on the light theme's background.
+        text = "".join(p.read_text() for p in apps.patches("deskclock"))
+        self.assertIn('parent="Theme.Material3Expressive.DynamicColors.DayNight.NoActionBar"', text)
+        added = "\n".join(line for line in text.splitlines() if line.startswith("+"))
+        removed = "\n".join(line for line in text.splitlines() if line.startswith("-"))
+        # The styles of the big time, the date, the labels and the empty alarm list.
+        self.assertEqual(removed.count('<item name="android:textColor">@color/white</item>'), 4)
+        self.assertEqual(added.count('<item name="android:textColor">?attr/colorOnSurface</item>'), 4)
+        self.assertIn('<item name="android:textColor">?attr/colorOnSurfaceVariant</item>', added)
+        # The inactive tabs, the city list, and the alarm screen, which has the window's colour.
+        self.assertIn('<item android:color="?attr/colorOnSurfaceVariant" />', added)
+        self.assertEqual(added.count('android:textColor="?attr/colorOnSurface"'), 5)
+        self.assertNotIn('android:textColor="@color/white"', added)
+        self.assertNotIn('android:textColor="@android:color/white"', added)
+        for java in ("mMarkerColor = Color.WHITE;", "dayButton.setTextColor(Color.WHITE);",
+                     "getButtonAnimator(mSnoozeButton, Color.WHITE)"):
+            self.assertIn(java, removed)
+        # The translucent colours are black in the light theme and white in the dark one.
+        self.assertIn('<color name="white_08p">#14000000</color>', added)
+        self.assertIn('<color name="no_alarms">#4C000000</color>', added)
+        self.assertIn('<color name="white_08p">#14FFFFFF</color>', added)
+        self.assertIn("+++ b/res/values-night/dsa_colors.xml", text)
+
+    def test_fr42_the_clocks_icons_take_their_colour_from_the_theme(self):
+        # Upstream's Clock is dark only, and these icons are vector drawables filled white that
+        # the places showing them do not tint: the toolbar's settings action, the alarm's
+        # ringtone, vibrate and delete icons, the alarm volume setting, the alarm screen's alarm
+        # button and the analog clock. In the light theme they showed white on a light page.
+        patch = HERE / "deskclock/patches/0003-tint-the-icons-from-the-theme.patch"
+        self.assertIn(patch, apps.patches("deskclock"))
+        sections = dict(re.findall(r"(?ms)^\+\+\+ b/(\S+)\n(.*?)(?=^diff |\Z)", patch.read_text()))
+        controls = ("ic_settings", "ic_ringtone", "ic_ringtone_silent", "ic_vibrate", "ic_delete_small",
+                    "ic_alarm_small")
+        on_surface = ("ic_fab_alarm", "clock_analog_dial", "clock_analog_hour", "clock_analog_minute")
+        for name, tint in [*((n, "?attr/colorControlNormal") for n in controls),
+                           *((n, "?attr/colorOnSurface") for n in on_surface)]:
+            with self.subTest(icon=name):
+                body = sections.get(f"res/drawable/{name}.xml", "")
+                self.assertIn(f'+<vector android:tint="{tint}"', body)
+        # The caret and the timer's close button are white on a grey disc, which reads in both
+        # themes; a tint from the theme would put a grey glyph on it.
+        for name in ("ic_caret_down", "ic_caret_up", "ic_close_circle"):
+            self.assertNotIn(f"res/drawable/{name}.xml", sections)
+        # The alarm screen: the dismiss icon takes the window's colour, so its circle takes the
+        # on-surface colour; the snooze circle is the secondary colour, so its icon takes the
+        # colour that reads on it.
+        self.assertIn('+            app:backgroundTint="?attr/colorOnSurface"', sections["res/layout/alarm_activity.xml"])
+        java = sections["src/com/android/deskclock/alarms/AlarmActivity.java"]
+        self.assertIn("-                ThemeUtils.resolveColor(this, R.attr.colorOnSurface));", java)
+        self.assertIn("+                ThemeUtils.resolveColor(this, R.attr.colorOnSecondary));", java)
+        # The screensaver is on black in both themes, so its date, next alarm and analog clock
+        # take the dark theme's colours rather than the light theme's dark text.
+        self.assertIn('+    android:theme="@style/ThemeOverlay.Material3.Dark">',
+                      sections["res/layout/desk_clock_saver.xml"])
 
     def test_fr42_an_app_with_a_title_area_starts_it_folded_in_a_low_window(self):
         for name in ("deskclock", "gallery", "camera", "music", "recorder", "documentsui"):
@@ -172,6 +232,187 @@ class DefaultAppsTests(unittest.TestCase):
             folder = Path(app["image"]).parent.name
             for replaced in app["replaces"]:
                 self.assertNotEqual(folder, replaced)
+
+
+# The image's own build manifests pin these; DocumentsUI's pins come from the same manifests.
+FRAMEWORKS_BASE = {"android16": "45034f0663f960d9ee5fb0a101a4732b71f6e2f4",
+                   "android17": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d"}
+
+
+class SystemScreensTests(unittest.TestCase):
+    def setUp(self):
+        self.manifest = apps.load()
+        self.screens = {a["name"]: a for a in self.manifest["apps"] if a.get("role") == "system"}
+
+    def test_fr34_every_system_screen_is_built_in_the_tree_at_the_images_pins(self):
+        self.assertEqual(set(self.screens), {"settings", "permissioncontroller", "packageinstaller", "intentresolver"})
+        majors = {f"android{i['android_major']}" for i in json.loads(INPUTS.read_text())["images"]}
+        for name, app in self.screens.items():
+            with self.subTest(app=name):
+                self.assertEqual(app["build"]["kind"], "aosp")
+                self.assertEqual(set(app["commits"]), majors)
+                for commit in app["commits"].values():
+                    self.assertRegex(commit, SHA)
+                self.assertEqual(app["certificate"], "platform")
+                self.assertEqual(app["replaces"], [])
+                self.assertTrue(app["build"]["tree_path"].startswith(app["build"]["project"]))
+                # Its install path in the tree, or for an app inside an APEX its APK target.
+                self.assertEqual(("installed" in app["build"]), ("apex" not in app["build"]))
+        self.assertEqual(self.screens["packageinstaller"]["commits"], FRAMEWORKS_BASE)
+        lib = apps.app_entry("settingslib", self.manifest)
+        self.assertTrue(apps.is_library(lib))
+        self.assertEqual(lib["commits"], FRAMEWORKS_BASE)
+
+    def test_fr34_every_system_screen_is_patched_to_follow_the_design(self):
+        for name in ("settingslib", *self.screens):
+            with self.subTest(app=name):
+                design = [p for p in apps.patches(name) if p.name.endswith("-follow-the-dsa-design.patch")]
+                self.assertEqual(len(design), 1)
+                for changed in changed_files(design[0]):
+                    self.assertFalse(changed.startswith("/") or ".." in Path(changed).parts, changed)
+        lib = "".join(p.read_text() for p in apps.patches("settingslib"))
+        # The large title opens expanded in a tall window and folded in a low one, sub-pages too.
+        self.assertIn("DsaDesign.showLargeTitle(mAppBarLayout)", lib)
+        self.assertIn("DsaDesign\n+                                            .largeTitleStartsExpanded(activity), true)", lib)
+        self.assertIn("-                            appBarLayout.post(() -> appBarLayout.setExpanded(false, true));", lib)
+        # Bold, variable-weight titles that shrink into the toolbar.
+        self.assertIn("'wght' 700", lib)
+        self.assertIn('+        <item name="titleCollapseMode">scale</item>', lib)
+        settings = "".join(p.read_text() for p in apps.patches("settings"))
+        self.assertIn("DsaDesign\n+                .largeTitleStartsExpanded(newConfig.screenHeightDp)", settings)
+        self.assertIn("+            recreate();", settings)
+        installer = "".join(p.read_text() for p in apps.patches("packageinstaller"))
+        self.assertIn("fun isMaterialDesignEnabled(context: Context): Boolean {\n+", installer)
+        self.assertIn("+        return true", installer)
+        permissions = "".join(p.read_text() for p in apps.patches("permissioncontroller"))
+        self.assertIn('+        <item name="android:textStyle">bold</item>', permissions)
+        self.assertNotIn("+        <item name=\"android:fontFamily\">google-sans", permissions)
+        self.assertIn("TextAppearance.Dsa.ChooserTitle", "".join(p.read_text() for p in apps.patches("intentresolver")))
+
+    def test_fr34_no_patch_adds_a_resource_value_with_a_bare_apostrophe(self):
+        # aapt2 rejects an apostrophe that is neither escaped nor inside double quotes
+        # ("unescaped apostrophe in string"), so 'wght' 700 is written "'wght' 700".
+        value = re.compile(r"^\+.*<(item|string)\b[^>]*>([^<]*)</\1>")
+        for app in [*self.manifest["apps"], *self.manifest["libraries"]]:
+            for patch in apps.patches(app["name"]):
+                for line in patch.read_text().splitlines():
+                    found = value.match(line)
+                    if not found or "'" not in found.group(2):
+                        continue
+                    text = found.group(2)
+                    quoted = text.startswith('"') and text.endswith('"')
+                    with self.subTest(patch=f"{app['name']}/{patch.name}", line=line):
+                        self.assertTrue(quoted or "'" not in text.replace("\\'", ""), line)
+
+    def test_fr42_recorder_builds_with_a_kotlin_that_sees_its_java_helpers(self):
+        # Kotlin 2.1.10 on Gradle 9.1 does not see the Java design helpers from Kotlin code.
+        text = "".join(p.read_text() for p in apps.patches("recorder"))
+        self.assertIn('+    id("org.jetbrains.kotlin.android") version "2.2.0" apply false', text)
+        self.assertIn('+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.2.0"))', text)
+
+    def test_fr34_only_settingslib_carries_the_design_helper(self):
+        # Settings and PermissionController take DsaDesign from SettingsLib; a second copy of the
+        # class in the same APK would not build.
+        lib = apps.app_entry("settingslib", self.manifest)
+        self.assertEqual([str(t.as_posix()) for _, t in apps.design_files(lib)],
+                         ["CollapsingToolbarBaseActivity/src/io/github/thisisthepy/dsa/design/DsaDesign.java"])
+        for name, app in self.screens.items():
+            with self.subTest(app=name):
+                self.assertEqual(apps.design_files(app), [])
+        self.assertEqual(self.screens["settings"]["libraries"], ["settingslib"])
+        self.assertEqual(self.screens["permissioncontroller"]["libraries"], ["settingslib"])
+
+    def test_fr34_settingslib_is_laid_over_the_tree_once_before_the_apps(self):
+        order = apps.tree_order(apps=self.manifest)
+        self.assertEqual(order[0], "settingslib")
+        self.assertEqual(order.count("settingslib"), 1)
+        self.assertEqual(set(order[1:]), {"documentsui", *self.screens})
+
+    def test_fr34_the_record_names_settingslib_too(self):
+        record = apps.provenance(self.screens["settings"], "android17")
+        self.assertEqual(record["commit"], self.screens["settings"]["commits"]["android17"])
+        self.assertEqual(record["libraries"]["settingslib"]["commit"], FRAMEWORKS_BASE["android17"])
+        self.assertEqual(set(record["libraries"]["settingslib"]["patches"]),
+                         {p.name for p in apps.patches("settingslib")})
+
+    def test_fr34_patch_tree_checks_the_project_a_folder_is_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / "services-lock.json"
+            lock.write_text(json.dumps({"versions": [{"projects": [
+                {"path": "frameworks/base", "commit": "0" * 40}]}]}))
+            with self.assertRaisesRegex(apps.AppsError, "frameworks/base at 0+"):
+                apps.patch_tree("packageinstaller", tmp, "android17", "cp2a", lock)
+            with self.assertRaisesRegex(apps.AppsError, "frameworks/base at 0+"):
+                apps.patch_tree("settingslib", tmp, "android17", "cp2a", lock)
+
+    def test_fr34_the_permission_controller_apk_is_found_among_the_trees_targets(self):
+        targets = [
+            "out/soong/.intermediates/packages/modules/Permission/PermissionController/PermissionController/"
+            "android_common_apex36/PermissionController.apk: phony",
+            "out/soong/.intermediates/packages/modules/Permission/PermissionController/PermissionController/"
+            "android_common_apex36/aligned/PermissionController.apk: phony",
+            "out/target/common/obj/foo.jar: phony",
+        ]
+        self.assertEqual(apps.apk_target("permissioncontroller", targets, self.manifest),
+                         targets[0].split(": ")[0])
+        with self.assertRaises(apps.AppsError):
+            apps.apk_target("permissioncontroller", targets[2:], self.manifest)
+        # The module's Android.bp names the platform too (apex_available), so a tree whose APEX
+        # variant is named otherwise still has the platform variant, built from the same sources.
+        base = "out/soong/.intermediates/packages/modules/Permission/PermissionController/PermissionController/"
+        platform = [base + "android_common/PermissionController.apk: phony", targets[2]]
+        self.assertEqual(apps.apk_target("permissioncontroller", platform, self.manifest),
+                         base + "android_common/PermissionController.apk")
+        named = [base + "android_common_com.android.permission/PermissionController.apk: phony", *platform]
+        self.assertEqual(apps.apk_target("permissioncontroller", named, self.manifest),
+                         base + "android_common_com.android.permission/PermissionController.apk")
+        # The APEX variant comes first when the tree has both.
+        self.assertEqual(apps.apk_target("permissioncontroller", [targets[0], *platform], self.manifest),
+                         targets[0].split(": ")[0])
+
+    def test_fr34_the_system_screens_build_on_a_runner_of_their_own(self):
+        self.assertEqual(apps.tree_apps("services", self.manifest), ["documentsui"])
+        self.assertEqual(set(apps.tree_apps("screens", self.manifest)), set(self.screens))
+        self.assertEqual(apps.tree_order("screens", self.manifest)[0], "settingslib")
+        self.assertNotIn("settingslib", apps.tree_order("services", self.manifest))
+        workflow = (HERE.parents[1] / ".github/workflows/framework.yml").read_text()
+        self.assertIn("part: [services, screens]", workflow)
+        self.assertIn("DSA_TREE_PART: ${{ matrix.part }}", workflow)
+        self.assertIn("default-app-system-screens-${{ matrix.android }}", workflow)
+        script = (HERE.parents[1] / ".github/scripts/framework/build-services.sh").read_text()
+        self.assertIn('[[ "$tree_part" == screens ]] || outputs=', script)
+        for image in ("release-image.yml", "test-image.yml"):
+            text = (HERE.parents[1] / ".github/workflows" / image).read_text()
+            self.assertIn("download-documentsui.sh ${{ matrix.android }} .scratch/default-apps system-screens", text)
+
+    def test_fr34_settings_lists_are_cards_with_room_between_groups(self):
+        lib = "".join(p.read_text() for p in apps.patches("settingslib"))
+        # A card surface that stands clear of the window, in light and dark.
+        self.assertIn("+    <color name=\"settingslib_dsa_card\">@color/settingslib_materialColorSurfaceContainerLowest</color>", lib)
+        self.assertIn("b/SettingsTheme/res/values-night-v36/settingslib_dsa_cards.xml", lib)
+        self.assertIn("+    <dimen name=\"settingslib_preference_corner_radius\">26dp</dimen>", lib)
+        self.assertIn("+        <item name=\"android:paddingTop\">@dimen/settingslib_dsa_group_gap</item>", lib)
+        for card in ("", "_top", "_center", "_bottom"):
+            self.assertIn(f"b/SettingsTheme/res/drawable-v36/settingslib_round_background{card}.xml", lib)
+        # Emphasized group titles in the accent colour.
+        self.assertIn("+        <item name=\"android:textColor\">@color/settingslib_materialColorPrimary</item>", lib)
+
+    def test_fr34_pressed_rows_morph_their_shape_and_spring(self):
+        lib = "".join(p.read_text() for p in apps.patches("settingslib"))
+        self.assertIn("+            <item android:state_pressed=\"true\">", lib)
+        self.assertIn("android:enterFadeDuration=\"@integer/settingslib_dsa_morph_ms\"", lib)
+        self.assertIn("R.animator.settingslib_dsa_press_spring", lib)
+        self.assertIn("b/SettingsTheme/res/interpolator-v36/settingslib_dsa_spring.xml", lib)
+        self.assertIn("+<pathInterpolator", lib)
+
+    def test_fr34_the_permission_dialog_buttons_are_full_width_rounded_tonal_buttons(self):
+        text = "".join(p.read_text() for p in apps.patches("permissioncontroller"))
+        self.assertEqual(text.count("+        <item name=\"android:background\">@drawable/dsa_grant_button</item>"), 3)
+        self.assertIn("b/res/drawable-v31/dsa_grant_button.xml", text)
+        self.assertIn("b/res/drawable-night-v31/dsa_grant_button.xml", text)
+        self.assertIn("+            <corners android:radius=\"28dp\" />", text)
+        self.assertIn("@android:color/system_accent2_100", text)
+        self.assertIn("@android:color/system_accent2_700", text)
 
 
 if __name__ == "__main__":

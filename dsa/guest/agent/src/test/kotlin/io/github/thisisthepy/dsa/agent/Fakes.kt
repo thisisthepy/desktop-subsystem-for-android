@@ -334,6 +334,64 @@ class FakeActions : TaskActions {
     var statusBarHeights = mapOf<Int, Int>()
 
     override fun statusBarHeight(densityDpi: Int): Int = statusBarHeights[densityDpi] ?: 0
+
+    /** Whether the framework can mark a task for forced system scaling; how often it was asked. */
+    var forcedDensity = false
+    var forcedDensityAsked = 0
+
+    /** Each mark asked for, in order: the task and whether it is marked. */
+    val forcedMarks = mutableListOf<Pair<Int, Boolean>>()
+    var marksTaken = true
+
+    override fun forcedDensitySupported(): Boolean {
+        forcedDensityAsked++
+        return forcedDensity
+    }
+
+    override fun markForcedDensity(taskId: Int, forced: Boolean): Boolean {
+        forcedMarks += taskId to forced
+        return marksTaken
+    }
+
+    /** Whether the framework can keep an app's focus, and how often that was asked. */
+    var keepFocus = false
+    var keepFocusAsked = 0
+
+    /** Each list of apps that keep their focus given to the framework, in order. */
+    val keepFocusLists = mutableListOf<Set<String>>()
+    var keepFocusTaken = true
+
+    override fun keepFocusSupported(): Boolean {
+        keepFocusAsked++
+        return keepFocus
+    }
+
+    override fun setKeepFocus(packages: Set<String>): Boolean {
+        keepFocusLists += packages
+        return keepFocusTaken
+    }
+
+    /** Whether the framework can give an overlay window a density, and how often that was asked. */
+    var overlayDensity = false
+    var overlayDensityAsked = 0
+
+    /** Each density given to an overlay window, in order: the window's name and the density. */
+    val overlayDensities = mutableListOf<Pair<String, Int>>()
+
+    /** The densities the framework says it gave windows before, by window name. */
+    val overlayDensitiesBefore = mutableMapOf<String, Int>()
+
+    override fun overlayDensitySupported(): Boolean {
+        overlayDensityAsked++
+        return overlayDensity
+    }
+
+    override fun setOverlayDensity(window: String, densityDpi: Int): Boolean {
+        overlayDensities += window to densityDpi
+        return true
+    }
+
+    override fun overlayDensity(window: String): Int = overlayDensitiesBefore[window] ?: 0
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
@@ -354,6 +412,18 @@ class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
     }
 
     override fun displaySize() = size ?: throw IllegalStateException("the display is not up")
+
+    private var displayListener: (() -> Unit)? = null
+
+    override fun listenToDisplay(onChange: () -> Unit) {
+        displayListener = onChange
+    }
+
+    /** The display takes [to], as when the hwcomposer grows it, and the framework says so. */
+    fun resize(to: Size) {
+        size = to
+        displayListener?.invoke()
+    }
 }
 
 /** The framework's input: records what was injected, on a clock the test moves. */

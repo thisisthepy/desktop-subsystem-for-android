@@ -344,6 +344,16 @@ DSA_GFX_EXPORT int dsa_gfx_get_guest_devices(dsa_gfx_guest_device* devices,
  * 0 when the renderer is not running. */
 DSA_GFX_EXPORT size_t dsa_gfx_describe_color_buffers(char* out, size_t capacity);
 
+/* Every live allocation on a guest process's device as text, one moment's: a comment line with
+ * the count and the bytes, a header line, and one tab-separated line per allocation, the
+ * devices that hold the most first and each device's largest first (the device, the guest
+ * process it serves, its kind, its bytes, the host memory type's index and flags, the image or
+ * buffer it is dedicated to, and why it is what it is: the guest's own, granted from the
+ * graphics memory shared with the guest, why it was not granted, or made by the renderer for
+ * the device itself). Writes at most `capacity` bytes, ended with a 0, and returns the bytes the
+ * whole text needs with its 0; 0 when the renderer is not running. */
+DSA_GFX_EXPORT size_t dsa_gfx_describe_guest_allocations(char* out, size_t capacity);
+
 /* Graphics memory shared with the guest (dsa_graphics_memory.h): the embedder's mapping of the
  * two sections the service attaches to the VM, the data region (`data`, `data_length` bytes)
  * and its grants table (`grants`, `grants_length` bytes). The renderer then puts a guest's

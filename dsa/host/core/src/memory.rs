@@ -22,6 +22,7 @@ use dsa_protocol::control;
 use dsa_protocol::host_api::types;
 
 use crate::host_api::UserAndroids;
+use crate::image_files::GuestArch;
 use crate::session::SessionState;
 use crate::tasks::TaskEvent;
 
@@ -87,6 +88,10 @@ pub struct GuestMemory {
     pub slab_reclaimable_kb: u64,
     pub swap_total_kb: u64,
     pub swap_free_kb: u64,
+    /// The swap cache (SwapCached): pages read back from zram that zram still holds. Cached
+    /// leaves them out; those a process maps are in `anon_pages_kb` too, the rest in no other
+    /// field. 0 from a guest that does not send it.
+    pub swap_cached_kb: u64,
     pub zram_original_kb: u64,
     pub zram_used_kb: u64,
     pub total_pss_kb: u64,
@@ -144,6 +149,9 @@ impl PageReporting {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct KernelMemory {
     pub slab_unreclaimable_kb: u64,
+    /// The threads' kernel stacks. The guest's kernel allocates them with vmalloc
+    /// (`CONFIG_VMAP_STACK`, on in the x86_64 and arm64 configurations it is built from), so
+    /// `vmalloc_used_kb` has them in it already.
     pub kernel_stack_kb: u64,
     pub page_tables_kb: u64,
     pub vmalloc_used_kb: u64,
@@ -153,6 +161,14 @@ pub struct KernelMemory {
     /// The memory the kernel was given: its online memory blocks, or the VM's size when the
     /// host set it smaller ([`GuestMemory::given`]).
     pub mem_online_kb: u64,
+    /// The page structures the kernel made after boot (`nr_memmap_pages`): those of the
+    /// persistent memory the guest maps directly (its disks read in place) and of memory
+    /// hot-added while it ran. They come out of MemTotal and no /proc/meminfo field names
+    /// them. 0 when the guest does not say.
+    pub memmap_kb: u64,
+    /// The page structures the kernel made at boot (`nr_memmap_boot_pages`), part of what it
+    /// reserved before MemTotal. 0 when the guest does not say.
+    pub memmap_boot_kb: u64,
 }
 
 /// The guest's last report and how old it is.
@@ -389,6 +405,7 @@ impl GuestMemory {
             slab_reclaimable_kb: memory.slab_reclaimable_kb,
             swap_total_kb: memory.swap_total_kb,
             swap_free_kb: memory.swap_free_kb,
+            swap_cached_kb: memory.swap_cached_kb,
             zram_original_kb: memory.zram_original_kb,
             zram_used_kb: memory.zram_used_kb,
             total_pss_kb: memory.total_pss_kb,
@@ -412,22 +429,35 @@ impl GuestMemory {
                 cma_total_kb: memory.cma_total_kb,
                 hugetlb_kb: memory.hugetlb_kb,
                 mem_online_kb: memory.mem_online_kb,
+                memmap_kb: memory.memmap_kb,
+                memmap_boot_kb: memory.memmap_boot_kb,
             },
         }
     }
 
+    /// What vmalloc and the kernel stacks hold together. The stacks are vmalloc'd
+    /// ([`KernelMemory::kernel_stack_kb`]), so this is VmallocUsed; a kernel built without
+    /// that would show more stack than vmalloc, and then the stacks are the least it is.
+    pub fn vmalloc_and_stacks_kb(&self) -> u64 {
+        self.kernel.vmalloc_used_kb.max(self.kernel.kernel_stack_kb)
+    }
+
     /// What of [`other_kb`](Self::other_kb) no counter names: memory drivers took for
-    /// themselves, such as GPU and DMA buffers.
+    /// themselves, such as GPU and DMA buffers. The page structures of the mapped disks and of
+    /// added memory, and the swap cache, are named apart ([`KernelMemory::memmap_kb`],
+    /// [`GuestMemory::swap_cached_kb`]). Swap cache pages a process maps are in AnonPages as
+    /// well, so with many of them this reads low by that part, never below 0.
     pub fn unaccounted_kb(&self) -> u64 {
         let k = &self.kernel;
         self.other_kb().saturating_sub(
             k.slab_unreclaimable_kb
-                + k.kernel_stack_kb
                 + k.page_tables_kb
-                + k.vmalloc_used_kb
+                + self.vmalloc_and_stacks_kb()
                 + k.percpu_kb
                 + k.hugetlb_kb
-                + self.zram_used_kb,
+                + self.zram_used_kb
+                + k.memmap_kb
+                + self.swap_cached_kb,
         )
     }
 
@@ -756,24 +786,44 @@ impl fmt::Display for MemorySnapshot {
         writeln!(f, "  app memory (anonymous) {} MiB", mib(g.anon_pages_kb))?;
         writeln!(f, "  kernel and everything else {} MiB", mib(g.other_kb()))?;
         let k = &g.kernel;
+        // The stacks are vmalloc'd, so they are shown as part of vmalloc, not beside it.
+        let mut named = String::new();
+        if k.memmap_kb > 0 {
+            named.push_str(&format!(
+                "page structures of the mapped disks and of added memory {}, ",
+                mib(k.memmap_kb)
+            ));
+        }
+        if g.swap_cached_kb > 0 {
+            named.push_str(&format!("swap cache {}, ", mib(g.swap_cached_kb)));
+        }
         writeln!(
             f,
-            "    unreclaimable slab {}, kernel stacks {}, page tables {}, vmalloc {}, per-CPU {}, \
-             huge pages {}, zram store {}, unaccounted (drivers, GPU and DMA buffers) {} MiB",
+            "    unreclaimable slab {}, page tables {}, vmalloc {} (kernel stacks {} of it), \
+             per-CPU {}, huge pages {}, zram store {}, {named}unaccounted (drivers, GPU and DMA \
+             buffers) {} MiB",
             mib(k.slab_unreclaimable_kb),
-            mib(k.kernel_stack_kb),
             mib(k.page_tables_kb),
-            mib(k.vmalloc_used_kb),
+            mib(g.vmalloc_and_stacks_kb()),
+            mib(k.kernel_stack_kb),
             mib(k.percpu_kb),
             mib(k.hugetlb_kb),
             mib(g.zram_used_kb),
             mib(g.unaccounted_kb())
         )?;
         if let Some(reserved) = g.reserved_at_boot_kb() {
+            let boot_memmap = if k.memmap_boot_kb > 0 {
+                format!(
+                    "; the page structures made at boot {} MiB",
+                    mib(k.memmap_boot_kb)
+                )
+            } else {
+                String::new()
+            };
             writeln!(
                 f,
                 "  reserved by the kernel at boot {} MiB of {} MiB given (code, page structures, \
-                 swiotlb, pstore); contiguous area (CMA) {} MiB",
+                 swiotlb, pstore{boot_memmap}); contiguous area (CMA) {} MiB",
                 mib(reserved),
                 mib(k.mem_online_kb),
                 mib(k.cma_total_kb)
@@ -879,6 +929,7 @@ pub fn snapshot_json(memory: &MemorySnapshot) -> serde_json::Value {
             "slab_reclaimable_kb": guest.slab_reclaimable_kb,
             "swap_total_kb": guest.swap_total_kb,
             "swap_free_kb": guest.swap_free_kb,
+            "swap_cached_kb": guest.swap_cached_kb,
             "zram_original_kb": guest.zram_original_kb,
             "zram_used_kb": guest.zram_used_kb,
             "total_pss_kb": guest.total_pss_kb,
@@ -894,6 +945,8 @@ pub fn snapshot_json(memory: &MemorySnapshot) -> serde_json::Value {
                 "cma_total_kb": guest.kernel.cma_total_kb,
                 "hugetlb_kb": guest.kernel.hugetlb_kb,
                 "mem_online_kb": guest.kernel.mem_online_kb,
+                "memmap_kb": guest.kernel.memmap_kb,
+                "memmap_boot_kb": guest.kernel.memmap_boot_kb,
                 "unaccounted_kb": guest.unaccounted_kb(),
                 "reserved_at_boot_kb": guest.reserved_at_boot_kb(),
             },
@@ -994,6 +1047,9 @@ pub fn snapshot_to_wire(snapshot: &MemorySnapshot) -> types::Memory {
                     .page_reporting
                     .is_some_and(|r| r.reported_kb_per_minute.is_some()),
                 ballooned_kb: g.ballooned_kb,
+                swap_cached_kb: g.swap_cached_kb,
+                memmap_kb: g.kernel.memmap_kb,
+                memmap_boot_kb: g.kernel.memmap_boot_kb,
             }
         }),
         host: snapshot
@@ -1030,6 +1086,7 @@ pub fn snapshot_from_wire(memory: types::Memory) -> MemorySnapshot {
                 slab_reclaimable_kb: g.slab_reclaimable_kb,
                 swap_total_kb: g.swap_total_kb,
                 swap_free_kb: g.swap_free_kb,
+                swap_cached_kb: g.swap_cached_kb,
                 zram_original_kb: g.zram_original_kb,
                 zram_used_kb: g.zram_used_kb,
                 total_pss_kb: g.total_pss_kb,
@@ -1071,6 +1128,8 @@ pub fn snapshot_from_wire(memory: types::Memory) -> MemorySnapshot {
                     cma_total_kb: g.cma_total_kb,
                     hugetlb_kb: g.hugetlb_kb,
                     mem_online_kb: g.mem_online_kb,
+                    memmap_kb: g.memmap_kb,
+                    memmap_boot_kb: g.memmap_boot_kb,
                 },
             },
         }),
@@ -1140,19 +1199,41 @@ pub fn log_memory(
     }
 }
 
-/// Kernel command line settings that keep what the guest kernel sets aside at boot small, the
-/// same on every host. Each is memory the guest never gets back while it runs.
-/// - `swiotlb=2048`: the bounce buffer for devices that cannot reach all of memory, 4 MiB
-///   (2048 slabs of 2 KiB) instead of 64. The kernel makes it whenever memory may reach past
-///   4 GiB, which a hot-add range makes true, but the VM's disks and network adapter (VMBus on
-///   Hyper-V, virtio elsewhere) reach all of memory and bounce nothing.
+/// Kernel command line settings that keep what the guest kernel of `arch` sets aside at boot
+/// small, the same on every host. Each is memory the guest never gets back while it runs.
+/// - The bounce buffer (swiotlb) for devices that cannot reach all of memory, which the kernel
+///   makes whenever memory may reach past 4 GiB (a hot-add range makes that true), 64 MiB by
+///   default. No device of the VMs bounces: VMBus on Hyper-V and virtio under crosvm and
+///   Apple's Virtualization framework reach all of memory. An x86_64 guest makes none
+///   (`swiotlb=noforce`, 4 MiB less than before). An arm64 guest keeps 4 MiB
+///   (`swiotlb=2048`, 2048 slabs of 2 KiB): its kernel lets small allocations skip the
+///   128-byte cache line alignment only while a bounce buffer exists, so without one every
+///   kmalloc would round up to 128 bytes, which costs more slab than the buffer.
 /// - `kfence.sample_interval=0`: no KFENCE pool (2 MiB and its metadata) when the kernel has
 ///   KFENCE; nobody reads its reports in a user's VM.
 /// - `dhash_entries`, `ihash_entries`, `thash_entries`, `uhash_entries`: the dentry, inode,
 ///   TCP and UDP hash tables sized for a desktop guest's few files and connections, not
 ///   scaled to its memory (about 8 MiB for 3 GiB, down to under 1 MiB).
-pub const GUEST_BOOT_MEMORY_CMDLINE: &str = "swiotlb=2048 kfence.sample_interval=0 \
-     dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024";
+/// - `slab_min_objects=1`: each slab cache gets the smallest slab that wastes at most a
+///   sixteenth of itself, instead of one big enough for 16 objects (on 4 processors). A slab
+///   is freed only when every object in it is, so caches of large objects kept many partly
+///   used 32 KiB slabs: with no app open, task_struct and kmalloc-4k held 4.5 MiB beyond their
+///   objects in 8-object slabs. In one-page slabs of one object they hold none.
+/// - `loop.hw_queue_depth=32`: each loop device allocates its whole request pool when it is
+///   made, used or not, and apexd keeps 64 of them. 32 requests instead of 128 take a 16 KiB
+///   block instead of 64 KiB per device, about 3 MiB less in all.
+pub fn guest_boot_memory_cmdline(arch: GuestArch) -> String {
+    let swiotlb = match arch {
+        GuestArch::X86_64 => "swiotlb=noforce",
+        GuestArch::Arm64 => "swiotlb=2048",
+    };
+    format!("{swiotlb} {GUEST_BOOT_MEMORY_WORDS}")
+}
+
+/// The settings of [`guest_boot_memory_cmdline`] that are the same for every architecture.
+const GUEST_BOOT_MEMORY_WORDS: &str = "kfence.sample_interval=0 \
+     dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024 \
+     slab_min_objects=1 loop.hw_queue_depth=32";
 
 /// The kernel command line word that has the guest compact its memory after each reclaim
 /// and in the background (the image's `dsa-memory.rc` and `dsa-channeld.rc` read it as
@@ -1275,7 +1356,8 @@ pub struct MemoryPlan {
 
 /// The memory a VM starts with for a user whose limit is `limit_mb` (0 for automatic):
 /// [`DEFAULT_MEMORY_MB`](crate::host_config::DEFAULT_MEMORY_MB), or the user's limit when it
-/// is smaller.
+/// is smaller. A limit is never taken below [`VM_MEMORY_MIN_MB`], which is above the default
+/// start, so every VM starts at the default and a limit says only how far it grows.
 ///
 /// The VM starts small because the guest kernel keeps its page records for all the memory
 /// it has resident, about 1.6% of it, used or not: a VM made at the computer's size from the
@@ -1285,7 +1367,7 @@ pub fn start_mb(limit_mb: u32) -> u32 {
     let default = crate::host_config::DEFAULT_MEMORY_MB;
     match limit_mb {
         0 => default,
-        limit => limit.clamp(VM_MEMORY_MIN_MB as u32, default),
+        limit => limit.max(VM_MEMORY_MIN_MB as u32).min(default),
     }
 }
 
@@ -1388,6 +1470,44 @@ pub enum GrowthAction {
     Resize(u64),
     /// The memory added last did not reach the guest: stop growing, for the reason given.
     GiveUp(String),
+    /// The guest is short but its tasks do not wait on memory, so the VM keeps its size. Only
+    /// to be logged: the line says why, with the guest's numbers. Given at the start of a short
+    /// stretch (not twice within a minute) and every five minutes while it lasts.
+    Wait(String),
+}
+
+/// Why [`MemoryGrowth`] grew the VM, for the line the host logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrowthReason {
+    /// The guest's tasks waited on memory for 10% of the last 10 seconds or more.
+    Stalled,
+    /// The guest had less than `floor_mb` available: it is nearly out.
+    NearlyOut { floor_mb: u64 },
+    /// The guest was short, with its tasks waiting on memory 5% of the time or more, on every
+    /// report for `secs` seconds.
+    Sustained { secs: u64 },
+}
+
+impl std::fmt::Display for GrowthReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GrowthReason::Stalled => write!(
+                f,
+                "its tasks waited on memory {GROW_STALL_PERCENT:.0}% of the time or more"
+            ),
+            GrowthReason::NearlyOut { floor_mb } => {
+                write!(
+                    f,
+                    "it is nearly out of memory, under {floor_mb} MiB available"
+                )
+            }
+            GrowthReason::Sustained { secs } => write!(
+                f,
+                "it stayed short with its tasks waiting on memory {STRAIN_STALL_PERCENT:.0}% of \
+                 the time or more for {secs} s"
+            ),
+        }
+    }
 }
 
 /// Grows the VM's memory when the guest runs short and gives it back when the guest no longer
@@ -1398,14 +1518,24 @@ pub enum GrowthAction {
 /// while running costs that only for memory actually added, and the guest still has no fixed
 /// ceiling below the maximum.
 ///
-/// - Grow when the guest's available memory falls under a fifth of its total (at least
-///   512 MiB), or when its tasks stall on memory for 10% of the time: to what it uses plus
-///   [`headroom_mb`], the same size a shrink would leave, and by at least
-///   512 MiB, up to the maximum, at most every 5 seconds. Memory added once costs the guest its
-///   page records (about 1.6% of it) for as long as it runs, even after it has been ballooned
-///   back to the host, so the VM grows only as far as the guest needs: a step of half the
-///   current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where 3072 MiB
-///   was enough.
+/// - Grow only for a need that reclaim and zram do not absorb. Memory added once costs the
+///   guest its page records (16 MiB a GiB) for as long as it runs, even after it has been
+///   ballooned back to the host: Hyper-V has no hot-remove, and the balloon takes single pages,
+///   not whole blocks the guest could take offline. So the VM grows when the guest's tasks
+///   stall on memory for 10% of the time, when it is nearly out (available under a sixteenth
+///   of its total, at least 128 MiB), or when it stays short (available under a fifth of its
+///   total, at least 512 MiB) with its tasks stalled 5% of the time or more on every report for
+///   30 seconds. Short without stalls is not a need: the kernel takes page cache and moves cold
+///   app memory to zram, and its tasks do not wait for it. Android's boot is that: the
+///   framework raises the kernel's free memory watermarks for its display (192 MiB for a
+///   4096x4096 one, twice over for the high watermark the available count leaves out), which
+///   alone took about 390 MiB off the available memory of a 1.5 GiB guest at second 30 with
+///   nothing stalled, and the VM grew 1536 MiB in its first 45 seconds for an Android that used
+///   under 500 MiB ten minutes later.
+/// - A growth goes to what the guest uses plus [`headroom_mb`], the same size a shrink would
+///   leave, and by at least 512 MiB, up to the maximum, at most every 5 seconds: a step of
+///   half the current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where
+///   3072 MiB was enough.
 /// - Shrink on the first report that finds the guest not short, once 5 seconds have passed
 ///   since the last change: to what it uses plus [`headroom_mb`], never below the base. Memory
 ///   the guest no longer needs goes back at once; the headroom, and growing and shrinking to
@@ -1438,12 +1568,37 @@ pub struct MemoryGrowth {
     /// Resizes that failed in a row, and when the next may be tried.
     failures: u32,
     retry_at: Option<Instant>,
+    /// Since when every report has found the guest short with its tasks stalled
+    /// [`STRAIN_STALL_PERCENT`] or more, and when the last report came.
+    strained_since: Option<Instant>,
+    last_report: Option<Instant>,
+    /// Why the last growth was asked for.
+    last_reason: Option<GrowthReason>,
+    /// Whether the last report found the guest short, and when a [`GrowthAction::Wait`] was
+    /// last given.
+    holding: bool,
+    told_wait: Option<Instant>,
 }
 
 /// Memory is added and removed in steps of this, in MiB, the guest's memory block size.
 const GROWTH_GRANULE_MB: u64 = 128;
 /// The least one growth adds, in MiB: a guest short of memory gets at least this much more.
 const GROW_STEP_MIN_MB: u64 = 512;
+/// Tasks stalled on memory this share of the last 10 s or more grow the VM at once.
+const GROW_STALL_PERCENT: f64 = 10.0;
+/// The stall at which the guest's own daemon counts itself under pressure; held this long
+/// ([`STRAIN_SUSTAIN`]) while the guest is short, it grows the VM.
+const STRAIN_STALL_PERCENT: f64 = 5.0;
+const STRAIN_SUSTAIN: Duration = Duration::from_secs(30);
+/// A short guest reports every 2 s; a longer silence starts the count of [`STRAIN_SUSTAIN`]
+/// again, since nothing is known of the time between.
+const STRAIN_REPORT_GAP: Duration = Duration::from_secs(10);
+/// Available memory under a sixteenth of the guest's total, and at least this, is nearly out.
+const NEARLY_OUT_MIN_MB: u64 = 128;
+/// A [`GrowthAction::Wait`] is given at most once a minute at the start of a short stretch,
+/// and again every five minutes while the stretch lasts.
+const WAIT_TELL_STRETCH: Duration = Duration::from_secs(60);
+const WAIT_TELL_REPEAT: Duration = Duration::from_secs(5 * 60);
 const GROW_COOLDOWN: Duration = Duration::from_secs(5);
 const SHRINK_COOLDOWN: Duration = Duration::from_secs(5);
 const HOT_ADD_DEADLINE: Duration = Duration::from_secs(30);
@@ -1480,7 +1635,17 @@ impl MemoryGrowth {
             shrink_goal_mb: None,
             failures: 0,
             retry_at: None,
+            strained_since: None,
+            last_report: None,
+            last_reason: None,
+            holding: false,
+            told_wait: None,
         }
+    }
+
+    /// Why the last growth asked for was asked for; `None` before any.
+    pub fn last_reason(&self) -> Option<GrowthReason> {
+        self.last_reason
     }
 
     /// The size the VM was last set to, in MiB.
@@ -1521,12 +1686,43 @@ impl MemoryGrowth {
             }
         }
         let available_mb = p.mem_available_kb / 1024;
-        let short = available_mb < (total_mb / 5).max(512) || p.stall_percent >= 10.0;
+        let short = available_mb < (total_mb / 5).max(512);
+        let stalled = p.stall_percent >= GROW_STALL_PERCENT;
+        let nearly_out_mb = (total_mb / 16).max(NEARLY_OUT_MIN_MB);
+        // Short and stalling on every report, without a silence between them: how long for.
+        let silent = self
+            .last_report
+            .is_some_and(|at| now.saturating_duration_since(at) > STRAIN_REPORT_GAP);
+        self.last_report = Some(now);
+        if short && p.stall_percent >= STRAIN_STALL_PERCENT {
+            if silent || self.strained_since.is_none() {
+                self.strained_since = Some(now);
+            }
+        } else {
+            self.strained_since = None;
+        }
+        let strained_for = self
+            .strained_since
+            .map(|since| now.saturating_duration_since(since));
+        let reason = if stalled {
+            Some(GrowthReason::Stalled)
+        } else if available_mb < nearly_out_mb {
+            Some(GrowthReason::NearlyOut {
+                floor_mb: nearly_out_mb,
+            })
+        } else if strained_for.is_some_and(|d| d >= STRAIN_SUSTAIN) {
+            Some(GrowthReason::Sustained {
+                secs: STRAIN_SUSTAIN.as_secs(),
+            })
+        } else {
+            None
+        };
         let since_change = |cooldown| {
             self.last_change
                 .is_none_or(|at| now.saturating_duration_since(at) >= cooldown)
         };
-        if short {
+        if let Some(reason) = reason {
+            self.holding = true;
             if self.current_mb >= self.max_mb || !since_change(GROW_COOLDOWN) {
                 return None;
             }
@@ -1540,8 +1736,41 @@ impl MemoryGrowth {
             let target = round_up_mb(self.current_mb + step).min(self.max_mb);
             self.awaiting = Some((total_mb, now));
             self.shrink_goal_mb = None;
+            // The next growth for a sustained need waits out its own stretch.
+            self.strained_since = None;
+            self.last_reason = Some(reason);
             return Some(self.resize(target, now));
         }
+        if short {
+            // Reclaim and zram take it: the VM keeps its size, and the log says so once for
+            // the stretch and every five minutes while it lasts.
+            let new_stretch = !self.holding;
+            self.holding = true;
+            if self.current_mb >= self.max_mb {
+                return None;
+            }
+            let since_told = self.told_wait.map(|at| now.saturating_duration_since(at));
+            let tell = match since_told {
+                None => true,
+                Some(d) if new_stretch => d >= WAIT_TELL_STRETCH,
+                Some(d) => d >= WAIT_TELL_REPEAT,
+            };
+            if !tell {
+                return None;
+            }
+            self.told_wait = Some(now);
+            return Some(GrowthAction::Wait(format!(
+                "memory: Android is short of memory ({available_mb} MiB available of \
+                 {total_mb} MiB, {:.1}% stalled) but its tasks hardly wait on it: reclaim and \
+                 zram take it, and the VM stays at {} MiB until they stall \
+                 {GROW_STALL_PERCENT:.0}% of the time, or {STRAIN_STALL_PERCENT:.0}% for \
+                 {} s, or under {nearly_out_mb} MiB is available",
+                p.stall_percent,
+                self.current_mb,
+                STRAIN_SUSTAIN.as_secs()
+            )));
+        }
+        self.holding = false;
         if self.current_mb <= self.base_mb
             || p.stall_percent >= 1.0
             || !since_change(SHRINK_COOLDOWN)
@@ -1698,6 +1927,72 @@ pub struct CommittedMemory {
     pub gpu_non_local_kb: Option<u64>,
 }
 
+/// A host process's committed memory split finer than [`CommittedMemory`], for a process whose
+/// memory at rest nobody has broken down yet (the graphics renderer's), in KiB: what its thread
+/// stacks hold, and what the modules it loaded (the graphics driver above all) keep in the
+/// writable parts of their images, which the commit counts as the process's own.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FloorMemory {
+    /// All committed private memory, from the platform's counters.
+    pub private_kb: Option<u64>,
+    /// Committed private pages found by walking the address space.
+    pub walked_private_kb: u64,
+    /// Of those: the default heap, where the process's own allocations and most libraries' go.
+    pub process_heap_kb: u64,
+    /// How many other heaps there are (their pages are among what was allocated directly).
+    pub other_heaps: u32,
+    /// Of those: write-combined or uncached pages, which only GPU drivers map.
+    pub gpu_mapped_kb: u64,
+    /// Of those: thread stacks, and how many threads have one.
+    pub stacks_kb: u64,
+    pub stacks: u32,
+    /// Of those: the rest, allocated straight from the system.
+    pub direct_kb: u64,
+    /// The largest private allocations that are not stacks, largest first.
+    pub largest_private_kb: Vec<u64>,
+    /// Committed writable pages of loaded modules' images (their data, and the copy-on-write
+    /// pages the system charges as the process's), and the modules that hold the most, by file
+    /// name, largest first.
+    pub module_data_kb: u64,
+    pub largest_modules: Vec<(String, u64)>,
+}
+
+/// The part of a log line that breaks `f` down by owner, in MiB.
+pub fn floor_line(f: &FloorMemory) -> String {
+    let tenths = |kb: u64| format!("{:.1}", kb as f64 / 1024.0);
+    let largest: Vec<String> = f.largest_private_kb.iter().map(|kb| tenths(*kb)).collect();
+    let modules: Vec<String> = f
+        .largest_modules
+        .iter()
+        .map(|(name, kb)| format!("{name} {}", tenths(*kb)))
+        .collect();
+    format!(
+        "private {} MiB ({} found in private pages); default heap {}; {} other heaps among what \
+         was allocated directly; GPU-mapped {}; thread stacks {} in {}; allocated directly {} \
+         (largest allocations {} MiB); module data {} ({} MiB)",
+        f.private_kb
+            .map_or("?".to_string(), |kb| mib(kb).to_string()),
+        mib(f.walked_private_kb),
+        mib(f.process_heap_kb),
+        f.other_heaps,
+        mib(f.gpu_mapped_kb),
+        mib(f.stacks_kb),
+        f.stacks,
+        mib(f.direct_kb),
+        if largest.is_empty() {
+            "none".to_string()
+        } else {
+            largest.join(", ")
+        },
+        mib(f.module_data_kb),
+        if modules.is_empty() {
+            "none".to_string()
+        } else {
+            modules.join(", ")
+        },
+    )
+}
+
 /// The log line that breaks a host process's committed memory down by owner, in MiB.
 pub fn committed_line(c: &CommittedMemory) -> String {
     let show = |kb: Option<u64>| kb.map_or("?".to_string(), |kb| mib(kb).to_string());
@@ -1730,6 +2025,59 @@ pub fn committed_line(c: &CommittedMemory) -> String {
         show(c.gpu_non_local_kb)
     ));
     line
+}
+
+/// What the GPU's own counters say one process uses, in KiB: on Windows the `GPU Process
+/// Memory` performance counters, which count every allocation the process's GPU devices
+/// made, whatever the graphics API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GpuProcessMemory {
+    /// System memory the GPU uses for the process (Windows: `Shared Usage`).
+    pub shared_kb: u64,
+    /// The GPU's own memory the process uses (Windows: `Dedicated Usage`). An integrated GPU
+    /// has little or none of its own, and its allocations are shared system memory.
+    pub dedicated_kb: u64,
+}
+
+/// One process for [`gpu_process_memory_line`]: what it is, its private commit, and what the
+/// GPU's counters say it uses; `None` for what could not be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GpuMemoryOf<'a> {
+    pub name: &'a str,
+    pub pid: u32,
+    pub private_kb: Option<u64>,
+    pub gpu: Option<GpuProcessMemory>,
+}
+
+/// The log line that puts the GPU's own count of each process beside its private commit, in
+/// MiB. A GPU allocation the driver keeps outside the process's address space is in the GPU
+/// counters and not in the private commit; on an integrated GPU it is system memory all the
+/// same, so a shared usage much larger than what the process maps write-combined says how
+/// much of the host's memory the private totals leave out.
+pub fn gpu_process_memory_line(processes: &[GpuMemoryOf]) -> String {
+    let show = |kb: Option<u64>| kb.map_or("?".to_string(), |kb| mib(kb).to_string());
+    let parts: Vec<String> = processes
+        .iter()
+        .map(|p| {
+            format!(
+                "{} pid {}: private {} MiB, GPU shared {} MiB, GPU dedicated {} MiB",
+                p.name,
+                p.pid,
+                show(p.private_kb),
+                show(p.gpu.map(|g| g.shared_kb)),
+                show(p.gpu.map(|g| g.dedicated_kb)),
+            )
+        })
+        .collect();
+    format!(
+        "GPU memory beside the private commit (the GPU's own counters; private commit may leave \
+         GPU-only memory out): {}",
+        if parts.is_empty() {
+            "no process".to_string()
+        } else {
+            parts.join("; ")
+        }
+    )
 }
 
 /// How long the window manager waits after the last task window closed before it gives back

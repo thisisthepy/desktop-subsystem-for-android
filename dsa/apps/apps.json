@@ -1,5 +1,5 @@
 {
-  "comment": "The default apps of the guest image: where each one's source is pinned, the patches and design files apps.py lays over it, how it is built, and where make-image.py puts it. The LineageOS apps come from their lineage-24.0 branch, pinned to a commit; DocumentsUI comes from AOSP at the commit each image's own build was made from (the build's manifest_<build_id>.xml names it), so it matches the framework it runs on. Move a pin by changing its commit and checking that the app's patches still apply (apps.py fetch).",
+  "comment": "The default apps of the guest image: where each one's source is pinned, the patches and design files apps.py lays over it, how it is built, and where make-image.py puts it. The LineageOS apps come from their lineage-24.0 branch, pinned to a commit; DocumentsUI comes from AOSP at the commit each image's own build was made from (the build's manifest_<build_id>.xml names it), so it matches the framework it runs on. Move a pin by changing its commit and checking that the app's patches still apply (apps.py fetch). The system screens (role \"system\": Settings, PermissionController, PackageInstaller and the share sheet) are AOSP apps too, built the same way at the image's own pins with DSA's design, and stand in place of the published ones. `libraries` are folders of the tree that several of them build from (SettingsLib), patched once before them.",
   "branch": "lineage-24.0",
   "apps": [
     {
@@ -9,11 +9,24 @@
       "upstream": "LineageOS DeskClock",
       "url": "https://github.com/LineageOS/android_packages_apps_DeskClock",
       "commit": "dc237b5b6dde798688be22f3b7f69906b751a37b",
-      "build": {"kind": "gradle", "module": "", "java": "src", "res": "res", "preference": true},
+      "build": {
+        "kind": "gradle",
+        "module": "",
+        "java": "src",
+        "res": "res",
+        "preference": true
+      },
       "image": "SYSTEM/app/DsaClock/DsaClock.apk",
-      "replaces": ["DeskClock", "AlarmClock"],
-      "sysconfig": ["<allow-in-power-save package=\"com.android.deskclock\" />"],
-      "default_permissions": ["android.permission.POST_NOTIFICATIONS"]
+      "replaces": [
+        "DeskClock",
+        "AlarmClock"
+      ],
+      "sysconfig": [
+        "<allow-in-power-save package=\"com.android.deskclock\" />"
+      ],
+      "default_permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     {
       "name": "gallery",
@@ -22,9 +35,21 @@
       "upstream": "LineageOS Glimpse",
       "url": "https://github.com/LineageOS/android_packages_apps_Glimpse",
       "commit": "882ceef7e8caba7cbc2a23eace4b2a05e610c7a4",
-      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": true},
+      "build": {
+        "kind": "gradle",
+        "module": "app",
+        "java": "app/src/main/java",
+        "res": "app/src/main/res",
+        "preference": true
+      },
       "image": "SYSTEM/app/DsaGallery/DsaGallery.apk",
-      "replaces": ["Gallery2", "Gallery", "Gallery3D", "GalleryNew3D", "Glimpse"],
+      "replaces": [
+        "Gallery2",
+        "Gallery",
+        "Gallery3D",
+        "GalleryNew3D",
+        "Glimpse"
+      ],
       "sysconfig": [],
       "default_permissions": []
     },
@@ -35,9 +60,18 @@
       "upstream": "LineageOS Aperture",
       "url": "https://github.com/LineageOS/android_packages_apps_Aperture",
       "commit": "479b2f3edff71b4a279fcfd9d5319b772276ce87",
-      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": true},
+      "build": {
+        "kind": "gradle",
+        "module": "app",
+        "java": "app/src/main/java",
+        "res": "app/src/main/res",
+        "preference": true
+      },
       "image": "SYSTEM/app/DsaCamera/DsaCamera.apk",
-      "replaces": ["Camera2", "Aperture"],
+      "replaces": [
+        "Camera2",
+        "Aperture"
+      ],
       "sysconfig": [],
       "default_permissions": []
     },
@@ -48,9 +82,19 @@
       "upstream": "LineageOS Twelve",
       "url": "https://github.com/LineageOS/android_packages_apps_Twelve",
       "commit": "bc89c9e51509ac25e5c11e3ff6dfc5e47809b5ac",
-      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": true},
+      "build": {
+        "kind": "gradle",
+        "module": "app",
+        "java": "app/src/main/java",
+        "res": "app/src/main/res",
+        "preference": true
+      },
       "image": "SYSTEM/app/DsaMusic/DsaMusic.apk",
-      "replaces": ["Music", "Eleven", "Twelve"],
+      "replaces": [
+        "Music",
+        "Eleven",
+        "Twelve"
+      ],
       "sysconfig": [],
       "default_permissions": []
     },
@@ -61,9 +105,18 @@
       "upstream": "LineageOS ExactCalculator",
       "url": "https://github.com/LineageOS/android_packages_apps_ExactCalculator",
       "commit": "f76cfbe2428de5744c0e0c4b74fb77708fb15b95",
-      "build": {"kind": "gradle", "module": "", "java": "src", "res": "res", "preference": false},
+      "build": {
+        "kind": "gradle",
+        "module": "",
+        "java": "src",
+        "res": "res",
+        "preference": false
+      },
       "image": "SYSTEM/app/DsaCalculator/DsaCalculator.apk",
-      "replaces": ["Calculator", "ExactCalculator"],
+      "replaces": [
+        "Calculator",
+        "ExactCalculator"
+      ],
       "sysconfig": [],
       "default_permissions": []
     },
@@ -74,9 +127,18 @@
       "upstream": "LineageOS Recorder",
       "url": "https://github.com/LineageOS/android_packages_apps_Recorder",
       "commit": "04edbaa8fa1ead58687daaa423269de2649bfe2b",
-      "build": {"kind": "gradle", "module": "app", "java": "app/src/main/java", "res": "app/src/main/res", "preference": false},
+      "build": {
+        "kind": "gradle",
+        "module": "app",
+        "java": "app/src/main/java",
+        "res": "app/src/main/res",
+        "preference": false
+      },
       "image": "SYSTEM/app/DsaRecorder/DsaRecorder.apk",
-      "replaces": ["SoundRecorder", "Recorder"],
+      "replaces": [
+        "SoundRecorder",
+        "Recorder"
+      ],
       "sysconfig": [],
       "default_permissions": []
     },
@@ -90,15 +152,171 @@
         "android16": "ca99454776b47322576e6dfb5f00cb778e3b3fd0",
         "android17": "4568ed0bc0a62f71d4126503ef92a91f42a22c4e"
       },
-      "build": {"kind": "aosp", "tree_path": "packages/apps/DocumentsUI", "module": "DocumentsUI",
-                "installed": "system/priv-app/DocumentsUI/DocumentsUI.apk",
-                "java": "src", "res": "res", "preference": false,
-                "flags": {"package": "com.android.documentsui.flags", "enabled": ["use_material3"]}},
+      "build": {
+        "kind": "aosp",
+        "tree_path": "packages/apps/DocumentsUI",
+        "module": "DocumentsUI",
+        "installed": "system/priv-app/DocumentsUI/DocumentsUI.apk",
+        "java": "src",
+        "res": "res",
+        "preference": false,
+        "flags": {
+          "package": "com.android.documentsui.flags",
+          "enabled": [
+            "use_material3"
+          ]
+        }
+      },
       "image": "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
       "certificate": "platform",
       "replaces": [],
       "sysconfig": [],
       "default_permissions": []
+    },
+    {
+      "name": "settings",
+      "label": "Settings",
+      "package": "com.android.settings",
+      "role": "system",
+      "upstream": "AOSP Settings",
+      "url": "https://android.googlesource.com/platform/packages/apps/Settings",
+      "commits": {
+        "android16": "f6ec09afb00fb635e247687e032c39ed0c1ec21b",
+        "android17": "213829fb67f5e070029e0513a088f31bc8f5c1ed"
+      },
+      "build": {
+        "kind": "aosp",
+        "project": "packages/apps/Settings",
+        "tree_path": "packages/apps/Settings",
+        "module": "Settings",
+        "installed": "system_ext/priv-app/Settings/Settings.apk",
+        "java": "src",
+        "res": "res",
+        "preference": false
+      },
+      "libraries": [
+        "settingslib"
+      ],
+      "design_files": [],
+      "image": "SYSTEM_EXT/priv-app/Settings/Settings.apk",
+      "certificate": "platform",
+      "replaces": [],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "permissioncontroller",
+      "label": "Permissions",
+      "package": "com.android.permissioncontroller",
+      "role": "system",
+      "upstream": "AOSP PermissionController",
+      "url": "https://android.googlesource.com/platform/packages/modules/Permission",
+      "commits": {
+        "android16": "e86c3ce11c473fe33c644296363a9d72069f40a3",
+        "android17": "1093eca7407576c72e51b1a88550ee0667a6e5dc"
+      },
+      "build": {
+        "kind": "aosp",
+        "project": "packages/modules/Permission",
+        "tree_path": "packages/modules/Permission/PermissionController",
+        "module": "PermissionController",
+        "apex": "com.android.permission",
+        "apk_patterns": [
+          "/PermissionController/PermissionController/android_common_apex[0-9]+/PermissionController[.]apk$",
+          "/PermissionController/PermissionController/android_common_com[.]android[.]permission/PermissionController[.]apk$",
+          "/PermissionController/PermissionController/android_common/PermissionController[.]apk$"
+        ],
+        "java": "src",
+        "res": "res",
+        "preference": false
+      },
+      "libraries": [
+        "settingslib"
+      ],
+      "design_files": [],
+      "image": "SYSTEM/apex/com.android.permission.apex/PermissionController.apk",
+      "certificate": "platform",
+      "replaces": [],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "packageinstaller",
+      "label": "Package installer",
+      "package": "com.android.packageinstaller",
+      "role": "system",
+      "upstream": "AOSP PackageInstaller",
+      "url": "https://android.googlesource.com/platform/frameworks/base",
+      "commits": {
+        "android16": "45034f0663f960d9ee5fb0a101a4732b71f6e2f4",
+        "android17": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d"
+      },
+      "build": {
+        "kind": "aosp",
+        "project": "frameworks/base",
+        "tree_path": "frameworks/base/packages/PackageInstaller",
+        "module": "PackageInstaller",
+        "installed": "system/priv-app/PackageInstaller/PackageInstaller.apk",
+        "java": "src",
+        "res": "res",
+        "preference": false
+      },
+      "libraries": [],
+      "design_files": [],
+      "image": "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+      "certificate": "platform",
+      "replaces": [],
+      "sysconfig": [],
+      "default_permissions": []
+    },
+    {
+      "name": "intentresolver",
+      "label": "Share sheet",
+      "package": "com.android.intentresolver",
+      "role": "system",
+      "upstream": "AOSP IntentResolver",
+      "url": "https://android.googlesource.com/platform/packages/modules/IntentResolver",
+      "commits": {
+        "android16": "a2ebe6518a69b891e6994e37755a79ef47a3af1d",
+        "android17": "514e2233f8c1183308e31c86386aa932003c307a"
+      },
+      "build": {
+        "kind": "aosp",
+        "project": "packages/modules/IntentResolver",
+        "tree_path": "packages/modules/IntentResolver",
+        "module": "IntentResolver",
+        "installed": "system/priv-app/IntentResolver/IntentResolver.apk",
+        "java": "src",
+        "res": "res",
+        "preference": false
+      },
+      "libraries": [],
+      "design_files": [],
+      "image": "SYSTEM/priv-app/IntentResolver/IntentResolver.apk",
+      "certificate": "platform",
+      "replaces": [],
+      "sysconfig": [],
+      "default_permissions": []
+    }
+  ],
+  "libraries": [
+    {
+      "name": "settingslib",
+      "label": "SettingsLib",
+      "url": "https://android.googlesource.com/platform/frameworks/base",
+      "commits": {
+        "android16": "45034f0663f960d9ee5fb0a101a4732b71f6e2f4",
+        "android17": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d"
+      },
+      "build": {
+        "project": "frameworks/base",
+        "tree_path": "frameworks/base/packages/SettingsLib",
+        "java": "CollapsingToolbarBaseActivity/src",
+        "res": "CollapsingToolbarBaseActivity/res"
+      },
+      "design_files": [
+        "java/io/github/thisisthepy/dsa/design/DsaDesign.java"
+      ]
     }
   ]
 }

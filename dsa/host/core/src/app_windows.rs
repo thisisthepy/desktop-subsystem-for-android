@@ -1,6 +1,7 @@
 //! A user's window settings for each app: whether the app's windows may be resized, the size
-//! they open at, how the app follows its window to a monitor of another scale, and where its
-//! full screen shows.
+//! they open at, how the app follows its window to a monitor of another scale, where its full
+//! screen shows, and whether it keeps the input focus inside Android while its window is not
+//! the active one (the Games page's "keep game focus").
 //!
 //! The settings app's Apps page and `dsa app-window` change them through the local API; the
 //! service keeps them beside the user's other settings, and the user's window manager reads
@@ -50,8 +51,14 @@ pub enum DpiScaling {
     /// soft.
     System,
     /// The app is given the new density without a restart, even though it does not say it
-    /// handles one. That needs a change to Android's framework that is not made yet, so until
-    /// then it works as [`DpiScaling::System`] does ([`DpiScaling::FORCED_AVAILABLE`]).
+    /// handles one: Android's framework, in DSA's image, is told to treat a change of density
+    /// as handled by the task's activity instead of relaunching it, and the app's process
+    /// converts the pixel sizes its views took at the old density (layout parameters, padding,
+    /// text, drawables) to the new one. Its window then follows its monitor as
+    /// [`DpiScaling::App`] does. A size the app keeps in its own fields stays at the old density
+    /// until the app reads it again, which is why it is a choice per app and never a default. On
+    /// an image whose framework cannot do it ([`DpiScaling::mode_on`]), it works as
+    /// [`DpiScaling::System`] does.
     SystemForced,
 }
 
@@ -66,9 +73,10 @@ pub enum ScalingMode {
 }
 
 impl DpiScaling {
-    /// Whether [`DpiScaling::SystemForced`] does what it says yet. It needs a framework change
-    /// that is not approved, so it does not.
-    pub const FORCED_AVAILABLE: bool = false;
+    /// Whether [`DpiScaling::SystemForced`] does what it says. It needs DSA's framework
+    /// change, which the image carries; an image without it falls back to
+    /// [`DpiScaling::System`] ([`DpiScaling::mode_on`]).
+    pub const FORCED_AVAILABLE: bool = true;
 
     /// Every choice, in the order the settings apps list them.
     pub const ALL: [DpiScaling; 4] = [
@@ -121,6 +129,32 @@ impl DpiScaling {
         self.resolved_for(package).mode(handles_density_change)
     }
 
+    /// [`DpiScaling::mode_for`] on a guest that can (`forced_density_available`) or cannot
+    /// give a task a new density without relaunching its activity. Where it cannot,
+    /// [`DpiScaling::SystemForced`] works as [`DpiScaling::System`] does: following the
+    /// monitor there would restart the app, which is what the user chose it to avoid. Every
+    /// other choice is as [`DpiScaling::mode_for`] says.
+    pub fn mode_on(
+        self,
+        package: &str,
+        handles_density_change: bool,
+        forced_density_available: bool,
+    ) -> ScalingMode {
+        match self.resolved_for(package) {
+            DpiScaling::SystemForced if !forced_density_available => ScalingMode::System,
+            resolved => resolved.mode(handles_density_change),
+        }
+    }
+
+    /// Whether the density requests of a task of `package` with this choice go out forced
+    /// (the guest gives the density without relaunching the activity): for
+    /// [`DpiScaling::SystemForced`] on a guest that can, and for nothing else.
+    pub fn forced_on(self, package: &str, forced_density_available: bool) -> bool {
+        DpiScaling::FORCED_AVAILABLE
+            && forced_density_available
+            && self.resolved_for(package) == DpiScaling::SystemForced
+    }
+
     /// What a task's window does with this choice, for a task whose top activity does
     /// (`handles_density_change`) or does not say it handles a change of density itself, and
     /// whose app is outside [`SYSTEM_SCALED_BY_DEFAULT`] ([`DpiScaling::mode_for`] takes the
@@ -131,7 +165,8 @@ impl DpiScaling {
     /// [`DpiScaling::Auto`] gives another density only to an activity that says it handles
     /// one. [`DpiScaling::App`] is the user's explicit choice to stay sharp at the cost of
     /// that relaunch, so it gives the new density to any app. [`DpiScaling::SystemForced`]
-    /// works as [`DpiScaling::System`] does until the framework change it needs is made.
+    /// gives it too, without the relaunch, on a guest whose framework can
+    /// ([`DpiScaling::mode_on`] falls back to [`DpiScaling::System`] where it cannot).
     pub fn mode(self, handles_density_change: bool) -> ScalingMode {
         match self {
             DpiScaling::App => ScalingMode::App,
@@ -343,6 +378,13 @@ pub struct AppWindowSettings {
     /// choice for the app ([`starts_below_title_bar`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub below_title_bar: Option<bool>,
+    /// Whether the app keeps its focus while another app's window has it ("keep game
+    /// focus"): while its task stays visible, Android does not tell it that it lost the
+    /// focus, so a game that pauses when it loses the focus keeps running while the user works
+    /// in another app's window. Keys and text still go only to the window that has the focus.
+    /// The guest hears the list with `TaskRequest::CaptionCompat`. Off by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_focus: bool,
 }
 
 /// The apps that start below the title bar unless the user chose otherwise. None for now:
@@ -382,6 +424,7 @@ impl AppWindowSettings {
             && self.fullscreen == FullScreenPlace::Default
             && self.immersive == FullScreenPlace::Default
             && self.below_title_bar.is_none()
+            && !self.keep_focus
     }
 
     /// Checks the settings, as a client sent them: the package must be an Android package
@@ -420,6 +463,7 @@ impl AppWindowSettings {
             below_title_bar: (app.below_title_bar
                 != BELOW_TITLE_BAR_BY_DEFAULT.contains(&app.package_name.as_str()))
             .then_some(app.below_title_bar),
+            keep_focus: app.keep_focus,
         }
     }
 
@@ -435,8 +479,22 @@ impl AppWindowSettings {
             fullscreen: self.fullscreen.to_wire(),
             immersive: self.immersive.to_wire(),
             below_title_bar: starts_below_title_bar(&self.package_name, Some(self)),
+            keep_focus: self.keep_focus,
         }
     }
+}
+
+/// The packages that keep their focus while another app's window has it, sorted, each once:
+/// what the guest is told.
+pub fn keep_focus_packages(apps: &[AppWindowSettings]) -> Vec<String> {
+    let mut packages: Vec<String> = apps
+        .iter()
+        .filter(|app| app.keep_focus)
+        .map(|app| app.package_name.clone())
+        .collect();
+    packages.sort();
+    packages.dedup();
+    packages
 }
 
 /// `apps` with `app` in place of its package's entry: removed when `app` has the defaults,
@@ -476,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn fr4_an_explicit_app_choice_always_takes_the_density_and_forced_works_as_system_for_now() {
+    fn fr4_an_explicit_app_choice_always_takes_the_density() {
         assert_eq!(DpiScaling::Auto.mode(true), ScalingMode::App);
         assert_eq!(DpiScaling::Auto.mode(false), ScalingMode::System);
         assert_eq!(DpiScaling::App.mode(true), ScalingMode::App);
@@ -484,10 +542,57 @@ mod tests {
         assert_eq!(DpiScaling::App.mode(false), ScalingMode::App);
         assert_eq!(DpiScaling::System.mode(false), ScalingMode::System);
         assert_eq!(DpiScaling::System.mode(true), ScalingMode::System);
-        // It needs a framework change that is not made yet.
-        const { assert!(!DpiScaling::FORCED_AVAILABLE) };
-        assert_eq!(DpiScaling::SystemForced.mode(false), ScalingMode::System);
-        assert_eq!(DpiScaling::SystemForced.mode(true), ScalingMode::System);
+    }
+
+    #[test]
+    fn fr4_forced_follows_the_monitor_without_a_relaunch_where_the_guest_can() {
+        const { assert!(DpiScaling::FORCED_AVAILABLE) };
+        // Its window follows the monitor as app does, whatever the activity says.
+        assert_eq!(DpiScaling::SystemForced.mode(false), ScalingMode::App);
+        assert_eq!(DpiScaling::SystemForced.mode(true), ScalingMode::App);
+        for handles in [false, true] {
+            assert_eq!(
+                DpiScaling::SystemForced.mode_on("com.example.notes", handles, true),
+                ScalingMode::App
+            );
+        }
+        // Its densities go out forced, and nothing else's ever does.
+        assert!(DpiScaling::SystemForced.forced_on("com.example.notes", true));
+        for scaling in [DpiScaling::Auto, DpiScaling::App, DpiScaling::System] {
+            assert!(!scaling.forced_on("com.example.notes", true), "{scaling:?}");
+            assert!(
+                !scaling.forced_on("com.google.android.youtube", true),
+                "{scaling:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fr4_forced_works_as_system_on_an_image_that_would_relaunch_the_app() {
+        for handles in [false, true] {
+            assert_eq!(
+                DpiScaling::SystemForced.mode_on("com.example.notes", handles, false),
+                ScalingMode::System
+            );
+        }
+        assert!(!DpiScaling::SystemForced.forced_on("com.example.notes", false));
+    }
+
+    #[test]
+    fn fr4_the_guest_changes_nothing_for_auto_app_and_system() {
+        for package in ["com.example.notes", "com.google.android.youtube"] {
+            for handles in [false, true] {
+                for scaling in [DpiScaling::Auto, DpiScaling::App, DpiScaling::System] {
+                    for available in [false, true] {
+                        assert_eq!(
+                            scaling.mode_on(package, handles, available),
+                            scaling.mode_for(package, handles),
+                            "{scaling:?} {package} {handles} {available}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -738,6 +843,65 @@ mod tests {
             assert!(crate::compositor::window_hosts::is_valid_package(package));
             assert!(!BELOW_TITLE_BAR_BY_DEFAULT[..i].contains(package));
         }
+    }
+
+    #[test]
+    fn fr44_keep_game_focus_is_off_for_every_app_by_default() {
+        // An app with no entry, a fresh entry, and settings stored before the switch existed.
+        assert!(!AppWindowSettings::default().keep_focus);
+        assert!(!notes(true, None).keep_focus);
+        let old: AppWindowSettings =
+            serde_json::from_str(r#"{"package_name":"com.example.notes","fixed_size":true}"#)
+                .unwrap();
+        assert!(!old.keep_focus);
+        assert!(keep_focus_packages(&[]).is_empty());
+        assert!(keep_focus_packages(&[notes(true, Some((400, 700))), old]).is_empty());
+    }
+
+    #[test]
+    fn fr44_keep_game_focus_is_stored_with_the_other_window_settings() {
+        let on = AppWindowSettings {
+            keep_focus: true,
+            ..notes(false, None)
+        };
+        // On is an entry of its own, and survives the wire and the stored file, so it holds
+        // across a restart of DSA.
+        assert!(!on.is_default());
+        assert!(on.to_wire().keep_focus);
+        assert_eq!(AppWindowSettings::from_wire(&on.to_wire()), on);
+        let stored = serde_json::to_string(&on).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AppWindowSettings>(&stored).unwrap(),
+            on
+        );
+        // Off is the default: no entry, nothing on the wire, nothing in the file.
+        let off = notes(false, None);
+        assert!(!off.to_wire().keep_focus);
+        assert!(!serde_json::to_string(&off).unwrap().contains("keep_focus"));
+        let list = replace(&[], on.clone()).unwrap();
+        assert_eq!(list, vec![on]);
+        assert!(replace(&list, off).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr44_the_window_manager_follows_the_apps_switched_on() {
+        let app = |package: &str, keep_focus: bool| AppWindowSettings {
+            package_name: package.into(),
+            fixed_size: true,
+            keep_focus,
+            ..AppWindowSettings::default()
+        };
+        assert_eq!(
+            keep_focus_packages(&[
+                app("com.ustwo.monumentvalley", true),
+                app("com.example.notes", false),
+                app("com.example.chess", true),
+            ]),
+            vec![
+                "com.example.chess".to_string(),
+                "com.ustwo.monumentvalley".to_string()
+            ]
+        );
     }
 
     #[test]

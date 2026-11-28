@@ -1,0 +1,25 @@
+Build with Kotlin 2.2.0, the version Aperture builds with on the same Android Gradle plugin
+(8.13.0) and Gradle (9.1.0). With Kotlin 2.1.10 on Gradle 9.1 the Kotlin compiler does not
+see the app's Java sources, so the Kotlin code cannot call DSA's design helpers (DsaDesign,
+CardGroups), which are Java.
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -7,5 +7,5 @@
+ plugins {
+     id("com.android.application") version "8.13.0" apply false
+-    id("org.jetbrains.kotlin.android") version "2.1.10" apply false
++    id("org.jetbrains.kotlin.android") version "2.2.0" apply false
+     id("org.lineageos.generatebp") version "+" apply false
+ }
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -59,5 +59,5 @@
+ dependencies {
+     // Align versions of all Kotlin components
+-    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.1.10"))
++    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.2.0"))
+
+     implementation("androidx.activity:activity-ktx:1.7.2")

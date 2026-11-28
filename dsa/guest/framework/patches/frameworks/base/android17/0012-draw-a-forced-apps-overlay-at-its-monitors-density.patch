@@ -1,0 +1,485 @@
+Subject: Draw an overlay window of a forced app at the density of the monitor it is on
+
+DSA shows each app overlay window (TYPE_APPLICATION_OVERLAY and the older system alert types) in
+a host window of its own, on whatever monitor the user drags it to. An app set to forced system
+scaling draws at the density of the monitor its task's window is on (0009, 0010), and its process
+draws its overlays at that density too, wherever they are. On a monitor of another density the
+host then has to stretch the overlay: FLO's floating lyrics, drawn at 164 dpi for a 125% monitor,
+were shown 1.6 times larger on a 200% one, the right size but blurred. An overlay is in no task,
+so the density 0009 gives a task never reaches it.
+
+The window manager's shell command "dsa-overlay-density <WINDOW> <DPI>" now gives one overlay
+window a density of its own, and "dsa-overlay-density <WINDOW> 0" takes it away. WINDOW is the
+identity hash that starts the window's name, as SurfaceFlinger's list of windows (which the DSA
+agent reads) names it. Only a window of an overlay type that an app added is taken. The window
+manager keeps the density on the window (WindowState.mDsaDensityDpi, which the command prints
+when given no DPI) and tells the window's process with IWindow.executeCommand
+(DsaDensityRescale.WINDOW_DENSITY_COMMAND), as "dump-visible-window-views" reaches a window's
+views. Without arguments the command prints "supported", which is how the agent tells an image
+with this change from one without it. The DSA agent, which holds MANAGE_ACTIVITY_TASKS, gives
+the overlay of an app set to forced system scaling the density of its monitor when that differs
+from its task's, and takes it away when the overlay is back on a monitor of its task's density.
+
+Android has no per-window density for such a window. The window manager does send each window a
+merged configuration, but a window that is not an activity's and was not added through a window
+context (an overlay a service adds with its own context, as FLO's is) takes its density from its
+context's resources, which belong to the whole process: ViewRootImpl.performConfigurationChange
+calls updateConfiguration, which reads mView.getResources(). Changing those would change every
+window of the app. So the window's own views are converted instead, in the app's process, with
+0010's conversion:
+
+- ViewRootImpl.mDsaDensityDpi holds the window's density. View.dsaTargetDensity is that density
+  for a view in the window, and the view's resources' density everywhere else, and 0010's
+  dsaRescaleIfStale converts a view to it. ViewRootImpl.dsaSetWindowDensity converts the
+  window's views in place (DsaDensityRescale.rescaleWindow) and lays the window out again as
+  0010 does for an activity's windows. A view that joins the window later is converted when it
+  is attached (View.dispatchAttachedToWindow), one that leaves it is converted back the first
+  time it is touched.
+- The window's size: an app gives an overlay's width and height in pixels at its density
+  (WindowManager.LayoutParams), so the window takes the size the app last gave it at the
+  window's density, also when the app updates its layout parameters (as it does to move it).
+  Its position stays as the app gives it: the app moves it by the distances the pointer went.
+- What the app sets in the window afterwards: a text size in dp or sp
+  (TextView.setTextSize), and an image or background from its resources (ImageView,
+  View.setBackgroundDrawable, View.setForeground) are taken at the window's density.
+
+Not converted, as in 0010: sizes the app works out itself from its resources or display metrics
+and sets in pixels. They stay at the app's density in that window.
+
+Nothing changes in a process that no overlay window was given a density: the host gives one only
+to an overlay of an app set to forced system scaling, a view checks nothing until then (every new
+check in a view stands behind DsaDensityRescale.sActive, as 0010's do; a window only notes the size
+its app gives it), and no other window of any app is touched.
+
+Applies to frameworks/base at 94b4c163b7dfe5ce3607f7bb8456f9573f7de57d (Android 17), after 0011.
+---
+diff --git a/core/java/android/view/DsaDensityRescale.java b/core/java/android/view/DsaDensityRescale.java
+--- a/core/java/android/view/DsaDensityRescale.java
++++ b/core/java/android/view/DsaDensityRescale.java
+@@ -76,9 +76,45 @@
+      */
+     static volatile boolean sActive;
+ 
++    /**
++     * The command the window manager sends an app overlay window's process
++     * (IWindow#executeCommand) to draw that window at another density than the app's
++     * (ViewRootImpl#dsaSetWindowDensity); its parameter is the density in dpi, 0 for the app's
++     * own again. The window manager's shell command dsa-overlay-density sends it.
++     */
++    public static final String WINDOW_DENSITY_COMMAND = "DSA_WINDOW_DENSITY";
++
+     private DsaDensityRescale() {}
+ 
+     /**
++     * Converts every view of one window, an app overlay window the DSA host gave a density of
++     * its own or took it from (ViewRootImpl#dsaSetWindowDensity), to the density it is drawn at
++     * now ({@link View#dsaTargetDensity}), and lays the window out again at its new size, as
++     * {@link #rescaleWindowsOf} does for an activity's windows. Only this window's views change:
++     * the app's other windows, its activities among them, keep their density.
++     */
++    static void rescaleWindow(ViewRootImpl root) {
++        final View view = root.getView();
++        if (view == null) {
++            return;
++        }
++        sActive = true;
++        sPassThread = Thread.currentThread();
++        sPassSizes = new HashMap<>();
++        try {
++            rescaleTree(view);
++        } finally {
++            sPassSizes = null;
++            sPassThread = null;
++        }
++        relayoutTree(view);
++        root.dsaWindowSizeChanged();
++        view.requestApplyInsets();
++        view.requestLayout();
++        view.invalidate();
++    }
++
++    /**
+      * Converts every view in the windows of the activity whose token is {@code token} (its own
+      * window, its dialogs and popups) to the density their resources now have, and asks them to
+      * lay out and draw again. Called by ActivityThread after the activity's resources take a new
+diff --git a/core/java/android/view/View.java b/core/java/android/view/View.java
+--- a/core/java/android/view/View.java
++++ b/core/java/android/view/View.java
+@@ -21191,7 +21191,7 @@
+         if (from == 0 || mResources == null) {
+             return;
+         }
+-        final int to = mResources.getDisplayMetrics().densityDpi;
++        final int to = dsaTargetDensity();
+         if (to == from || to == 0) {
+             return;
+         }
+@@ -21208,6 +21208,54 @@
+     }
+ 
+     /**
++     * DSA: the density this view's pixel sizes are to be in: that of its window when the DSA
++     * host gave the window a density of its own (ViewRootImpl#mDsaDensityDpi, an app overlay
++     * window on a monitor of another density than its app's), else its resources'. A view that
++     * joins or leaves such a window is converted to its new window's density.
++     * @hide
++     */
++    public final int dsaTargetDensity() {
++        final AttachInfo info = mAttachInfo;
++        final ViewRootImpl root = info != null ? info.mViewRootImpl : null;
++        if (root != null && root.mDsaDensityDpi != 0) {
++            return root.mDsaDensityDpi;
++        }
++        return mResources != null ? mResources.getDisplayMetrics().densityDpi : 0;
++    }
++
++    /**
++     * DSA: {@code px}, a size worked out from this view's resources, at the density of its
++     * window when that is another ({@link #dsaTargetDensity}). Unchanged everywhere else.
++     * @hide
++     */
++    public final float dsaToTargetDensity(float px) {
++        if (!DsaDensityRescale.sActive || mResources == null) {
++            return px;
++        }
++        return DsaDensityRescale.scale(px, mResources.getDisplayMetrics().densityDpi,
++                dsaTargetDensity());
++    }
++
++    /**
++     * DSA: moves {@code drawable}, made from this view's resources at their density, to the
++     * density of this view's window when that is another ({@link #dsaTargetDensity}), so that
++     * an image the app sets on a view of an app overlay window drawn at the density of its
++     * monitor is the size of the rest of that window. A drawable at another density than the
++     * resources' is left as its maker set it.
++     * @hide
++     */
++    public final void dsaRetargetForWindow(Drawable drawable) {
++        if (drawable == null || !DsaDensityRescale.sActive || mResources == null) {
++            return;
++        }
++        final int from = mResources.getDisplayMetrics().densityDpi;
++        final int to = dsaTargetDensity();
++        if (to != from && to != 0) {
++            drawable.dsaRetargetDensity(from, to);
++        }
++    }
++
++    /**
+      * DSA: converts the sizes this view keeps in pixels from {@code fromDpi} to {@code toDpi}:
+      * its layout parameters, padding, minimum size, elevation, translation, scroll position, the
+      * density of its background and foreground, and the fields of its own classes that hold a
+@@ -23630,6 +23678,9 @@
+     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.P)
+     void dispatchAttachedToWindow(AttachInfo info, int visibility) {
+         mAttachInfo = info;
++        // DSA: a view that joins a window the DSA host gave a density of its own (an app
++        // overlay window on a monitor of another density) takes that density now.
++        dsaRescaleIfActive();
+         if (mOverlay != null) {
+             mOverlay.getOverlayView().dispatchAttachedToWindow(info, visibility);
+         }
+@@ -27032,6 +27083,7 @@
+     @Deprecated
+     public void setBackgroundDrawable(Drawable background) {
+         dsaRescaleIfActive();
++        dsaRetargetForWindow(background);
+         computeOpaqueFlags();
+ 
+         if (background == mBackground) {
+@@ -27317,6 +27369,7 @@
+      */
+     public void setForeground(Drawable foreground) {
+         dsaRescaleIfActive();
++        dsaRetargetForWindow(foreground);
+         if (mForegroundInfo == null) {
+             if (foreground == null) {
+                 // Nothing to do.
+diff --git a/core/java/android/view/ViewRootImpl.java b/core/java/android/view/ViewRootImpl.java
+--- a/core/java/android/view/ViewRootImpl.java
++++ b/core/java/android/view/ViewRootImpl.java
+@@ -766,6 +766,18 @@
+     private static final long DSA_FOCUS_LOSS_SETTLE_MS = 300;
+ 
+     private final Runnable mDsaFocusLossCheck = this::dsaCheckFocusLoss;
++
++    /**
++     * DSA: the density this window's views are drawn at when it is not their resources': the
++     * density of the host monitor an app overlay window is on, which the DSA host gives such a
++     * window when its app draws at another (dsaSetWindowDensity). 0 for every other window, and
++     * for an overlay drawn at its app's density. Read by View#dsaTargetDensity.
++     */
++    int mDsaDensityDpi;
++
++    /** DSA: the width and height the app last gave this window, at its resources' density. */
++    private int mDsaAppWidth;
++    private int mDsaAppHeight;
+     @GuardedBy("this")
+     boolean mUpcomingInTouchMode;
+     /**
+@@ -2423,6 +2435,14 @@
+                 mWindowAttributes.packageName = mBasePackageName;
+             }
+ 
++            // DSA: the app gives an overlay's size at its resources' density; a window drawn at
++            // a density of its own (dsaSetWindowDensity) takes that size at its density.
++            mDsaAppWidth = attrs.width;
++            mDsaAppHeight = attrs.height;
++            if (mDsaDensityDpi != 0) {
++                dsaApplyWindowSize();
++            }
++
+             // Restore the layoutInDisplayCutoutMode of the caller;
+             attrs.layoutInDisplayCutoutMode = layoutInDisplayCutoutModeFromCaller;
+ 
+@@ -7301,6 +7321,84 @@
+     }
+ 
+     /**
++     * DSA: the window manager's word that the DSA host gives this window, an app overlay
++     * window, the density {@code parameters} names, or its app's own again with 0
++     * (DsaDensityRescale#WINDOW_DENSITY_COMMAND). Called on a binder thread; the window takes
++     * the density on its own thread. Nothing is written back.
++     */
++    void dsaWindowDensityCommand(String parameters, ParcelFileDescriptor out) {
++        try {
++            if (out != null) {
++                out.close();
++            }
++        } catch (IOException e) {
++            // Nothing is written to it.
++        }
++        final int densityDpi;
++        try {
++            densityDpi = Integer.parseInt(parameters);
++        } catch (NumberFormatException e) {
++            Log.w(mTag, "DSA: no density in " + parameters);
++            return;
++        }
++        mHandler.post(() -> dsaSetWindowDensity(densityDpi));
++    }
++
++    /**
++     * DSA: draws this window, an app overlay window, at {@code densityDpi}, the density of the
++     * host monitor it is on, or at its resources' density again with 0.
++     *
++     * <p>An app set to System (forced) scaling draws at the density of the monitor its task's
++     * window is on, overlays included. An overlay the user drags onto a monitor of another
++     * density is then shown stretched by the host, from a picture drawn at the task's density.
++     * Given the monitor's density, this window's views are converted to it in place
++     * (DsaDensityRescale#rescaleWindow, as for a forced task's activity), and the window takes
++     * the size the app gave it at that density, so it is the same size on that monitor and drawn
++     * sharp. The app's other windows keep their density, and nothing else in the process
++     * changes. Only an overlay window takes it: the window manager sends it to no other.
++     */
++    void dsaSetWindowDensity(int densityDpi) {
++        if (mView == null
++                || !WindowManager.LayoutParams.isSystemAlertWindowType(mWindowAttributes.type)) {
++            return;
++        }
++        final int dpi = Math.max(0, densityDpi);
++        if (dpi == mDsaDensityDpi) {
++            return;
++        }
++        if (mDsaDensityDpi == 0) {
++            mDsaAppWidth = mWindowAttributes.width;
++            mDsaAppHeight = mWindowAttributes.height;
++        }
++        mDsaDensityDpi = dpi;
++        DsaDensityRescale.rescaleWindow(this);
++    }
++
++    /**
++     * DSA: gives the window the size its app last gave it, at the density its views are drawn
++     * at, and has it ask the window manager for its frame again (DsaDensityRescale).
++     */
++    void dsaWindowSizeChanged() {
++        dsaApplyWindowSize();
++        mWindowAttributesChanged = true;
++        mForceNextWindowRelayout = true;
++    }
++
++    /**
++     * DSA: the size the app gave the window in pixels at its resources' density, at the density
++     * the window is drawn at. A size the window takes from its content or its display
++     * (WRAP_CONTENT, MATCH_PARENT) stays as it is.
++     */
++    private void dsaApplyWindowSize() {
++        final int from = DsaDensityRescale.densityOf(mContext);
++        final int to = mDsaDensityDpi != 0 ? mDsaDensityDpi : from;
++        mWindowAttributes.width = mDsaAppWidth > 0
++                ? DsaDensityRescale.scale(mDsaAppWidth, from, to) : mDsaAppWidth;
++        mWindowAttributes.height = mDsaAppHeight > 0
++                ? DsaDensityRescale.scale(mDsaAppHeight, from, to) : mDsaAppHeight;
++    }
++
++    /**
+      * Update display and views if last applied merged configuration changed.
+      * @param newDisplayId Id of new display if moved, {@link Display#INVALID_DISPLAY} otherwise.
+      */
+@@ -12928,6 +13026,12 @@
+                                 + ", uid=" + Binder.getCallingUid());
+                     }
+ 
++                    // DSA: the window manager gives an app overlay window another density.
++                    if (DsaDensityRescale.WINDOW_DENSITY_COMMAND.equals(command)) {
++                        viewAncestor.dsaWindowDensityCommand(parameters, out);
++                        return;
++                    }
++
+                     OutputStream clientStream = null;
+                     try {
+                         clientStream = new ParcelFileDescriptor.AutoCloseOutputStream(out);
+diff --git a/core/java/android/widget/ImageView.java b/core/java/android/widget/ImageView.java
+--- a/core/java/android/widget/ImageView.java
++++ b/core/java/android/widget/ImageView.java
+@@ -1073,6 +1073,8 @@
+     private void updateDrawable(Drawable d) {
+         // DSA: converted first, so that the drawable set now keeps its own density.
+         dsaRescaleIfActive();
++        // DSA: and at the density of a window the DSA host gave a density of its own.
++        dsaRetargetForWindow(d);
+         if (d != mRecycleableBitmapDrawable && mRecycleableBitmapDrawable != null) {
+             mRecycleableBitmapDrawable.setBitmap(null);
+         }
+diff --git a/core/java/android/widget/TextView.java b/core/java/android/widget/TextView.java
+--- a/core/java/android/widget/TextView.java
++++ b/core/java/android/widget/TextView.java
+@@ -4897,8 +4897,13 @@
+ 
+     private void setTextSizeInternal(int unit, float size, boolean shouldRequestLayout) {
+         mTextSizeUnit = unit;
+-        setRawTextSize(TypedValue.applyDimension(unit, size, getDisplayMetricsOrSystem()),
+-                shouldRequestLayout);
++        float px = TypedValue.applyDimension(unit, size, getDisplayMetricsOrSystem());
++        // DSA: a size in dp or sp is at the density of a window the DSA host gave a density of
++        // its own (View#dsaTargetDensity), as the rest of that window is.
++        if (unit != TypedValue.COMPLEX_UNIT_PX) {
++            px = dsaToTargetDensity(px);
++        }
++        setRawTextSize(px, shouldRequestLayout);
+     }
+ 
+     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
+diff --git a/services/core/java/com/android/server/wm/WindowManagerShellCommand.java b/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
+--- a/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
++++ b/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
+@@ -172,6 +172,9 @@
+                 // DSA: which apps keep their focus while another app's task is on top.
+                 case "dsa-keep-focus":
+                     return runDsaKeepFocus(pw);
++                // DSA: the density an app overlay window is drawn at.
++                case "dsa-overlay-density":
++                    return runDsaOverlayDensity(pw);
+                 case "shell":
+                     return runWmShellCommand(pw);
+                 default:
+@@ -1634,6 +1637,92 @@
+         return 0;
+     }
+ 
++    /**
++     * DSA: draws an app overlay window at another density than its app's, or at its app's again.
++     *
++     *     dsa-overlay-density                    prints "supported"
++     *     dsa-overlay-density <WINDOW>           prints the density it was last given, 0 for none
++     *     dsa-overlay-density <WINDOW> <DPI>     gives it DPI, or with 0 its app's own again
++     *
++     * WINDOW is the hexadecimal identity hash that starts the window's name (WindowState#getName,
++     * as SurfaceFlinger's list of windows names it). Only a window of an overlay type
++     * (TYPE_APPLICATION_OVERLAY and the older system alert types) that an app added is taken.
++     * The window manager tells the window's process (IWindow#executeCommand with
++     * DsaDensityRescale.WINDOW_DENSITY_COMMAND), which converts that window's views to the
++     * density in place and lays the window out again; the app's other windows keep theirs.
++     *
++     * The DSA agent gives the overlay of an app set to System (forced) scaling the density of the
++     * host monitor it is on when that differs from the density of the app's task, so it is drawn
++     * sharp there instead of stretched. Without arguments the command only answers, which tells
++     * the agent this framework has the change: one without it answers "Unknown command". The
++     * caller needs MANAGE_ACTIVITY_TASKS, as for dsa-forced-density.
++     */
++    private int runDsaOverlayDensity(PrintWriter pw) {
++        mInternal.mContext.enforceCallingOrSelfPermission(
++                android.Manifest.permission.MANAGE_ACTIVITY_TASKS, "dsa-overlay-density");
++        final String windowArg = getNextArg();
++        if (windowArg == null) {
++            pw.println("supported");
++            return 0;
++        }
++        final String dpiArg = getNextArg();
++        int dpi = -1;
++        if (dpiArg != null) {
++            try {
++                dpi = Integer.parseInt(dpiArg);
++            } catch (NumberFormatException e) {
++                dpi = -2;
++            }
++            if (dpi != 0 && (dpi < 72 || dpi > 960)) {
++                getErrPrintWriter().println("Error: bad density " + dpiArg);
++                return -1;
++            }
++        }
++        synchronized (mInternal.mGlobalLock) {
++            final WindowState[] found = new WindowState[1];
++            mInternal.mRoot.forAllWindows(w -> {
++                if (found[0] == null
++                        && windowArg.equals(Integer.toHexString(System.identityHashCode(w)))) {
++                    found[0] = w;
++                }
++            }, true /* traverseTopToBottom */);
++            final WindowState window = found[0];
++            if (window == null) {
++                getErrPrintWriter().println("Error: no window " + windowArg);
++                return -1;
++            }
++            if (!android.view.WindowManager.LayoutParams.isSystemAlertWindowType(
++                    window.mAttrs.type)
++                    || UserHandle.getAppId(window.getOwningUid())
++                            < android.os.Process.FIRST_APPLICATION_UID) {
++                getErrPrintWriter().println("Error: window " + windowArg
++                        + " is not an app's overlay window");
++                return -1;
++            }
++            if (dpi < 0) {
++                pw.println(window.mDsaDensityDpi);
++                return 0;
++            }
++            try {
++                final ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
++                try {
++                    window.mClient.executeCommand(
++                            android.view.DsaDensityRescale.WINDOW_DENSITY_COMMAND,
++                            Integer.toString(dpi), pipe[1]);
++                } finally {
++                    pipe[0].close();
++                    pipe[1].close();
++                }
++            } catch (IOException | RemoteException e) {
++                getErrPrintWriter().println("Error: could not reach window " + windowArg + ": "
++                        + e);
++                return -1;
++            }
++            window.mDsaDensityDpi = dpi;
++        }
++        return 0;
++    }
++
+     private int runWmShellCommand(PrintWriter pw) {
+         final String[] args = peekRemainingArgs();
+         ArrayList<String> sbArgs = new ArrayList<>();
+diff --git a/services/core/java/com/android/server/wm/WindowState.java b/services/core/java/com/android/server/wm/WindowState.java
+--- a/services/core/java/com/android/server/wm/WindowState.java
++++ b/services/core/java/com/android/server/wm/WindowState.java
+@@ -295,6 +295,12 @@
+     final Context mContext;
+     final Session mSession;
+     final IWindow mClient;
++    /**
++     * DSA: the density this app overlay window was last given through the shell command
++     * dsa-overlay-density, which its app's process draws it at instead of the app's own; 0 for
++     * none.
++     */
++    int mDsaDensityDpi;
+     final int mAppOp;
+     // UserId and appId of the owner. Don't display windows of non-current user.
+     final int mOwnerUid;

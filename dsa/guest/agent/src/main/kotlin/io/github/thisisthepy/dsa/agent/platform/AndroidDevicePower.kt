@@ -5,21 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.IBinder
-import android.os.ParcelFileDescriptor
 import android.os.PowerManager
-import android.os.ResultReceiver
 import android.os.SystemClock
 import android.provider.Settings
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.agent.power.Battery
 import io.github.thisisthepy.dsa.agent.power.BatteryStatus
 import io.github.thisisthepy.dsa.agent.power.DevicePower
-import java.io.FileDescriptor
-import java.io.FileInputStream
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The framework's power controls, all behind the DEVICE_POWER permission the platform key
@@ -148,53 +140,7 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
      * what it printed when it fails.
      */
     private fun shell(service: String, vararg args: String) {
-        val binder = Class.forName("android.os.ServiceManager")
-            .getMethod("getService", String::class.java)
-            .invoke(null, service) as IBinder?
-            ?: error("the $service service is not up")
-        val shellCallback = Class.forName("android.os.ShellCallback")
-        val command = IBinder::class.java.getMethod(
-            "shellCommand",
-            FileDescriptor::class.java,
-            FileDescriptor::class.java,
-            FileDescriptor::class.java,
-            Array<String>::class.java,
-            shellCallback,
-            ResultReceiver::class.java,
-        )
-        val input = ParcelFileDescriptor.open(java.io.File("/dev/null"), ParcelFileDescriptor.MODE_READ_ONLY)
-        val (read, write) = ParcelFileDescriptor.createPipe()
-        // The service reports the command's exit code through a one-way call, which may
-        // arrive just after the command's call returns.
-        val done = CountDownLatch(1)
-        val code = AtomicInteger(0)
-        val result = object : ResultReceiver(null) {
-            override fun onReceiveResult(resultCode: Int, resultData: android.os.Bundle?) {
-                code.set(resultCode)
-                done.countDown()
-            }
-        }
-        try {
-            command.invoke(
-                binder,
-                input.fileDescriptor,
-                write.fileDescriptor,
-                write.fileDescriptor,
-                arrayOf(*args),
-                null,
-                result,
-            )
-        } finally {
-            input.close()
-            write.close()
-        }
-        val output = FileInputStream(read.fileDescriptor).use { it.readBytes().decodeToString().trim() }
-        read.close()
-        done.await(RESULT_WAIT_MILLIS, TimeUnit.MILLISECONDS)
-        // The commands print "Unknown option" and the like, and some exit 0 all the same.
-        if (code.get() != 0 || output.startsWith("Error") || output.contains("Unknown") || output.contains("Unable")) {
-            error("$service ${args.joinToString(" ")} failed (code ${code.get()}): $output")
-        }
+        val output = serviceShell(service, *args)
         if (output.isNotEmpty()) log.info("$service ${args.joinToString(" ")}: $output")
     }
 
@@ -202,7 +148,6 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
         // PowerManager.WAKE_REASON_APPLICATION
         const val WAKE_REASON_APPLICATION = 2
         const val WAKE_DETAILS = "io.github.thisisthepy.dsa.agent:window shown"
-        const val RESULT_WAIT_MILLIS = 2000L
         const val IDLE_WAIT_MILLIS = 3000L
         // Settings.System.MIN_REFRESH_RATE and PEAK_REFRESH_RATE, hidden from the SDK.
         const val MIN_REFRESH_RATE = "min_refresh_rate"

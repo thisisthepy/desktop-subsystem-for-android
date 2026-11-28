@@ -658,6 +658,14 @@ pub fn create_user_android(
     {
         eprintln!("{sid}: display: cannot follow the monitors' refresh rate: {error}");
     }
+    // Each time a task's window opens, the session reads the monitors the user's session
+    // recorded, and the guest's display grows when they need more of it.
+    let owner = sid.to_string();
+    session.set_monitor_source(Arc::new(move || {
+        local_app_data(&owner)
+            .ok()
+            .and_then(|dir| crate::monitors::recorded_monitors(&dir))
+    }));
     // The guest's power HAL: its hints set how hard Windows runs the guest's processors.
     let hints = session.watch_power_hints();
     let (watched, user_name) = (Arc::downgrade(&session), sid.to_string());

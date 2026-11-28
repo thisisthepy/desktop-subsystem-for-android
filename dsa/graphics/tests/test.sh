@@ -57,6 +57,11 @@ mkdir -p "$out"
     "$here/cpu_upload_test.cpp" -o "$out/cpu_upload_test"
 "$out/cpu_upload_test"
 
+# When the host renderer composes a YUV ColorBuffer, and which uploads it refuses (patch 0045).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/yuv_pictures_test.cpp" -o "$out/yuv_pictures_test"
+"$out/yuv_pictures_test"
+
 # How long a process keeps a gralloc buffer's host ColorBuffer open (guest/mesa 0013).
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/color_buffer_refs_test.cpp" -o "$out/color_buffer_refs_test"
@@ -97,6 +102,21 @@ mkdir -p "$out"
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -pthread -I"$here/../include" \
     "$here/graphics_memory_test.cpp" -o "$out/graphics_memory_test"
 "$out/graphics_memory_test"
+
+# Why each allocation on a guest's device is what it is, for the renderer's list (patch 0048).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -pthread -I"$here/../include" \
+    "$here/allocation_note_test.cpp" -o "$out/allocation_note_test"
+"$out/allocation_note_test"
+
+# When the renderer trims what a guest's device left behind (patch 0049, dsa_gfx_memory.cpp).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/device_gone_trim_test.cpp" -o "$out/device_gone_trim_test"
+"$out/device_gone_trim_test"
+
+# What an app's window surface costs in stencil on the GPU, for the renderer's log.
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/stencil_format_test.cpp" -o "$out/stencil_format_test"
+"$out/stencil_format_test"
 
 # The upstream headers are not ours to warn about.
 upstream=(

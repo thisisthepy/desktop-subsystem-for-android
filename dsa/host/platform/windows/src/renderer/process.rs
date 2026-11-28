@@ -7,34 +7,41 @@
 //! NT handle duplicated into this process), and the window manager is told once the copy is
 //! done.
 //!
-//! The renderer lives only as long as its window manager: when the window manager's
-//! connection ends, so does this process, at once, so a renderer can never be left holding
-//! the VM's graphics ports for a window manager that is gone.
+//! A window manager that stops the renderer, or says the VM it served is gone, ends it at once.
+//! One that ends without a word (it crashed, or was ended from outside) leaves it waiting on
+//! [`adoption_pipe`](super::adoption_pipe) for the next window manager, for
+//! [`ADOPTION_WAIT`](dsa_host_core::renderer::ADOPTION_WAIT): the guest's streams and everything
+//! its processes made here stay, so Android's apps keep drawing their text, images and icons
+//! after the window manager restarts. When no window manager takes it over in that time, it
+//! ends, so a renderer is never left holding the VM's graphics ports for nobody.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
+use dsa_host_core::loaded_modules::ModuleWatch;
 use dsa_host_core::renderer::{
-    address_from, follow_device_state, open_renderer, HeldTargets, RendererProcessMemory, ServedVm,
+    address_from, adopted_started, adoption_refusal, adoption_wait, follow_device_state,
+    open_renderer, HeldTargets, RendererProcessMemory, ServedVm, WindowManagerLeft,
     WindowManagerLink, WINDOW_MANAGER_ARGUMENT,
 };
-use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Started};
+use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Note, Start, Started};
 use dsa_protocol::renderer::{decode_body, send};
-use dsa_transport::{Connector, Listener, TransportError};
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use dsa_transport::local::LocalListener;
+use dsa_transport::{Connection, Connector, Listener, TransportError};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, HMODULE};
 use windows_sys::Win32::System::ProcessStatus::{
-    K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
-    PROCESS_MEMORY_COUNTERS_EX,
+    K32EmptyWorkingSet, K32EnumProcessModules, K32GetModuleBaseNameW, K32GetProcessMemoryInfo,
+    PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 
-use super::{report_gpu, report_vulkan_driver, request_of, vulkan_driver_of};
+use super::{adoption_pipe, report_gpu, report_vulkan_driver, request_of, vulkan_driver_of};
 use crate::compositor::adapter::{DisplayPresenter, DisplaySink, GfxstreamAdapter};
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
-use crate::pipe::SameUserPipeConnector;
+use crate::pipe::{current_user_only_sddl, NamedPipeListener, SameUserPipeConnector};
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
 use crate::vulkan_driver::{self, DriverOutcome};
 
@@ -75,6 +82,31 @@ impl RemoteSink {
             // here as soon as the new one is open rather than kept with nothing to use it.
             held: Mutex::new(HeldTargets::keeping(1)),
         }
+    }
+
+    /// The window manager that gave the textures is gone: every display lets go of its texture,
+    /// in `presenter` first and then here. The next window manager numbers its textures from 1
+    /// again and makes new ones, and a texture kept under an old number, or an old handle value
+    /// a new handle took, would have the frames written where nothing shows them.
+    pub fn release_all(&self, presenter: &dyn DisplayPresenter) {
+        let displays = self
+            .held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .displays();
+        for display_id in displays {
+            presenter.forget_display(display_id);
+            self.forget(display_id);
+        }
+    }
+
+    /// How many displays (task windows) hold a texture of the window manager's now.
+    pub fn windows(&self) -> usize {
+        self.held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .displays()
+            .len()
     }
 
     /// No window shows `display_id` now: its textures' handles go.
@@ -151,6 +183,49 @@ fn own_memory_kb() -> (Option<u64>, Option<u64>) {
     )
 }
 
+/// The file names of the libraries loaded in this process now, for [`ModuleWatch`]. Empty
+/// when Windows does not list them.
+fn loaded_modules() -> Vec<String> {
+    // SAFETY: our own process's pseudo handle.
+    let process = unsafe { GetCurrentProcess() };
+    let mut handles: Vec<HMODULE> = vec![std::ptr::null_mut(); 512];
+    let width = std::mem::size_of::<HMODULE>();
+    loop {
+        let mut needed = 0u32;
+        // SAFETY: room for `handles.len()` handles, as the size given says.
+        let listed = unsafe {
+            K32EnumProcessModules(
+                process,
+                handles.as_mut_ptr(),
+                (handles.len() * width) as u32,
+                &mut needed,
+            )
+        };
+        if listed == 0 {
+            return Vec::new();
+        }
+        let count = needed as usize / width;
+        if count <= handles.len() {
+            handles.truncate(count);
+            break;
+        }
+        // More libraries than room: again with room for them, and for a few loaded meanwhile.
+        handles.resize(count + 64, std::ptr::null_mut());
+    }
+    handles
+        .iter()
+        .filter_map(|&module| {
+            let mut name = [0u16; 260];
+            // SAFETY: a module of this process (one unloaded meanwhile only fails), and a
+            // buffer of the length given.
+            let length = unsafe {
+                K32GetModuleBaseNameW(process, module, name.as_mut_ptr(), name.len() as u32)
+            } as usize;
+            (length > 0).then(|| String::from_utf16_lossy(&name[..length.min(name.len())]))
+        })
+        .collect()
+}
+
 /// What this process holds, with the renderer's own count.
 /// Writes every live color buffer, as the renderer lists it, to the user's
 /// `renderer-color-buffers.txt` beside the window manager's log, which the memory snapshot and
@@ -178,6 +253,25 @@ fn save_color_buffers(adapter: &GfxstreamAdapter) -> Result<(), String> {
 fn memory(adapter: &GfxstreamAdapter) -> RendererProcessMemory {
     let (working_set_kb, private_kb) = own_memory_kb();
     RendererProcessMemory::of_this_process(working_set_kb, private_kb, adapter.counted_memory())
+}
+
+/// The log line that says whose this renderer's memory is: its GPU memory by the device it is
+/// on, and its committed memory by owner (heaps, the driver's write-combined pools, thread
+/// stacks, the loaded modules' data), headed by whether a guest process or a task window is
+/// there. With neither, it is what the renderer costs at rest.
+fn memory_by_owner(
+    adapter: &GfxstreamAdapter,
+    sink: &RemoteSink,
+    held: &RendererProcessMemory,
+) -> String {
+    let floor = crate::compositor::committed::floor(held.held.private_kb);
+    let guest_processes = held.counted.map_or(0, |counted| counted.guest_processes);
+    dsa_host_core::renderer::renderer_memory_line(
+        adapter.counted_owners().as_ref(),
+        &floor,
+        guest_processes,
+        sink.windows(),
+    )
 }
 
 /// No task window is shown: gives back the memory the renderer is not using. The guest's
@@ -298,14 +392,30 @@ pub fn run(args: &[String]) -> ! {
         link.note(&why);
     }
 
+    // Which libraries each stage of the start loads, so the log shows what brought in a
+    // driver the renderer does not render with.
+    let mut modules = ModuleWatch::new(loaded_modules());
+
     // Which Vulkan: a native driver, or Dozen from the Compatibility Pack where no GPU has
     // one. What the choice needs of the Vulkan loader goes into this process's environment
-    // before gfxstream loads the loader, and nowhere else.
+    // before gfxstream loads the loader, and nowhere else. The loader is kept to the GPU's own
+    // driver where that finds the GPU, so another GPU's driver is never loaded here.
     let vulkan = vulkan_driver_of(&start);
-    let found = vulkan_driver::look();
-    let plan = vulkan_driver::plan(vulkan, &found, &request_of(&start));
+    let (found, select) = vulkan_driver::look_for(vulkan, &request_of(&start));
+    let mut plan = vulkan_driver::plan(vulkan, &found, &request_of(&start));
+    if let Some(select) = select.as_deref() {
+        if vulkan_driver::keep_only(&mut plan, select) {
+            link.note(&format!(
+                "the renderer loads only the Vulkan driver of the GPU it renders on ({select}); \
+                 no other GPU's driver is loaded"
+            ));
+        }
+    }
     for (name, value) in &plan.env {
         std::env::set_var(name, value);
+    }
+    if let Some(line) = modules.note("looking at the Vulkan drivers", loaded_modules()) {
+        link.note(&line);
     }
     let request = plan.request.clone().unwrap_or_else(|| request_of(&start));
     // `GFXSTREAM_BACKEND_PATH` names another backend library, as the renderer's tests do;
@@ -320,6 +430,9 @@ pub fn run(args: &[String]) -> ! {
     } else {
         GfxstreamAdapter::on_gpu_with(backend, &request, &plan.features)
     });
+    if let Some(line) = modules.note("gfxstream started on its device", loaded_modules()) {
+        link.note(&line);
+    }
     let mut started = Started {
         process_id: std::process::id(),
         notes: adapter.notes().to_vec(),
@@ -372,9 +485,14 @@ pub fn run(args: &[String]) -> ! {
         FramePath::Nowhere
     };
     started.frame_path = frame_path as i32;
+    if let Some(line) = modules.note("the frame presentation started", loaded_modules()) {
+        link.note(&line);
+    }
     started.adapter_luid = DisplayPresenter::adapter_luid(&*adapter)
         .map(|luid| luid.to_vec())
         .unwrap_or_default();
+    // What a window manager that takes this renderer over is told it runs on.
+    let first_started = started.clone();
     if send(&mut *connection, Body::Started(started)).is_err() {
         end_now(6);
     }
@@ -391,6 +509,16 @@ pub fn run(args: &[String]) -> ! {
         ));
     }
 
+    // Starting left freed memory committed in the heap: the Vulkan probe's instance and
+    // drivers, which it unloaded, and what gfxstream and the driver used while they made the
+    // device and compiled its pipelines. It goes back now, rather than at the window manager's
+    // first idle give-back, and the log says what the renderer holds at rest, by owner.
+    crate::compositor::committed::compact_heaps();
+    link.note(&format!(
+        "started; {}",
+        memory_by_owner(&adapter, &sink, &memory(&adapter))
+    ));
+
     let vm: VmIdSlot = Arc::default();
     let mut served = ServedVm::new();
     for (kind, port) in [
@@ -406,15 +534,112 @@ pub fn run(args: &[String]) -> ! {
         );
     }
 
+    // Only the installed renderer, which its window manager names on the command line, waits
+    // to be taken over: one a test runs inside its own program ends with the test's window
+    // manager, as before.
+    let adoptable = args.iter().any(|arg| arg == WINDOW_MANAGER_ARGUMENT);
+    loop {
+        let left = serve_window_manager(
+            &mut *connection,
+            &link,
+            &adapter,
+            &sink,
+            &vm,
+            &mut served,
+            &mut modules,
+        );
+        let Some(wait) = adoption_wait(left).filter(|_| adoptable) else {
+            break;
+        };
+        // The window manager crashed or was ended. The guest's streams, and everything its
+        // processes made here, stay; the next window manager takes this renderer over.
+        link.lost();
+        sink.release_all(&*adapter);
+        connection.close();
+        match wait_to_be_taken_over(wait, &start, &first_started) {
+            Some(next) => {
+                let Some(sender) = next.try_clone_sender() else {
+                    break;
+                };
+                connection = next;
+                link.attach(sender);
+                served.adopted();
+            }
+            None => break,
+        }
+    }
+    link.close();
+    end_now(0)
+}
+
+/// Waits up to `wait` for the next window manager in this session to take this renderer over,
+/// on [`adoption_pipe`]: its handshake, and its `Start`, which must ask for what `first` did.
+/// Returns its connection once it was told what the renderer runs on (`first_started`), or
+/// `None` when none came, or one asks for something else; the renderer then ends, and that
+/// window manager starts a fresh one.
+fn wait_to_be_taken_over(
+    wait: Duration,
+    first: &Start,
+    first_started: &Started,
+) -> Option<Box<dyn Connection>> {
+    let sddl = current_user_only_sddl().ok()?;
+    let mut listener = NamedPipeListener::bind(&adoption_pipe(), &sddl).ok()?;
+    let deadline = Instant::now() + wait;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        let mut connection = match listener.accept(left.min(Duration::from_millis(500))) {
+            Ok((connection, _)) => connection,
+            Err(TransportError::Timeout) => continue,
+            Err(_) => return None,
+        };
+        let Ok(asked) = open_renderer(&mut *connection, &build()) else {
+            continue;
+        };
+        if let Some(why) = adoption_refusal(first, &asked) {
+            let _ = send(
+                &mut *connection,
+                Body::Note(Note {
+                    text: format!(
+                        "the renderer that kept running after the last window manager ended \
+                         ends instead of serving this one ({why}); a fresh one starts"
+                    ),
+                }),
+            );
+            return None;
+        }
+        if send(
+            &mut *connection,
+            Body::Started(adopted_started(first_started)),
+        )
+        .is_ok()
+        {
+            return Some(connection);
+        }
+    }
+}
+
+/// Serves one window manager's messages on `connection` until it leaves, and says how.
+fn serve_window_manager(
+    connection: &mut dyn Connection,
+    link: &Arc<WindowManagerLink>,
+    adapter: &Arc<GfxstreamAdapter>,
+    sink: &Arc<RemoteSink>,
+    vm: &VmIdSlot,
+    served: &mut ServedVm,
+    modules: &mut ModuleWatch,
+) -> WindowManagerLeft {
     loop {
         let frame = match connection.recv(None) {
             Ok(frame) => frame,
             Err(TransportError::Timeout) => continue,
-            Err(_) => break,
+            Err(_) => return WindowManagerLeft::Lost,
         };
         let Ok(body) = decode_body(&frame) else {
             link.note("the window manager sent something that is not a message; ending");
-            break;
+            return WindowManagerLeft::Stopped;
         };
         let Some(body) = link.take(body) else {
             continue;
@@ -424,15 +649,23 @@ pub fn run(args: &[String]) -> ! {
                 // The VM this renderer served is gone: a fresh renderer, which the window
                 // manager starts at once, serves the next one without what this one kept.
                 let told = (!guest.vm_id.is_empty()).then_some(guest.vm_id.as_str());
+                if told.is_none() && served.awaits_vm() {
+                    // A window manager that took this renderer over and has not looked at
+                    // the VM yet: the guest's sockets stay bound to the VM served.
+                    continue;
+                }
                 if served.told(told) {
-                    let (_, private_kb) = own_memory_kb();
+                    let held = memory(adapter);
                     link.note(&format!(
                         "the VM this renderer served is gone; it ends so that the window \
                          manager starts a fresh one for the next VM, without the {} MiB of \
-                         private memory this one holds",
-                        private_kb.map_or("?".to_string(), |kb| (kb / 1024).to_string())
+                         private memory this one holds; {}",
+                        held.held
+                            .private_kb
+                            .map_or("?".to_string(), |kb| (kb / 1024).to_string()),
+                        memory_by_owner(adapter, sink, &held)
                     ));
-                    break;
+                    return WindowManagerLeft::VmGone;
                 }
                 let id = if guest.vm_id.is_empty() {
                     None
@@ -448,7 +681,7 @@ pub fn run(args: &[String]) -> ! {
                 *vm.lock().unwrap_or_else(|e| e.into_inner()) = id;
             }
             Body::ForgetDisplay(forget) => {
-                DisplayPresenter::forget_display(&*adapter, forget.display_id);
+                DisplayPresenter::forget_display(&**adapter, forget.display_id);
                 sink.forget(forget.display_id);
             }
             Body::MemoryRequest(asked) => {
@@ -461,21 +694,23 @@ pub fn run(args: &[String]) -> ! {
                     // five minutes), and a video's uploads left their buffers' worth there.
                     crate::compositor::committed::compact_heaps();
                 }
-                let report = memory(&adapter).to_report(asked.request);
-                link.send(Body::MemoryReport(report));
-                // Whose the GPU memory is, for the window manager's log beside the report.
-                if let Some(owners) = adapter.counted_owners() {
-                    link.note(&dsa_host_core::renderer::renderer_owners_line(&owners));
-                }
+                let held = memory(adapter);
+                link.send(Body::MemoryReport(held.to_report(asked.request)));
+                // Whose the GPU memory is and whose the committed memory is, for the window
+                // manager's log beside the report.
+                link.note(&memory_by_owner(adapter, sink, &held));
                 // Every color buffer, for the memory snapshot and the diagnostics archive.
-                if let Err(why) = save_color_buffers(&adapter) {
+                if let Err(why) = save_color_buffers(adapter) {
                     link.note(&format!("could not save the color buffer list: {why}"));
                 }
+                // Libraries the guest's work brought in since the start (a driver's video or
+                // Direct3D parts that the first app's frames needed).
+                if let Some(line) = modules.note("serving the guest", loaded_modules()) {
+                    link.note(&line);
+                }
             }
-            Body::Stop(_) => break,
+            Body::Stop(_) => return WindowManagerLeft::Stopped,
             _ => {}
         }
     }
-    link.close();
-    end_now(0)
 }

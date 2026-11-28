@@ -1,0 +1,262 @@
+Subject: HWUI: let go of an idle window's surface and the buffers its queue holds
+
+A window's buffer queue holds the buffer on screen and the free ones the app draws its next
+frames into (three more for the Settings app, 7 MiB each at 1208x1383), and keeps them while the
+window draws nothing. Each is a GPU buffer on the host. Discarding the queue's free buffers alone
+would not free them: the window's surface (ANGLE's Vulkan swapchain under the EGL surface, or
+HWUI's own VulkanSurface) imported every buffer it dequeued and keeps the import, and the app's
+references keep SurfaceFlinger's cached copy too.
+
+At the idle release 0014 adds, after 30 seconds without a frame, each window now lets go of its
+GPU surface (IRenderPipeline::releaseSurfaceWhileIdle) and keeps its native window, the state a
+trim that destroys the GPU context leaves (onContextDestroyed). Destroying the surface
+disconnects the window's queue, which frees every buffer in it but the one SurfaceFlinger shows,
+so the window keeps its last picture on screen. The app's buffers then die, which uncaches them
+in SurfaceFlinger, and the surface's depth and stencil image goes too. The idle release's
+waited-on submit makes ANGLE free what it deferred. The log line of 0014 counts the windows:
+
+  No frame for N s: let go of the surfaces of W windows and K KiB of GPU caches (R resources);
+  L KiB remain
+
+The next frame makes the surface again in makeCurrent(), as after a trim, and draws the whole
+window (it has a new surface). A frame the render thread draws on its own (an animation, a
+RenderNode drawn directly) makes it again first too. makeCurrent() also sets again what
+setupPipelineSurface() set on the window (frame timestamps, freeze scaling, no producer
+throttling), which the disconnect forgot. That first frame dequeues and so allocates new
+buffers. A window that draws into a hardware buffer, or has no surface, is left alone.
+
+Applies to frameworks/base at 94b4c163b7dfe5ce3607f7bb8456f9573f7de57d (Android 17), after 0014.
+---
+diff --git a/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp b/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
+index 9787d8f0..81383138 100644
+--- a/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
+@@ -229,6 +229,17 @@ void SkiaOpenGLPipeline::onContextDestroyed() {
+     }
+ }
+ 
++bool SkiaOpenGLPipeline::releaseSurfaceWhileIdle() {
++    if (mHardwareBuffer || !mNativeWindow || mEglSurface == EGL_NO_SURFACE) {
++        return false;
++    }
++    // Destroying the EGL surface disconnects the window's buffer queue, which frees every buffer
++    // in it but the one on screen. makeCurrent() makes the surface again for the next frame.
++    mEglManager.destroySurface(mEglSurface);
++    mEglSurface = EGL_NO_SURFACE;
++    return true;
++}
++
+ void SkiaOpenGLPipeline::onStop() {
+     if (mEglManager.isCurrent(mEglSurface)) {
+         mEglManager.makeCurrent(EGL_NO_SURFACE);
+diff --git a/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp b/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp
+index 10abc1cc..92acab2c 100644
+--- a/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp
+@@ -193,6 +193,17 @@ void SkiaVulkanPipeline::setTargetSdrHdrRatio(float ratio) {
+     }
+ }
+ 
++bool SkiaVulkanPipeline::releaseSurfaceWhileIdle() {
++    if (mHardwareBuffer || !mNativeWindow || !mVkSurface) {
++        return false;
++    }
++    // Destroying the surface disconnects the window's buffer queue, which frees every buffer in
++    // it but the one on screen. makeCurrent() makes the surface again for the next frame.
++    vulkanManager().destroySurface(mVkSurface);
++    mVkSurface = nullptr;
++    return true;
++}
++
+ bool SkiaVulkanPipeline::isSurfaceReady() {
+     return CC_UNLIKELY(mVkSurface != nullptr);
+ }
+diff --git a/libs/hwui/platform/android/pipeline/skia/SkiaOpenGLPipeline.h b/libs/hwui/platform/android/pipeline/skia/SkiaOpenGLPipeline.h
+index be93be9f..73bd6867 100644
+--- a/libs/hwui/platform/android/pipeline/skia/SkiaOpenGLPipeline.h
++++ b/libs/hwui/platform/android/pipeline/skia/SkiaOpenGLPipeline.h
+@@ -52,6 +52,7 @@ public:
+     bool setSurface(ANativeWindow* surface, renderthread::SwapBehavior swapBehavior) override;
+     [[nodiscard]] android::base::unique_fd flush() override;
+     void onStop() override;
++    bool releaseSurfaceWhileIdle() override;
+     bool isSurfaceReady() override;
+     bool isContextReady() override;
+ 
+diff --git a/libs/hwui/platform/android/pipeline/skia/SkiaVulkanPipeline.h b/libs/hwui/platform/android/pipeline/skia/SkiaVulkanPipeline.h
+index 3e0d5ee7..daac6621 100644
+--- a/libs/hwui/platform/android/pipeline/skia/SkiaVulkanPipeline.h
++++ b/libs/hwui/platform/android/pipeline/skia/SkiaVulkanPipeline.h
+@@ -53,6 +53,7 @@ public:
+ 
+     bool setSurface(ANativeWindow* surface, renderthread::SwapBehavior swapBehavior) override;
+     void onStop() override;
++    bool releaseSurfaceWhileIdle() override;
+     bool isSurfaceReady() override;
+     bool isContextReady() override;
+     void setTargetSdrHdrRatio(float ratio) override;
+diff --git a/libs/hwui/renderthread/CacheManager.cpp b/libs/hwui/renderthread/CacheManager.cpp
+index 1dca04b8..b28d6df9 100644
+--- a/libs/hwui/renderthread/CacheManager.cpp
++++ b/libs/hwui/renderthread/CacheManager.cpp
+@@ -340,6 +340,12 @@ void CacheManager::onIdleReleaseDue() {
+ 
+ void CacheManager::releaseWhileIdle(nsecs_t idleFor) {
+     ATRACE_NAME("releaseWhileIdle");
++    // Each window's surface first: with it go the buffers its queue holds but the one on screen,
++    // which SurfaceFlinger keeps showing, and the surface's depth and stencil.
++    size_t windows = 0;
++    for (auto context : mCanvasContexts) {
++        if (context->releaseSurfaceWhileIdle()) windows++;
++    }
+     int countBefore = 0;
+     size_t bytesBefore = 0;
+     mGrContext->getResourceCacheUsage(&countBefore, &bytesBefore);
+@@ -355,9 +361,9 @@ void CacheManager::releaseWhileIdle(nsecs_t idleFor) {
+     int countAfter = 0;
+     size_t bytesAfter = 0;
+     mGrContext->getResourceCacheUsage(&countAfter, &bytesAfter);
+-    ALOGI("No frame for %" PRId64 " s: let go of %zu KiB of GPU caches (%d resources); %zu KiB "
+-          "remain",
+-          ns2s(idleFor), (bytesBefore - std::min(bytesBefore, bytesAfter)) / 1024,
++    ALOGI("No frame for %" PRId64 " s: let go of the surfaces of %zu windows and %zu KiB of GPU "
++          "caches (%d resources); %zu KiB remain",
++          ns2s(idleFor), windows, (bytesBefore - std::min(bytesBefore, bytesAfter)) / 1024,
+           countBefore - countAfter, bytesAfter / 1024);
+ }
+ 
+diff --git a/libs/hwui/renderthread/CacheManager.h b/libs/hwui/renderthread/CacheManager.h
+index 47b87db1..8de6e073 100644
+--- a/libs/hwui/renderthread/CacheManager.h
++++ b/libs/hwui/renderthread/CacheManager.h
+@@ -77,7 +77,8 @@ private:
+     // DSA: a window the user can see, but that draws nothing, keeps what its last frames left in
+     // the GPU caches for as long as it stays on screen; Android trims an app's caches only once
+     // its UI is hidden. Once the render thread has drawn no frame for kIdleReleaseAfter, these
+-    // let go of them. The next frame uploads again what it draws.
++    // let go of them, and of each window's surface with the buffers its queue holds. The next
++    // frame makes the surface again and uploads again what it draws.
+     void scheduleIdleRelease(nsecs_t delay);
+     void onIdleReleaseDue();
+     void releaseWhileIdle(nsecs_t idleFor);
+diff --git a/libs/hwui/renderthread/CanvasContext.cpp b/libs/hwui/renderthread/CanvasContext.cpp
+index e3550895..360cf499 100644
+--- a/libs/hwui/renderthread/CanvasContext.cpp
++++ b/libs/hwui/renderthread/CanvasContext.cpp
+@@ -347,10 +347,7 @@ void CanvasContext::setupPipelineSurface() {
+             // Enable frame stats after the surface has been bound to the appropriate graphics API.
+             // Order is important when new and old surfaces are the same, because old surface has
+             // its frame stats disabled automatically.
+-            native_window_enable_frame_timestamps(mNativeSurface->getNativeWindow(), true);
+-            native_window_set_scaling_mode(mNativeSurface->getNativeWindow(),
+-                                        NATIVE_WINDOW_SCALING_MODE_FREEZE);
+-            native_window_set_producer_throttling_enabled(mNativeSurface->getNativeWindow(), false);
++            setWindowOptions(mNativeSurface->getNativeWindow());
+         }
+     } else if (mNativeSurface == nullptr) {
+         mRenderThread.removeFrameCallback(this);
+@@ -358,6 +355,12 @@ void CanvasContext::setupPipelineSurface() {
+     }
+ }
+ 
++void CanvasContext::setWindowOptions(ANativeWindow* window) {
++    native_window_enable_frame_timestamps(window, true);
++    native_window_set_scaling_mode(window, NATIVE_WINDOW_SCALING_MODE_FREEZE);
++    native_window_set_producer_throttling_enabled(window, false);
++}
++
+ void CanvasContext::setSwapBehavior(SwapBehavior swapBehavior) {
+     mSwapBehavior = swapBehavior;
+ }
+@@ -445,7 +448,14 @@ bool CanvasContext::makeCurrent() {
+         return false;
+     }
+ 
++    const bool remakesIdleSurface = std::exchange(mSurfaceReleasedWhileIdle, false);
+     auto result = mRenderPipeline->makeCurrent();
++    if (remakesIdleSurface && result != MakeCurrentResult::Failed && mNativeSurface &&
++        mRenderPipeline->isSurfaceReady()) {
++        // Letting go of the surface disconnected the window, which forgets what
++        // setupPipelineSurface() set on it.
++        setWindowOptions(mNativeSurface->getNativeWindow());
++    }
+     switch (result) {
+         case MakeCurrentResult::AlreadyCurrent:
+             return true;
+@@ -1111,6 +1121,7 @@ void CanvasContext::doFrame() {
+         // The surface went with the lost context: make it again on the new one, then draw.
+         if (!makeCurrent()) return;
+     }
++    if (mSurfaceReleasedWhileIdle && !makeCurrent()) return;
+     if (!mRenderPipeline->isSurfaceReady()) return;
+     mIdleDuration =
+             systemTime(SYSTEM_TIME_MONOTONIC) - mRenderThread.timeLord().computeFrameTimeNanos();
+@@ -1147,6 +1158,7 @@ const SkM44& CanvasContext::getPixelSnapMatrix() const {
+ }
+ 
+ void CanvasContext::prepareAndDraw(RenderNode* node) {
++    if (mSurfaceReleasedWhileIdle && !makeCurrent()) return;
+     int64_t vsyncId = mRenderThread.timeLord().lastVsyncId();
+     ATRACE_FORMAT("%s %" PRId64, __func__, vsyncId);
+ 
+@@ -1223,6 +1235,16 @@ void CanvasContext::destroyHardwareResources() {
+     }
+ }
+ 
++bool CanvasContext::releaseSurfaceWhileIdle() {
++    if (!mNativeSurface || !mRenderPipeline->releaseSurfaceWhileIdle()) {
++        return false;
++    }
++    mSurfaceReleasedWhileIdle = true;
++    // The surface made again has none of what the window showed: the next frame draws it all.
++    mHaveNewSurface = true;
++    return true;
++}
++
+ void CanvasContext::onDeviceReset() {
+     // What the window last showed may have gone with the lost device, so all of it is drawn
+     // again: the next frame has full damage (makeCurrent() marks the new surface), and the UI
+diff --git a/libs/hwui/renderthread/CanvasContext.h b/libs/hwui/renderthread/CanvasContext.h
+index e4b63598..cced2eba 100644
+--- a/libs/hwui/renderthread/CanvasContext.h
++++ b/libs/hwui/renderthread/CanvasContext.h
+@@ -198,6 +198,11 @@ public:
+     // Whether the UI thread is to draw the window again in full; true once after each reset.
+     bool takeUiRedrawAfterDeviceReset() { return std::exchange(mUiRedrawAfterDeviceReset, false); }
+ 
++    // DSA: lets go of the window's GPU surface while the window draws nothing, which frees the
++    // buffers its queue holds but the one on screen. The next frame makes the surface again and
++    // draws the whole window. False when the window has no such surface.
++    bool releaseSurfaceWhileIdle();
++
+     DeferredLayerUpdater* createTextureLayer();
+ 
+     void stopDrawing();
+@@ -386,6 +391,12 @@ private:
+     // and the next sync asks the UI thread to draw again.
+     bool mRedrawAfterDeviceReset = false;
+     bool mUiRedrawAfterDeviceReset = false;
++    // Set by releaseSurfaceWhileIdle(): a frame the render thread draws on its own (an
++    // animation) makes the surface again first, as one the UI thread syncs does.
++    bool mSurfaceReleasedWhileIdle = false;
++    // What setupPipelineSurface() sets on a window once its surface is made (frame timestamps,
++    // scaling, no producer throttling); a disconnect forgets it.
++    static void setWindowOptions(ANativeWindow* window);
+     DamageAccumulator mDamageAccumulator;
+     ColorArea mColorArea;
+     LayerUpdateQueue mLayerUpdateQueue;
+diff --git a/libs/hwui/renderthread/IRenderPipeline.h b/libs/hwui/renderthread/IRenderPipeline.h
+index 012dae47..2256fc9a 100644
+--- a/libs/hwui/renderthread/IRenderPipeline.h
++++ b/libs/hwui/renderthread/IRenderPipeline.h
+@@ -102,6 +102,10 @@ public:
+     virtual void updateRenderTargetSize(uint64_t width, uint64_t height) {}
+ 
+     virtual void onStop() = 0;
++    // DSA: lets go of the GPU surface made for the window while the window draws nothing, and
++    // keeps the window, as a trim that destroys the GPU context does: makeCurrent() makes the
++    // surface again. False when there is no such surface to let go of.
++    virtual bool releaseSurfaceWhileIdle() { return false; }
+     virtual bool isSurfaceReady() = 0;
+     virtual bool isContextReady() = 0;
+     virtual void onDestroyHardwareResources() = 0;

@@ -121,7 +121,9 @@ pub fn renderer_log_to(logger: Option<Arc<CompositorLogger>>) {
 }
 
 /// How one of the graphics renderer's lines reads in the log: `severity` is the renderer's
-/// `W`, `E` or `F`. Other severities are not written.
+/// `W`, `E` or `F`, or `N` for a note the backend writes itself (what a trim gave back, what
+/// the GPU offers), which comes rarely. Other severities, gfxstream's informational and
+/// verbose lines among them, are not written: it writes some for every resource.
 pub fn renderer_line(severity: u8, message: &str) -> Option<String> {
     let message = message.trim_end();
     match severity {
@@ -130,6 +132,7 @@ pub fn renderer_line(severity: u8, message: &str) -> Option<String> {
         )),
         b'E' => Some(format!("graphics renderer error: {message}")),
         b'W' => Some(format!("graphics renderer warning: {message}")),
+        b'N' => Some(format!("graphics renderer: {message}")),
         _ => None,
     }
 }
@@ -148,7 +151,7 @@ pub fn renderer_log_through(forward: RendererLines) {
 /// Writes one of the graphics renderer's lines, from any of its threads.
 pub fn renderer_log(severity: u8, message: &str) {
     if let Some(forward) = RENDERER_LINES.get() {
-        if matches!(severity, b'W' | b'E' | b'F') {
+        if matches!(severity, b'W' | b'E' | b'F' | b'N') {
             forward(severity, message);
         }
         return;
@@ -761,6 +764,25 @@ mod tests {
         );
         assert_eq!(renderer_line(b'I', "Destroyed VkDevice"), None);
         assert_eq!(renderer_line(b'V', "verbose"), None);
+    }
+
+    #[test]
+    fn nfr1_the_backends_own_notes_reach_the_log_and_gfxstreams_info_does_not() {
+        assert_eq!(
+            renderer_line(
+                b'N',
+                "1 guest Vulkan device(s) went away: the renderer trimmed its command pool and \
+                 compacted its heaps in 3.2 ms; private memory 307.0 -> 290.0 MiB (17.0 MiB \
+                 given back)\n"
+            )
+            .as_deref(),
+            Some(
+                "graphics renderer: 1 guest Vulkan device(s) went away: the renderer trimmed \
+                 its command pool and compacted its heaps in 3.2 ms; private memory 307.0 -> \
+                 290.0 MiB (17.0 MiB given back)"
+            )
+        );
+        assert_eq!(renderer_line(b'I', "Destroyed VkDevice"), None);
     }
 
     #[test]

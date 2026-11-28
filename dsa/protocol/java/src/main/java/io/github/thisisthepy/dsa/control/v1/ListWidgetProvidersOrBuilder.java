@@ -12,4 +12,18 @@ public interface ListWidgetProvidersOrBuilder extends
    * @return The requestId.
    */
   int getRequestId();
+
+  /**
+   * <pre>
+   * Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+   * icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+   * apps the user opens asks so, and asks for those widgets' previews with
+   * GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+   * front would take seconds and hold hundreds of images.
+   * </pre>
+   *
+   * <code>bool lazy_previews = 2;</code>
+   * @return The lazyPreviews.
+   */
+  boolean getLazyPreviews();
 }

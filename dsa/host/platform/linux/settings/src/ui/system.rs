@@ -1196,7 +1196,7 @@ fn google_play(ctx: &Shared, page: &Rc<Page>) {
 fn alt_stores(ctx: &Shared, page: &Rc<Page>) {
     let stores_group = group(
         &tr("Alternative stores"),
-        Some(&tr("DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps.")),
+        Some(&tr("DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there.")),
     );
     page.add(&stores_group);
     type Row = (adw::ActionRow, gtk::Button, gtk::Button);

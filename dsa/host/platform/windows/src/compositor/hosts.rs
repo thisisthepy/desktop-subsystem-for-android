@@ -34,6 +34,7 @@ use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::idle_device::IdleDevice;
 use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
 use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::shown_windows::{CoverWatch, ShownWindows};
@@ -41,6 +42,9 @@ use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, to_wire, FromHost, HostAction, HostId,
     MediaButtons, MenuWork, ToHost, WindowHosts,
+};
+use dsa_host_core::compositor::window_monitor::{
+    opening_monitor, remember_closed_size, remembered_closed_size, remembered_monitor,
 };
 use dsa_host_core::memory::IdleTrim;
 use dsa_host_core::tasks::{AppInfo, TaskEvent, TaskRequest};
@@ -642,7 +646,10 @@ impl FrameTarget for RemoteWindow {
                 return;
             }
             if !state.early.frame((width, height)) {
-                // No window host yet: the frame stays in the texture until one connects.
+                // No window host yet: the frame stays in the texture until one connects, and
+                // is shown then, so the window need not ask the guest for one.
+                self.drawn
+                    .frame_arrived(self.drawing.load(Ordering::Relaxed));
                 return;
             }
             let Some(link) = state.link.clone() else {
@@ -905,6 +912,10 @@ pub struct ManagerSetup {
     pub stop: Arc<AtomicBool>,
     /// Told whether any window is shown, for the trim of idle memory.
     pub idle: Arc<Mutex<IdleTrim>>,
+    /// Told how many task windows and window programs exist, which says when the task
+    /// windows' Direct3D device goes and when it is made ahead of a window. None when there is
+    /// no device.
+    pub device: Option<Arc<Mutex<IdleDevice>>>,
     /// Told, on each change, whether a task window is the active window, for Windows' touch
     /// gestures. None when nothing follows that.
     pub fronts: Option<Sender<bool>>,
@@ -978,6 +989,8 @@ pub fn manage(setup: ManagerSetup) {
         front: false,
         setup,
     };
+    // A window that opens with no frame asks the guest for its task's frame until one arrives.
+    manager.windows.watch_frames(manager.setup.drawn.clone());
     let mut last_tick = Instant::now();
     while !manager.setup.stop.load(Ordering::Relaxed) {
         match manager.setup.events.recv_timeout(TICK) {
@@ -990,6 +1003,7 @@ pub fn manage(setup: ManagerSetup) {
             manager.tick();
         }
         manager.publish();
+        manager.note_windows();
     }
     let actions = manager.hosts.reset();
     manager.carry_out(actions);
@@ -1005,6 +1019,96 @@ impl Manager {
         note(self.setup.logger.as_deref(), message);
     }
 
+    /// Tells the device's idle rule how many windows exist (the tasks with a window and the
+    /// window programs connected, which may show a splash before their task has one), and has
+    /// the device made ahead of the first frame of a window that appears while it is gone: on
+    /// a thread of its own, so the manager goes on meanwhile, while the window program makes
+    /// its window. Its first call for a surface, or the renderer's first frame, waits for that
+    /// device rather than making another.
+    fn note_windows(&self) {
+        let Some(device) = &self.setup.device else {
+            return;
+        };
+        let windows = self.remotes.len() + self.links.len();
+        let appeared = device
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .windows_open(windows, Instant::now());
+        if !appeared {
+            return;
+        }
+        let Some(gpu) = self.setup.gpu.clone() else {
+            return;
+        };
+        if gpu.is_made() {
+            return;
+        }
+        let logger = self.setup.logger.clone();
+        let spawned = thread::Builder::new()
+            .name("dsa-wm-device".into())
+            .spawn(move || {
+                if let Err(why) = gpu.prepare() {
+                    note(
+                        logger.as_deref(),
+                        &format!(
+                            "could not make the task windows' Direct3D device ahead of a \
+                             window: {why}; the window's first frame tries again"
+                        ),
+                    );
+                }
+            });
+        if let Err(why) = spawned {
+            self.log(&format!(
+                "could not start making the task windows' Direct3D device ahead of a window: \
+                 {why}; the window's first frame makes it"
+            ));
+        }
+    }
+
+    /// Tells the task rules the DPI of the monitor each new task's window opens on, before
+    /// they decide its window: the same monitor its window host puts it on.
+    fn note_opening_monitors(&mut self, events: &[TaskEvent]) {
+        let mut monitors = None;
+        let apps = crate::paths::UserRoot::current().map(|root| root.apps());
+        for event in events {
+            let TaskEvent::Updated(task) = event else {
+                continue;
+            };
+            if task.is_overlay() || self.windows.package_of(task.task_id).is_some() {
+                continue;
+            }
+            let monitors = monitors.get_or_insert_with(crate::window_monitors::desktop_monitors);
+            // The monitor the app's last window closed on, while it is connected.
+            let last = apps
+                .as_deref()
+                .and_then(|dir| remembered_monitor(dir, &task.package_name));
+            let dpi = opening_monitor(last.as_deref(), monitors).map(|monitor| monitor.dpi);
+            self.windows.set_opening_dpi(&task.package_name, dpi);
+            // And the size it closed at there, which it opens at again.
+            let closed = apps
+                .as_deref()
+                .and_then(|dir| remembered_closed_size(dir, &task.package_name));
+            self.windows.set_closed_size(&task.package_name, closed);
+        }
+    }
+
+    /// Remembers the size each window that closed closed at, beside the monitor its window
+    /// host remembers, so that its app's next window opens at it.
+    fn remember_closed_sizes(&mut self) {
+        let closed = self.windows.take_closed_sizes();
+        if closed.is_empty() {
+            return;
+        }
+        let Some(apps) = crate::paths::UserRoot::current().map(|root| root.apps()) else {
+            return;
+        };
+        for (package, size) in closed {
+            if let Err(why) = remember_closed_size(&apps, &package, size) {
+                self.log(&format!("the size {package}'s window closed at: {why}"));
+            }
+        }
+    }
+
     fn handle(&mut self, event: ManagerEvent) {
         let now = Instant::now();
         match event {
@@ -1018,6 +1122,7 @@ impl Manager {
                         self.carry_out(actions);
                     }
                 }
+                self.note_opening_monitors(&current);
                 let changes = self.windows.sync(&current);
                 self.guest_change(changes, now);
             }
@@ -1026,6 +1131,7 @@ impl Manager {
                     let actions = self.hosts.app(app, now);
                     self.carry_out(actions);
                 }
+                self.note_opening_monitors(std::slice::from_ref(&*event));
                 let changes = self.windows.apply(&event);
                 for note in self.windows.take_notes() {
                     self.log(&note);
@@ -1323,6 +1429,7 @@ impl Manager {
 
     /// A window that closes is no longer the active window, though it may never say so.
     fn closing(&mut self, changes: &[WindowChange]) {
+        self.remember_closed_sizes();
         let mut changed = false;
         for change in changes {
             if let WindowChange::Close { task_id } = change {

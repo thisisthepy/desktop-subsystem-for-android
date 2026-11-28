@@ -38,7 +38,11 @@ release fence signals (up to 1 s), so a picture never lands in a buffer the scre
 A picture goes out only in a buffer that holds all of it: a buffer that is too small, cannot
 be locked or unlocked, or a picture shorter than its size, ends the work with no output and
 gives the buffer back to the surface (`src/picture_copy.h`), rather than showing zeros (green)
-or an older picture. A failure that repeats is logged once in a hundred.
+or an older picture. A picture with a part its decoder never wrote (a luma row of zeros over a
+chroma row of zeros, which no encoder makes and which shows as solid green) is not written
+either, and the surface keeps showing the last good picture; the host drops such a picture
+first and ends its packet's work with no picture, so this catches what reaches the guest
+anyway. A failure that repeats is logged once in a hundred.
 
 Packets go to the host through a queue that a thread of the link's own writes
 (`src/send_queue.h`), so the framework's `queue()` call never waits on the host. The host

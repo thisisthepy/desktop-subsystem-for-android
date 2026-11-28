@@ -183,18 +183,37 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
 // that one; a first frame has nothing better to show.
 bool leavesLastFrame(bool layerMissing, bool hasFrame);
 
-// When the frames of a task reported again with the bounds it already had are sent again, as
-// milliseconds from the report; empty when they are not. The agent reports every task again
-// when it restarts, and the host then reopens the task's window, which has no frame of its own
-// yet. SurfaceFlinger presents only when something changes, so a still app (a dialog, a
-// settings page) would leave that window showing the host's splash until it drew again. So a
-// task whose frame was sent before gets its frame again at once, and once more a while later,
-// as the host may not have reopened the window by the time the first one arrives. A report
-// with new bounds asks for a frame anyway, and a task never sent has nothing to repeat.
-std::vector<int64_t> resendAfterReport(bool boundsChanged, bool posted);
+// Whether a task's report has the hwcomposer ask SurfaceFlinger for a frame: only when its
+// bounds changed, since the window's frame must follow the task's new place at once. A report
+// with the bounds it had (a new title, the focus) asks for nothing, which would cost a frame of
+// the whole display each time. A window that needs the task's frame, as one the host reopened
+// after the agent restarted, asks for it itself (RequestTaskFrame).
+bool reportAsksForFrame(bool boundsChanged);
 
-// How long after a repeated report the second frame is asked for.
-constexpr int64_t kResendLateMs = 1500;
+// The ColorBuffer holding the last frame composed and posted for a task, which the host is sent
+// again when it asks for the task's frame (RequestTaskFrame), so a still app's window shows it
+// without waiting for SurfaceFlinger. 0 when there is none to send: nothing was posted on this
+// connection, or the last post was the app's own buffer (an overlay shown uncomposed), which the
+// app may have drawn into since. `lastPosted` is the target the last frame was composed into
+// (-1 for none).
+uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int lastPosted);
+
+// How long a task keeps its second ColorBuffer after the host was last found still copying a
+// frame out of the first. A ColorBuffer is as large as the task can be (24 MiB for a task of
+// 3072x2048), so a task whose window keeps up holds one.
+constexpr int64_t kSecondTargetKeepMs = 2000;
+
+// Which of a task's two ColorBuffers its next frame is composed into, when its last frame was
+// composed into `lastPosted` (-1 for none). A host whose compositions wait until the target's
+// last frame has been copied into its window (`hostGuards`) takes every frame in the one the last
+// frame is in, and the two in turn only until `secondUntilMs` (steady clock), set when it was
+// found still copying one. Any other host gets the two in turn, so it can copy one while the
+// next is composed.
+int composeTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs);
+
+// The ColorBuffer a task lets go of at `nowMs`, or -1 for none: the one its last frame is not
+// in, once a host that waits for its window's copies has kept up since `secondUntilMs`.
+int idleTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs);
 
 // Whether a frame goes unsent because nothing in it shows what the app drew: no layer of the
 // task shows a buffer, or every one that does is fully transparent. That is the task as it
@@ -336,6 +355,16 @@ struct BufferSize {
 // forth. A task larger than the display gets buffers of its own size in that direction.
 BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
                           int64_t taskHeight);
+
+// The longest side the display takes, at boot (ro.boot.dsa.display_width and _height) and
+// when it grows.
+constexpr int64_t kMaxDisplaySide = 16384;
+
+// The display's size once the host asks for `width` by `height` while it is `current`: each
+// side the larger of the two, and at most kMaxDisplaySide. It never shrinks, since a smaller
+// display would take size from task windows that are open; a request of 0 or less on a side
+// leaves that side as it is.
+BufferSize grownDisplaySize(BufferSize current, int64_t width, int64_t height);
 
 // Which host display carries each task's frames. A task keeps its display from its first
 // frame until it ends, so the host sees one stable pairing per window.

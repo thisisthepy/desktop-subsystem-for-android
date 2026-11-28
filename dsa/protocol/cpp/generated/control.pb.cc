@@ -129,6 +129,7 @@ PROTOBUF_CONSTEXPR TaskUpdated::TaskUpdated(
   , /*decltype(_impl_.fullscreen_request_)*/0
   , /*decltype(_impl_.can_go_back_)*/false
   , /*decltype(_impl_.handles_density_change_)*/false
+  , /*decltype(_impl_.forced_density_available_)*/false
   , /*decltype(_impl_.below_title_bar_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct TaskUpdatedDefaultTypeInternal {
@@ -145,6 +146,7 @@ PROTOBUF_CONSTEXPR OverlayWindow::OverlayWindow(
     /*decltype(_impl_.window_type_)*/0
   , /*decltype(_impl_.focusable_)*/false
   , /*decltype(_impl_.touchable_)*/false
+  , /*decltype(_impl_.density_dpi_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct OverlayWindowDefaultTypeInternal {
   PROTOBUF_CONSTEXPR OverlayWindowDefaultTypeInternal()
@@ -158,6 +160,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 PROTOBUF_CONSTEXPR CaptionCompat::CaptionCompat(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.below_title_bar_)*/{}
+  , /*decltype(_impl_.keep_focus_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct CaptionCompatDefaultTypeInternal {
   PROTOBUF_CONSTEXPR CaptionCompatDefaultTypeInternal()
@@ -195,6 +198,19 @@ struct TaskFramesDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 TaskFramesDefaultTypeInternal _TaskFrames_default_instance_;
+PROTOBUF_CONSTEXPR RequestTaskFrame::RequestTaskFrame(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct RequestTaskFrameDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR RequestTaskFrameDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~RequestTaskFrameDefaultTypeInternal() {}
+  union {
+    RequestTaskFrame _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RequestTaskFrameDefaultTypeInternal _RequestTaskFrame_default_instance_;
 PROTOBUF_CONSTEXPR CloseTask::CloseTask(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.task_id_)*/0
@@ -256,6 +272,7 @@ PROTOBUF_CONSTEXPR SetTaskDensity::SetTaskDensity(
     /*decltype(_impl_.task_id_)*/0
   , /*decltype(_impl_.density_dpi_)*/0u
   , /*decltype(_impl_.recreate_)*/false
+  , /*decltype(_impl_.forced_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct SetTaskDensityDefaultTypeInternal {
   PROTOBUF_CONSTEXPR SetTaskDensityDefaultTypeInternal()
@@ -266,6 +283,20 @@ struct SetTaskDensityDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SetTaskDensityDefaultTypeInternal _SetTaskDensity_default_instance_;
+PROTOBUF_CONSTEXPR SetOverlayDensity::SetOverlayDensity(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.overlay_id_)*/0
+  , /*decltype(_impl_.density_dpi_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct SetOverlayDensityDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR SetOverlayDensityDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~SetOverlayDensityDefaultTypeInternal() {}
+  union {
+    SetOverlayDensity _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SetOverlayDensityDefaultTypeInternal _SetOverlayDensity_default_instance_;
 PROTOBUF_CONSTEXPR LaunchPlacement::LaunchPlacement(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.density_dpi_)*/0u
@@ -346,6 +377,7 @@ PROTOBUF_CONSTEXPR InstalledApp::InstalledApp(
   , /*decltype(_impl_.data_bytes_)*/uint64_t{0u}
   , /*decltype(_impl_.cache_bytes_)*/uint64_t{0u}
   , /*decltype(_impl_.system_app_)*/false
+  , /*decltype(_impl_.game_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct InstalledAppDefaultTypeInternal {
   PROTOBUF_CONSTEXPR InstalledAppDefaultTypeInternal()
@@ -773,6 +805,20 @@ struct DisplayRefreshDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DisplayRefreshDefaultTypeInternal _DisplayRefresh_default_instance_;
+PROTOBUF_CONSTEXPR DisplaySize::DisplaySize(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.width_)*/0u
+  , /*decltype(_impl_.height_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DisplaySizeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DisplaySizeDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DisplaySizeDefaultTypeInternal() {}
+  union {
+    DisplaySize _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DisplaySizeDefaultTypeInternal _DisplaySize_default_instance_;
 PROTOBUF_CONSTEXPR GuestMemoryPressure::GuestMemoryPressure(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.mem_total_kb_)*/uint64_t{0u}
@@ -1514,6 +1560,9 @@ PROTOBUF_CONSTEXPR GuestMemory::GuestMemory(
   , /*decltype(_impl_.free_reported_kb_)*/uint64_t{0u}
   , /*decltype(_impl_.reported_total_kb_)*/uint64_t{0u}
   , /*decltype(_impl_.refaulted_total_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.swap_cached_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.memmap_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.memmap_boot_kb_)*/uint64_t{0u}
   , /*decltype(_impl_.google_play_processes_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct GuestMemoryDefaultTypeInternal {
@@ -2140,6 +2189,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 PROTOBUF_CONSTEXPR ListWidgetProviders::ListWidgetProviders(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.request_id_)*/0u
+  , /*decltype(_impl_.lazy_previews_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct ListWidgetProvidersDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ListWidgetProvidersDefaultTypeInternal()
@@ -2150,6 +2200,64 @@ struct ListWidgetProvidersDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ListWidgetProvidersDefaultTypeInternal _ListWidgetProviders_default_instance_;
+PROTOBUF_CONSTEXPR WidgetAppIcon::WidgetAppIcon(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.icon_png_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct WidgetAppIconDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR WidgetAppIconDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~WidgetAppIconDefaultTypeInternal() {}
+  union {
+    WidgetAppIcon _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 WidgetAppIconDefaultTypeInternal _WidgetAppIcon_default_instance_;
+PROTOBUF_CONSTEXPR GetWidgetPreviews::GetWidgetPreviews(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.providers_)*/{}
+  , /*decltype(_impl_.request_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct GetWidgetPreviewsDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GetWidgetPreviewsDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GetWidgetPreviewsDefaultTypeInternal() {}
+  union {
+    GetWidgetPreviews _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GetWidgetPreviewsDefaultTypeInternal _GetWidgetPreviews_default_instance_;
+PROTOBUF_CONSTEXPR WidgetPreview::WidgetPreview(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.provider_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.preview_png_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.source_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct WidgetPreviewDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR WidgetPreviewDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~WidgetPreviewDefaultTypeInternal() {}
+  union {
+    WidgetPreview _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 WidgetPreviewDefaultTypeInternal _WidgetPreview_default_instance_;
+PROTOBUF_CONSTEXPR WidgetPreviews::WidgetPreviews(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.previews_)*/{}
+  , /*decltype(_impl_.request_id_)*/0u
+  , /*decltype(_impl_.complete_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct WidgetPreviewsDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR WidgetPreviewsDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~WidgetPreviewsDefaultTypeInternal() {}
+  union {
+    WidgetPreviews _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 WidgetPreviewsDefaultTypeInternal _WidgetPreviews_default_instance_;
 PROTOBUF_CONSTEXPR WidgetProvider::WidgetProvider(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.provider_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
@@ -2179,6 +2287,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 PROTOBUF_CONSTEXPR WidgetProviders::WidgetProviders(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.providers_)*/{}
+  , /*decltype(_impl_.app_icons_)*/{}
   , /*decltype(_impl_.request_id_)*/0u
   , /*decltype(_impl_.complete_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
@@ -5331,6 +5440,65 @@ bool SensorKind_Parse(
   }
   return success;
 }
+bool WidgetPreviewSource_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> WidgetPreviewSource_strings[4] = {};
+
+static const char WidgetPreviewSource_names[] =
+  "WIDGET_PREVIEW_SOURCE_ICON"
+  "WIDGET_PREVIEW_SOURCE_IMAGE"
+  "WIDGET_PREVIEW_SOURCE_LAYOUT"
+  "WIDGET_PREVIEW_SOURCE_UNSPECIFIED";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry WidgetPreviewSource_entries[] = {
+  { {WidgetPreviewSource_names + 0, 26}, 3 },
+  { {WidgetPreviewSource_names + 26, 27}, 2 },
+  { {WidgetPreviewSource_names + 53, 28}, 1 },
+  { {WidgetPreviewSource_names + 81, 33}, 0 },
+};
+
+static const int WidgetPreviewSource_entries_by_number[] = {
+  3, // 0 -> WIDGET_PREVIEW_SOURCE_UNSPECIFIED
+  2, // 1 -> WIDGET_PREVIEW_SOURCE_LAYOUT
+  1, // 2 -> WIDGET_PREVIEW_SOURCE_IMAGE
+  0, // 3 -> WIDGET_PREVIEW_SOURCE_ICON
+};
+
+const std::string& WidgetPreviewSource_Name(
+    WidgetPreviewSource value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          WidgetPreviewSource_entries,
+          WidgetPreviewSource_entries_by_number,
+          4, WidgetPreviewSource_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      WidgetPreviewSource_entries,
+      WidgetPreviewSource_entries_by_number,
+      4, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     WidgetPreviewSource_strings[idx].get();
+}
+bool WidgetPreviewSource_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, WidgetPreviewSource* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      WidgetPreviewSource_entries, 4, name, &int_value);
+  if (success) {
+    *value = static_cast<WidgetPreviewSource>(int_value);
+  }
+  return success;
+}
 bool NodeAction_IsValid(int value) {
   switch (value) {
     case 0:
@@ -7819,6 +7987,7 @@ TaskUpdated::TaskUpdated(const TaskUpdated& from)
     , decltype(_impl_.fullscreen_request_){}
     , decltype(_impl_.can_go_back_){}
     , decltype(_impl_.handles_density_change_){}
+    , decltype(_impl_.forced_density_available_){}
     , decltype(_impl_.below_title_bar_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
@@ -7877,6 +8046,7 @@ inline void TaskUpdated::SharedCtor(
     , decltype(_impl_.fullscreen_request_){0}
     , decltype(_impl_.can_go_back_){false}
     , decltype(_impl_.handles_density_change_){false}
+    , decltype(_impl_.forced_density_available_){false}
     , decltype(_impl_.below_title_bar_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
@@ -8121,6 +8291,14 @@ const char* TaskUpdated::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         } else
           goto handle_unusual;
         continue;
+      // bool forced_density_available = 29;
+      case 29:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 232)) {
+          _impl_.forced_density_available_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // bool below_title_bar = 40;
       case 40:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
@@ -8299,6 +8477,12 @@ uint8_t* TaskUpdated::_InternalSerialize(
         _Internal::overlay(this).GetCachedSize(), target, stream);
   }
 
+  // bool forced_density_available = 29;
+  if (this->_internal_forced_density_available() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(29, this->_internal_forced_density_available(), target);
+  }
+
   // bool below_title_bar = 40;
   if (this->_internal_below_title_bar() != 0) {
     target = stream->EnsureSpace(target);
@@ -8439,6 +8623,11 @@ size_t TaskUpdated::ByteSizeLong() const {
     total_size += 2 + 1;
   }
 
+  // bool forced_density_available = 29;
+  if (this->_internal_forced_density_available() != 0) {
+    total_size += 2 + 1;
+  }
+
   // bool below_title_bar = 40;
   if (this->_internal_below_title_bar() != 0) {
     total_size += 2 + 1;
@@ -8528,6 +8717,9 @@ void TaskUpdated::MergeFrom(const TaskUpdated& from) {
   if (from._internal_handles_density_change() != 0) {
     _this->_internal_set_handles_density_change(from._internal_handles_density_change());
   }
+  if (from._internal_forced_density_available() != 0) {
+    _this->_internal_set_forced_density_available(from._internal_forced_density_available());
+  }
   if (from._internal_below_title_bar() != 0) {
     _this->_internal_set_below_title_bar(from._internal_below_title_bar());
   }
@@ -8591,12 +8783,13 @@ OverlayWindow::OverlayWindow(const OverlayWindow& from)
       decltype(_impl_.window_type_){}
     , decltype(_impl_.focusable_){}
     , decltype(_impl_.touchable_){}
+    , decltype(_impl_.density_dpi_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&_impl_.window_type_, &from._impl_.window_type_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.touchable_) -
-    reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.touchable_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.density_dpi_) -
+    reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.density_dpi_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.OverlayWindow)
 }
 
@@ -8608,6 +8801,7 @@ inline void OverlayWindow::SharedCtor(
       decltype(_impl_.window_type_){0}
     , decltype(_impl_.focusable_){false}
     , decltype(_impl_.touchable_){false}
+    , decltype(_impl_.density_dpi_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -8636,8 +8830,8 @@ void OverlayWindow::Clear() {
   (void) cached_has_bits;
 
   ::memset(&_impl_.window_type_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.touchable_) -
-      reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.touchable_));
+      reinterpret_cast<char*>(&_impl_.density_dpi_) -
+      reinterpret_cast<char*>(&_impl_.window_type_)) + sizeof(_impl_.density_dpi_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -8667,6 +8861,14 @@ const char* OverlayWindow::_InternalParse(const char* ptr, ::_pbi::ParseContext*
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.touchable_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 density_dpi = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.density_dpi_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -8718,6 +8920,12 @@ uint8_t* OverlayWindow::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_touchable(), target);
   }
 
+  // uint32 density_dpi = 4;
+  if (this->_internal_density_dpi() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_density_dpi(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -8747,6 +8955,11 @@ size_t OverlayWindow::ByteSizeLong() const {
   // bool touchable = 3;
   if (this->_internal_touchable() != 0) {
     total_size += 1 + 1;
+  }
+
+  // uint32 density_dpi = 4;
+  if (this->_internal_density_dpi() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_density_dpi());
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -8779,6 +8992,9 @@ void OverlayWindow::MergeFrom(const OverlayWindow& from) {
   if (from._internal_touchable() != 0) {
     _this->_internal_set_touchable(from._internal_touchable());
   }
+  if (from._internal_density_dpi() != 0) {
+    _this->_internal_set_density_dpi(from._internal_density_dpi());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -8797,8 +9013,8 @@ void OverlayWindow::InternalSwap(OverlayWindow* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(OverlayWindow, _impl_.touchable_)
-      + sizeof(OverlayWindow::_impl_.touchable_)
+      PROTOBUF_FIELD_OFFSET(OverlayWindow, _impl_.density_dpi_)
+      + sizeof(OverlayWindow::_impl_.density_dpi_)
       - PROTOBUF_FIELD_OFFSET(OverlayWindow, _impl_.window_type_)>(
           reinterpret_cast<char*>(&_impl_.window_type_),
           reinterpret_cast<char*>(&other->_impl_.window_type_));
@@ -8826,6 +9042,7 @@ CaptionCompat::CaptionCompat(const CaptionCompat& from)
   CaptionCompat* const _this = this; (void)_this;
   new (&_impl_) Impl_{
       decltype(_impl_.below_title_bar_){from._impl_.below_title_bar_}
+    , decltype(_impl_.keep_focus_){from._impl_.keep_focus_}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -8838,6 +9055,7 @@ inline void CaptionCompat::SharedCtor(
   (void)is_message_owned;
   new (&_impl_) Impl_{
       decltype(_impl_.below_title_bar_){arena}
+    , decltype(_impl_.keep_focus_){arena}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -8854,6 +9072,7 @@ CaptionCompat::~CaptionCompat() {
 inline void CaptionCompat::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
   _impl_.below_title_bar_.~RepeatedPtrField();
+  _impl_.keep_focus_.~RepeatedPtrField();
 }
 
 void CaptionCompat::SetCachedSize(int size) const {
@@ -8867,6 +9086,7 @@ void CaptionCompat::Clear() {
   (void) cached_has_bits;
 
   _impl_.below_title_bar_.Clear();
+  _impl_.keep_focus_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -8888,6 +9108,21 @@ const char* CaptionCompat::_InternalParse(const char* ptr, ::_pbi::ParseContext*
             CHK_(::_pbi::VerifyUTF8(str, nullptr));
             if (!ctx->DataAvailable(ptr)) break;
           } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<10>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated string keep_focus = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_keep_focus();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            CHK_(::_pbi::VerifyUTF8(str, nullptr));
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
         } else
           goto handle_unusual;
         continue;
@@ -8930,6 +9165,16 @@ uint8_t* CaptionCompat::_InternalSerialize(
     target = stream->WriteString(1, s, target);
   }
 
+  // repeated string keep_focus = 2;
+  for (int i = 0, n = this->_internal_keep_focus_size(); i < n; i++) {
+    const auto& s = this->_internal_keep_focus(i);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      s.data(), static_cast<int>(s.length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.CaptionCompat.keep_focus");
+    target = stream->WriteString(2, s, target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -8954,6 +9199,14 @@ size_t CaptionCompat::ByteSizeLong() const {
       _impl_.below_title_bar_.Get(i));
   }
 
+  // repeated string keep_focus = 2;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.keep_focus_.size());
+  for (int i = 0, n = _impl_.keep_focus_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.keep_focus_.Get(i));
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -8976,6 +9229,7 @@ void CaptionCompat::MergeFrom(const CaptionCompat& from) {
   (void) cached_has_bits;
 
   _this->_impl_.below_title_bar_.MergeFrom(from._impl_.below_title_bar_);
+  _this->_impl_.keep_focus_.MergeFrom(from._impl_.keep_focus_);
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -8994,6 +9248,7 @@ void CaptionCompat::InternalSwap(CaptionCompat* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   _impl_.below_title_bar_.InternalSwap(&other->_impl_.below_title_bar_);
+  _impl_.keep_focus_.InternalSwap(&other->_impl_.keep_focus_);
 }
 
 std::string CaptionCompat::GetTypeName() const {
@@ -9391,6 +9646,186 @@ void TaskFrames::InternalSwap(TaskFrames* other) {
 
 std::string TaskFrames::GetTypeName() const {
   return "dsa.control.v1.TaskFrames";
+}
+
+
+// ===================================================================
+
+class RequestTaskFrame::_Internal {
+ public:
+};
+
+RequestTaskFrame::RequestTaskFrame(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.RequestTaskFrame)
+}
+RequestTaskFrame::RequestTaskFrame(const RequestTaskFrame& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  RequestTaskFrame* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.task_id_ = from._impl_.task_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.RequestTaskFrame)
+}
+
+inline void RequestTaskFrame::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+RequestTaskFrame::~RequestTaskFrame() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.RequestTaskFrame)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void RequestTaskFrame::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void RequestTaskFrame::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void RequestTaskFrame::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.RequestTaskFrame)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.task_id_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* RequestTaskFrame::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* RequestTaskFrame::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.RequestTaskFrame)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.RequestTaskFrame)
+  return target;
+}
+
+size_t RequestTaskFrame::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.RequestTaskFrame)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void RequestTaskFrame::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const RequestTaskFrame*>(
+      &from));
+}
+
+void RequestTaskFrame::MergeFrom(const RequestTaskFrame& from) {
+  RequestTaskFrame* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.RequestTaskFrame)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void RequestTaskFrame::CopyFrom(const RequestTaskFrame& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.RequestTaskFrame)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool RequestTaskFrame::IsInitialized() const {
+  return true;
+}
+
+void RequestTaskFrame::InternalSwap(RequestTaskFrame* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.task_id_, other->_impl_.task_id_);
+}
+
+std::string RequestTaskFrame::GetTypeName() const {
+  return "dsa.control.v1.RequestTaskFrame";
 }
 
 
@@ -10291,12 +10726,13 @@ SetTaskDensity::SetTaskDensity(const SetTaskDensity& from)
       decltype(_impl_.task_id_){}
     , decltype(_impl_.density_dpi_){}
     , decltype(_impl_.recreate_){}
+    , decltype(_impl_.forced_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.recreate_) -
-    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.recreate_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.forced_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.forced_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.SetTaskDensity)
 }
 
@@ -10308,6 +10744,7 @@ inline void SetTaskDensity::SharedCtor(
       decltype(_impl_.task_id_){0}
     , decltype(_impl_.density_dpi_){0u}
     , decltype(_impl_.recreate_){false}
+    , decltype(_impl_.forced_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -10336,8 +10773,8 @@ void SetTaskDensity::Clear() {
   (void) cached_has_bits;
 
   ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.recreate_) -
-      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.recreate_));
+      reinterpret_cast<char*>(&_impl_.forced_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.forced_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -10367,6 +10804,14 @@ const char* SetTaskDensity::_InternalParse(const char* ptr, ::_pbi::ParseContext
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.recreate_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool forced = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.forced_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -10418,6 +10863,12 @@ uint8_t* SetTaskDensity::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_recreate(), target);
   }
 
+  // bool forced = 4;
+  if (this->_internal_forced() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_forced(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -10446,6 +10897,11 @@ size_t SetTaskDensity::ByteSizeLong() const {
 
   // bool recreate = 3;
   if (this->_internal_recreate() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool forced = 4;
+  if (this->_internal_forced() != 0) {
     total_size += 1 + 1;
   }
 
@@ -10479,6 +10935,9 @@ void SetTaskDensity::MergeFrom(const SetTaskDensity& from) {
   if (from._internal_recreate() != 0) {
     _this->_internal_set_recreate(from._internal_recreate());
   }
+  if (from._internal_forced() != 0) {
+    _this->_internal_set_forced(from._internal_forced());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -10497,8 +10956,8 @@ void SetTaskDensity::InternalSwap(SetTaskDensity* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.recreate_)
-      + sizeof(SetTaskDensity::_impl_.recreate_)
+      PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.forced_)
+      + sizeof(SetTaskDensity::_impl_.forced_)
       - PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.task_id_)>(
           reinterpret_cast<char*>(&_impl_.task_id_),
           reinterpret_cast<char*>(&other->_impl_.task_id_));
@@ -10506,6 +10965,219 @@ void SetTaskDensity::InternalSwap(SetTaskDensity* other) {
 
 std::string SetTaskDensity::GetTypeName() const {
   return "dsa.control.v1.SetTaskDensity";
+}
+
+
+// ===================================================================
+
+class SetOverlayDensity::_Internal {
+ public:
+};
+
+SetOverlayDensity::SetOverlayDensity(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.SetOverlayDensity)
+}
+SetOverlayDensity::SetOverlayDensity(const SetOverlayDensity& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  SetOverlayDensity* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.overlay_id_){}
+    , decltype(_impl_.density_dpi_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.overlay_id_, &from._impl_.overlay_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.density_dpi_) -
+    reinterpret_cast<char*>(&_impl_.overlay_id_)) + sizeof(_impl_.density_dpi_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.SetOverlayDensity)
+}
+
+inline void SetOverlayDensity::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.overlay_id_){0}
+    , decltype(_impl_.density_dpi_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+SetOverlayDensity::~SetOverlayDensity() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.SetOverlayDensity)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void SetOverlayDensity::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void SetOverlayDensity::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void SetOverlayDensity::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.SetOverlayDensity)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.overlay_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.density_dpi_) -
+      reinterpret_cast<char*>(&_impl_.overlay_id_)) + sizeof(_impl_.density_dpi_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* SetOverlayDensity::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 overlay_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.overlay_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 density_dpi = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.density_dpi_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* SetOverlayDensity::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.SetOverlayDensity)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 overlay_id = 1;
+  if (this->_internal_overlay_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_overlay_id(), target);
+  }
+
+  // uint32 density_dpi = 2;
+  if (this->_internal_density_dpi() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_density_dpi(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.SetOverlayDensity)
+  return target;
+}
+
+size_t SetOverlayDensity::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.SetOverlayDensity)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 overlay_id = 1;
+  if (this->_internal_overlay_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_overlay_id());
+  }
+
+  // uint32 density_dpi = 2;
+  if (this->_internal_density_dpi() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_density_dpi());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void SetOverlayDensity::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const SetOverlayDensity*>(
+      &from));
+}
+
+void SetOverlayDensity::MergeFrom(const SetOverlayDensity& from) {
+  SetOverlayDensity* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.SetOverlayDensity)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_overlay_id() != 0) {
+    _this->_internal_set_overlay_id(from._internal_overlay_id());
+  }
+  if (from._internal_density_dpi() != 0) {
+    _this->_internal_set_density_dpi(from._internal_density_dpi());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void SetOverlayDensity::CopyFrom(const SetOverlayDensity& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.SetOverlayDensity)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool SetOverlayDensity::IsInitialized() const {
+  return true;
+}
+
+void SetOverlayDensity::InternalSwap(SetOverlayDensity* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(SetOverlayDensity, _impl_.density_dpi_)
+      + sizeof(SetOverlayDensity::_impl_.density_dpi_)
+      - PROTOBUF_FIELD_OFFSET(SetOverlayDensity, _impl_.overlay_id_)>(
+          reinterpret_cast<char*>(&_impl_.overlay_id_),
+          reinterpret_cast<char*>(&other->_impl_.overlay_id_));
+}
+
+std::string SetOverlayDensity::GetTypeName() const {
+  return "dsa.control.v1.SetOverlayDensity";
 }
 
 
@@ -11670,6 +12342,7 @@ InstalledApp::InstalledApp(const InstalledApp& from)
     , decltype(_impl_.data_bytes_){}
     , decltype(_impl_.cache_bytes_){}
     , decltype(_impl_.system_app_){}
+    , decltype(_impl_.game_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -11722,8 +12395,8 @@ InstalledApp::InstalledApp(const InstalledApp& from)
       _this->GetArenaForAllocation());
   }
   ::memcpy(&_impl_.version_code_, &from._impl_.version_code_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.system_app_) -
-    reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.game_) -
+    reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.game_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstalledApp)
 }
 
@@ -11746,6 +12419,7 @@ inline void InstalledApp::SharedCtor(
     , decltype(_impl_.data_bytes_){uint64_t{0u}}
     , decltype(_impl_.cache_bytes_){uint64_t{0u}}
     , decltype(_impl_.system_app_){false}
+    , decltype(_impl_.game_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.package_name_.InitDefault();
@@ -11812,8 +12486,8 @@ void InstalledApp::Clear() {
   _impl_.primary_abi_.ClearToEmpty();
   _impl_.shared_user_id_.ClearToEmpty();
   ::memset(&_impl_.version_code_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.system_app_) -
-      reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
+      reinterpret_cast<char*>(&_impl_.game_) -
+      reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.game_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -11948,6 +12622,14 @@ const char* InstalledApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* 
           ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
           CHK_(ptr);
           CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool game = 15;
+      case 15:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 120)) {
+          _impl_.game_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
@@ -12086,6 +12768,12 @@ uint8_t* InstalledApp::_InternalSerialize(
         14, this->_internal_shared_user_id(), target);
   }
 
+  // bool game = 15;
+  if (this->_internal_game() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(15, this->_internal_game(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -12186,6 +12874,11 @@ size_t InstalledApp::ByteSizeLong() const {
     total_size += 1 + 1;
   }
 
+  // bool game = 15;
+  if (this->_internal_game() != 0) {
+    total_size += 1 + 1;
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -12247,6 +12940,9 @@ void InstalledApp::MergeFrom(const InstalledApp& from) {
   if (from._internal_system_app() != 0) {
     _this->_internal_set_system_app(from._internal_system_app());
   }
+  if (from._internal_game() != 0) {
+    _this->_internal_set_game(from._internal_game());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -12292,8 +12988,8 @@ void InstalledApp::InternalSwap(InstalledApp* other) {
       &other->_impl_.shared_user_id_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.system_app_)
-      + sizeof(InstalledApp::_impl_.system_app_)
+      PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.game_)
+      + sizeof(InstalledApp::_impl_.game_)
       - PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.version_code_)>(
           reinterpret_cast<char*>(&_impl_.version_code_),
           reinterpret_cast<char*>(&other->_impl_.version_code_));
@@ -19669,6 +20365,219 @@ void DisplayRefresh::InternalSwap(DisplayRefresh* other) {
 
 std::string DisplayRefresh::GetTypeName() const {
   return "dsa.control.v1.DisplayRefresh";
+}
+
+
+// ===================================================================
+
+class DisplaySize::_Internal {
+ public:
+};
+
+DisplaySize::DisplaySize(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DisplaySize)
+}
+DisplaySize::DisplaySize(const DisplaySize& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DisplaySize* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.width_){}
+    , decltype(_impl_.height_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.width_, &from._impl_.width_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.height_) -
+    reinterpret_cast<char*>(&_impl_.width_)) + sizeof(_impl_.height_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DisplaySize)
+}
+
+inline void DisplaySize::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.width_){0u}
+    , decltype(_impl_.height_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+DisplaySize::~DisplaySize() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DisplaySize)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DisplaySize::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void DisplaySize::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DisplaySize::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DisplaySize)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.width_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.height_) -
+      reinterpret_cast<char*>(&_impl_.width_)) + sizeof(_impl_.height_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DisplaySize::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 width = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.width_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 height = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DisplaySize::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DisplaySize)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 width = 1;
+  if (this->_internal_width() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_width(), target);
+  }
+
+  // uint32 height = 2;
+  if (this->_internal_height() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_height(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DisplaySize)
+  return target;
+}
+
+size_t DisplaySize::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DisplaySize)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint32 width = 1;
+  if (this->_internal_width() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_width());
+  }
+
+  // uint32 height = 2;
+  if (this->_internal_height() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_height());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DisplaySize::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DisplaySize*>(
+      &from));
+}
+
+void DisplaySize::MergeFrom(const DisplaySize& from) {
+  DisplaySize* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DisplaySize)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_width() != 0) {
+    _this->_internal_set_width(from._internal_width());
+  }
+  if (from._internal_height() != 0) {
+    _this->_internal_set_height(from._internal_height());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DisplaySize::CopyFrom(const DisplaySize& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DisplaySize)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DisplaySize::IsInitialized() const {
+  return true;
+}
+
+void DisplaySize::InternalSwap(DisplaySize* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(DisplaySize, _impl_.height_)
+      + sizeof(DisplaySize::_impl_.height_)
+      - PROTOBUF_FIELD_OFFSET(DisplaySize, _impl_.width_)>(
+          reinterpret_cast<char*>(&_impl_.width_),
+          reinterpret_cast<char*>(&other->_impl_.width_));
+}
+
+std::string DisplaySize::GetTypeName() const {
+  return "dsa.control.v1.DisplaySize";
 }
 
 
@@ -32779,6 +33688,9 @@ GuestMemory::GuestMemory(const GuestMemory& from)
     , decltype(_impl_.free_reported_kb_){}
     , decltype(_impl_.reported_total_kb_){}
     , decltype(_impl_.refaulted_total_kb_){}
+    , decltype(_impl_.swap_cached_kb_){}
+    , decltype(_impl_.memmap_kb_){}
+    , decltype(_impl_.memmap_boot_kb_){}
     , decltype(_impl_.google_play_processes_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
@@ -32822,6 +33734,9 @@ inline void GuestMemory::SharedCtor(
     , decltype(_impl_.free_reported_kb_){uint64_t{0u}}
     , decltype(_impl_.reported_total_kb_){uint64_t{0u}}
     , decltype(_impl_.refaulted_total_kb_){uint64_t{0u}}
+    , decltype(_impl_.swap_cached_kb_){uint64_t{0u}}
+    , decltype(_impl_.memmap_kb_){uint64_t{0u}}
+    , decltype(_impl_.memmap_boot_kb_){uint64_t{0u}}
     , decltype(_impl_.google_play_processes_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
   };
@@ -33101,6 +34016,30 @@ const char* GuestMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         } else
           goto handle_unusual;
         continue;
+      // uint64 swap_cached_kb = 30;
+      case 30:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 240)) {
+          _impl_.swap_cached_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 memmap_kb = 31;
+      case 31:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 248)) {
+          _impl_.memmap_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 memmap_boot_kb = 32;
+      case 32:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 0)) {
+          _impl_.memmap_boot_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -33306,6 +34245,24 @@ uint8_t* GuestMemory::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(29, this->_internal_refaulted_total_kb(), target);
   }
 
+  // uint64 swap_cached_kb = 30;
+  if (this->_internal_swap_cached_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(30, this->_internal_swap_cached_kb(), target);
+  }
+
+  // uint64 memmap_kb = 31;
+  if (this->_internal_memmap_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(31, this->_internal_memmap_kb(), target);
+  }
+
+  // uint64 memmap_boot_kb = 32;
+  if (this->_internal_memmap_boot_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(32, this->_internal_memmap_boot_kb(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -33490,6 +34447,27 @@ size_t GuestMemory::ByteSizeLong() const {
         this->_internal_refaulted_total_kb());
   }
 
+  // uint64 swap_cached_kb = 30;
+  if (this->_internal_swap_cached_kb() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::UInt64Size(
+        this->_internal_swap_cached_kb());
+  }
+
+  // uint64 memmap_kb = 31;
+  if (this->_internal_memmap_kb() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::UInt64Size(
+        this->_internal_memmap_kb());
+  }
+
+  // uint64 memmap_boot_kb = 32;
+  if (this->_internal_memmap_boot_kb() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::UInt64Size(
+        this->_internal_memmap_boot_kb());
+  }
+
   // uint32 google_play_processes = 24;
   if (this->_internal_google_play_processes() != 0) {
     total_size += 2 +
@@ -33599,6 +34577,15 @@ void GuestMemory::MergeFrom(const GuestMemory& from) {
   }
   if (from._internal_refaulted_total_kb() != 0) {
     _this->_internal_set_refaulted_total_kb(from._internal_refaulted_total_kb());
+  }
+  if (from._internal_swap_cached_kb() != 0) {
+    _this->_internal_set_swap_cached_kb(from._internal_swap_cached_kb());
+  }
+  if (from._internal_memmap_kb() != 0) {
+    _this->_internal_set_memmap_kb(from._internal_memmap_kb());
+  }
+  if (from._internal_memmap_boot_kb() != 0) {
+    _this->_internal_set_memmap_boot_kb(from._internal_memmap_boot_kb());
   }
   if (from._internal_google_play_processes() != 0) {
     _this->_internal_set_google_play_processes(from._internal_google_play_processes());
@@ -44032,10 +45019,13 @@ ListWidgetProviders::ListWidgetProviders(const ListWidgetProviders& from)
   ListWidgetProviders* const _this = this; (void)_this;
   new (&_impl_) Impl_{
       decltype(_impl_.request_id_){}
+    , decltype(_impl_.lazy_previews_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _this->_impl_.request_id_ = from._impl_.request_id_;
+  ::memcpy(&_impl_.request_id_, &from._impl_.request_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.lazy_previews_) -
+    reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.lazy_previews_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ListWidgetProviders)
 }
 
@@ -44045,6 +45035,7 @@ inline void ListWidgetProviders::SharedCtor(
   (void)is_message_owned;
   new (&_impl_) Impl_{
       decltype(_impl_.request_id_){0u}
+    , decltype(_impl_.lazy_previews_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -44072,7 +45063,9 @@ void ListWidgetProviders::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  _impl_.request_id_ = 0u;
+  ::memset(&_impl_.request_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.lazy_previews_) -
+      reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.lazy_previews_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -44086,6 +45079,14 @@ const char* ListWidgetProviders::_InternalParse(const char* ptr, ::_pbi::ParseCo
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
           _impl_.request_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool lazy_previews = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.lazy_previews_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -44125,6 +45126,12 @@ uint8_t* ListWidgetProviders::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_request_id(), target);
   }
 
+  // bool lazy_previews = 2;
+  if (this->_internal_lazy_previews() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(2, this->_internal_lazy_previews(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -44144,6 +45151,11 @@ size_t ListWidgetProviders::ByteSizeLong() const {
   // uint32 request_id = 1;
   if (this->_internal_request_id() != 0) {
     total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_request_id());
+  }
+
+  // bool lazy_previews = 2;
+  if (this->_internal_lazy_previews() != 0) {
+    total_size += 1 + 1;
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -44170,6 +45182,9 @@ void ListWidgetProviders::MergeFrom(const ListWidgetProviders& from) {
   if (from._internal_request_id() != 0) {
     _this->_internal_set_request_id(from._internal_request_id());
   }
+  if (from._internal_lazy_previews() != 0) {
+    _this->_internal_set_lazy_previews(from._internal_lazy_previews());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -44187,11 +45202,1012 @@ bool ListWidgetProviders::IsInitialized() const {
 void ListWidgetProviders::InternalSwap(ListWidgetProviders* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_.request_id_, other->_impl_.request_id_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ListWidgetProviders, _impl_.lazy_previews_)
+      + sizeof(ListWidgetProviders::_impl_.lazy_previews_)
+      - PROTOBUF_FIELD_OFFSET(ListWidgetProviders, _impl_.request_id_)>(
+          reinterpret_cast<char*>(&_impl_.request_id_),
+          reinterpret_cast<char*>(&other->_impl_.request_id_));
 }
 
 std::string ListWidgetProviders::GetTypeName() const {
   return "dsa.control.v1.ListWidgetProviders";
+}
+
+
+// ===================================================================
+
+class WidgetAppIcon::_Internal {
+ public:
+};
+
+WidgetAppIcon::WidgetAppIcon(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.WidgetAppIcon)
+}
+WidgetAppIcon::WidgetAppIcon(const WidgetAppIcon& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  WidgetAppIcon* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.icon_png_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.icon_png_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.icon_png_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_icon_png().empty()) {
+    _this->_impl_.icon_png_.Set(from._internal_icon_png(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.WidgetAppIcon)
+}
+
+inline void WidgetAppIcon::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.icon_png_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.icon_png_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.icon_png_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+WidgetAppIcon::~WidgetAppIcon() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.WidgetAppIcon)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void WidgetAppIcon::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+  _impl_.icon_png_.Destroy();
+}
+
+void WidgetAppIcon::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void WidgetAppIcon::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.WidgetAppIcon)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _impl_.icon_png_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* WidgetAppIcon::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string package_name = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes icon_png = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_icon_png();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* WidgetAppIcon::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.WidgetAppIcon)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string package_name = 1;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.WidgetAppIcon.package_name");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_package_name(), target);
+  }
+
+  // bytes icon_png = 2;
+  if (!this->_internal_icon_png().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_icon_png(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.WidgetAppIcon)
+  return target;
+}
+
+size_t WidgetAppIcon::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.WidgetAppIcon)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 1;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  // bytes icon_png = 2;
+  if (!this->_internal_icon_png().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_icon_png());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void WidgetAppIcon::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const WidgetAppIcon*>(
+      &from));
+}
+
+void WidgetAppIcon::MergeFrom(const WidgetAppIcon& from) {
+  WidgetAppIcon* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.WidgetAppIcon)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  if (!from._internal_icon_png().empty()) {
+    _this->_internal_set_icon_png(from._internal_icon_png());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void WidgetAppIcon::CopyFrom(const WidgetAppIcon& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.WidgetAppIcon)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool WidgetAppIcon::IsInitialized() const {
+  return true;
+}
+
+void WidgetAppIcon::InternalSwap(WidgetAppIcon* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.icon_png_, lhs_arena,
+      &other->_impl_.icon_png_, rhs_arena
+  );
+}
+
+std::string WidgetAppIcon::GetTypeName() const {
+  return "dsa.control.v1.WidgetAppIcon";
+}
+
+
+// ===================================================================
+
+class GetWidgetPreviews::_Internal {
+ public:
+};
+
+GetWidgetPreviews::GetWidgetPreviews(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GetWidgetPreviews)
+}
+GetWidgetPreviews::GetWidgetPreviews(const GetWidgetPreviews& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GetWidgetPreviews* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.providers_){from._impl_.providers_}
+    , decltype(_impl_.request_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.request_id_ = from._impl_.request_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GetWidgetPreviews)
+}
+
+inline void GetWidgetPreviews::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.providers_){arena}
+    , decltype(_impl_.request_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GetWidgetPreviews::~GetWidgetPreviews() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GetWidgetPreviews)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GetWidgetPreviews::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.providers_.~RepeatedPtrField();
+}
+
+void GetWidgetPreviews::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GetWidgetPreviews::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GetWidgetPreviews)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.providers_.Clear();
+  _impl_.request_id_ = 0u;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GetWidgetPreviews::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 request_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.request_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated string providers = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_providers();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            CHK_(::_pbi::VerifyUTF8(str, nullptr));
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GetWidgetPreviews::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GetWidgetPreviews)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_request_id(), target);
+  }
+
+  // repeated string providers = 2;
+  for (int i = 0, n = this->_internal_providers_size(); i < n; i++) {
+    const auto& s = this->_internal_providers(i);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      s.data(), static_cast<int>(s.length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.GetWidgetPreviews.providers");
+    target = stream->WriteString(2, s, target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GetWidgetPreviews)
+  return target;
+}
+
+size_t GetWidgetPreviews::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GetWidgetPreviews)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated string providers = 2;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.providers_.size());
+  for (int i = 0, n = _impl_.providers_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.providers_.Get(i));
+  }
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_request_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GetWidgetPreviews::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GetWidgetPreviews*>(
+      &from));
+}
+
+void GetWidgetPreviews::MergeFrom(const GetWidgetPreviews& from) {
+  GetWidgetPreviews* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GetWidgetPreviews)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.providers_.MergeFrom(from._impl_.providers_);
+  if (from._internal_request_id() != 0) {
+    _this->_internal_set_request_id(from._internal_request_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GetWidgetPreviews::CopyFrom(const GetWidgetPreviews& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GetWidgetPreviews)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GetWidgetPreviews::IsInitialized() const {
+  return true;
+}
+
+void GetWidgetPreviews::InternalSwap(GetWidgetPreviews* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.providers_.InternalSwap(&other->_impl_.providers_);
+  swap(_impl_.request_id_, other->_impl_.request_id_);
+}
+
+std::string GetWidgetPreviews::GetTypeName() const {
+  return "dsa.control.v1.GetWidgetPreviews";
+}
+
+
+// ===================================================================
+
+class WidgetPreview::_Internal {
+ public:
+};
+
+WidgetPreview::WidgetPreview(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.WidgetPreview)
+}
+WidgetPreview::WidgetPreview(const WidgetPreview& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  WidgetPreview* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.provider_){}
+    , decltype(_impl_.preview_png_){}
+    , decltype(_impl_.source_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.provider_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.provider_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_provider().empty()) {
+    _this->_impl_.provider_.Set(from._internal_provider(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.preview_png_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.preview_png_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_preview_png().empty()) {
+    _this->_impl_.preview_png_.Set(from._internal_preview_png(), 
+      _this->GetArenaForAllocation());
+  }
+  _this->_impl_.source_ = from._impl_.source_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.WidgetPreview)
+}
+
+inline void WidgetPreview::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.provider_){}
+    , decltype(_impl_.preview_png_){}
+    , decltype(_impl_.source_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.provider_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.provider_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.preview_png_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.preview_png_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+WidgetPreview::~WidgetPreview() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.WidgetPreview)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void WidgetPreview::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.provider_.Destroy();
+  _impl_.preview_png_.Destroy();
+}
+
+void WidgetPreview::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void WidgetPreview::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.WidgetPreview)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.provider_.ClearToEmpty();
+  _impl_.preview_png_.ClearToEmpty();
+  _impl_.source_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* WidgetPreview::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string provider = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_provider();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes preview_png = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_preview_png();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.WidgetPreviewSource source = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_source(static_cast<::dsa::control::v1::WidgetPreviewSource>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* WidgetPreview::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.WidgetPreview)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string provider = 1;
+  if (!this->_internal_provider().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_provider().data(), static_cast<int>(this->_internal_provider().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.WidgetPreview.provider");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_provider(), target);
+  }
+
+  // bytes preview_png = 2;
+  if (!this->_internal_preview_png().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_preview_png(), target);
+  }
+
+  // .dsa.control.v1.WidgetPreviewSource source = 3;
+  if (this->_internal_source() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      3, this->_internal_source(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.WidgetPreview)
+  return target;
+}
+
+size_t WidgetPreview::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.WidgetPreview)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string provider = 1;
+  if (!this->_internal_provider().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_provider());
+  }
+
+  // bytes preview_png = 2;
+  if (!this->_internal_preview_png().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_preview_png());
+  }
+
+  // .dsa.control.v1.WidgetPreviewSource source = 3;
+  if (this->_internal_source() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_source());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void WidgetPreview::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const WidgetPreview*>(
+      &from));
+}
+
+void WidgetPreview::MergeFrom(const WidgetPreview& from) {
+  WidgetPreview* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.WidgetPreview)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_provider().empty()) {
+    _this->_internal_set_provider(from._internal_provider());
+  }
+  if (!from._internal_preview_png().empty()) {
+    _this->_internal_set_preview_png(from._internal_preview_png());
+  }
+  if (from._internal_source() != 0) {
+    _this->_internal_set_source(from._internal_source());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void WidgetPreview::CopyFrom(const WidgetPreview& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.WidgetPreview)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool WidgetPreview::IsInitialized() const {
+  return true;
+}
+
+void WidgetPreview::InternalSwap(WidgetPreview* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.provider_, lhs_arena,
+      &other->_impl_.provider_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.preview_png_, lhs_arena,
+      &other->_impl_.preview_png_, rhs_arena
+  );
+  swap(_impl_.source_, other->_impl_.source_);
+}
+
+std::string WidgetPreview::GetTypeName() const {
+  return "dsa.control.v1.WidgetPreview";
+}
+
+
+// ===================================================================
+
+class WidgetPreviews::_Internal {
+ public:
+};
+
+WidgetPreviews::WidgetPreviews(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.WidgetPreviews)
+}
+WidgetPreviews::WidgetPreviews(const WidgetPreviews& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  WidgetPreviews* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.previews_){from._impl_.previews_}
+    , decltype(_impl_.request_id_){}
+    , decltype(_impl_.complete_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.request_id_, &from._impl_.request_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.complete_) -
+    reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.complete_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.WidgetPreviews)
+}
+
+inline void WidgetPreviews::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.previews_){arena}
+    , decltype(_impl_.request_id_){0u}
+    , decltype(_impl_.complete_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+WidgetPreviews::~WidgetPreviews() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.WidgetPreviews)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void WidgetPreviews::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.previews_.~RepeatedPtrField();
+}
+
+void WidgetPreviews::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void WidgetPreviews::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.WidgetPreviews)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.previews_.Clear();
+  ::memset(&_impl_.request_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.complete_) -
+      reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.complete_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* WidgetPreviews::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 request_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.request_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated .dsa.control.v1.WidgetPreview previews = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            ptr = ctx->ParseMessage(_internal_add_previews(), ptr);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool complete = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.complete_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* WidgetPreviews::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.WidgetPreviews)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_request_id(), target);
+  }
+
+  // repeated .dsa.control.v1.WidgetPreview previews = 2;
+  for (unsigned i = 0,
+      n = static_cast<unsigned>(this->_internal_previews_size()); i < n; i++) {
+    const auto& repfield = this->_internal_previews(i);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+        InternalWriteMessage(2, repfield, repfield.GetCachedSize(), target, stream);
+  }
+
+  // bool complete = 3;
+  if (this->_internal_complete() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_complete(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.WidgetPreviews)
+  return target;
+}
+
+size_t WidgetPreviews::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.WidgetPreviews)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated .dsa.control.v1.WidgetPreview previews = 2;
+  total_size += 1UL * this->_internal_previews_size();
+  for (const auto& msg : this->_impl_.previews_) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
+  }
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_request_id());
+  }
+
+  // bool complete = 3;
+  if (this->_internal_complete() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void WidgetPreviews::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const WidgetPreviews*>(
+      &from));
+}
+
+void WidgetPreviews::MergeFrom(const WidgetPreviews& from) {
+  WidgetPreviews* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.WidgetPreviews)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.previews_.MergeFrom(from._impl_.previews_);
+  if (from._internal_request_id() != 0) {
+    _this->_internal_set_request_id(from._internal_request_id());
+  }
+  if (from._internal_complete() != 0) {
+    _this->_internal_set_complete(from._internal_complete());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void WidgetPreviews::CopyFrom(const WidgetPreviews& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.WidgetPreviews)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool WidgetPreviews::IsInitialized() const {
+  return true;
+}
+
+void WidgetPreviews::InternalSwap(WidgetPreviews* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.previews_.InternalSwap(&other->_impl_.previews_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(WidgetPreviews, _impl_.complete_)
+      + sizeof(WidgetPreviews::_impl_.complete_)
+      - PROTOBUF_FIELD_OFFSET(WidgetPreviews, _impl_.request_id_)>(
+          reinterpret_cast<char*>(&_impl_.request_id_),
+          reinterpret_cast<char*>(&other->_impl_.request_id_));
+}
+
+std::string WidgetPreviews::GetTypeName() const {
+  return "dsa.control.v1.WidgetPreviews";
 }
 
 
@@ -44840,6 +46856,7 @@ WidgetProviders::WidgetProviders(const WidgetProviders& from)
   WidgetProviders* const _this = this; (void)_this;
   new (&_impl_) Impl_{
       decltype(_impl_.providers_){from._impl_.providers_}
+    , decltype(_impl_.app_icons_){from._impl_.app_icons_}
     , decltype(_impl_.request_id_){}
     , decltype(_impl_.complete_){}
     , /*decltype(_impl_._cached_size_)*/{}};
@@ -44857,6 +46874,7 @@ inline void WidgetProviders::SharedCtor(
   (void)is_message_owned;
   new (&_impl_) Impl_{
       decltype(_impl_.providers_){arena}
+    , decltype(_impl_.app_icons_){arena}
     , decltype(_impl_.request_id_){0u}
     , decltype(_impl_.complete_){false}
     , /*decltype(_impl_._cached_size_)*/{}
@@ -44875,6 +46893,7 @@ WidgetProviders::~WidgetProviders() {
 inline void WidgetProviders::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
   _impl_.providers_.~RepeatedPtrField();
+  _impl_.app_icons_.~RepeatedPtrField();
 }
 
 void WidgetProviders::SetCachedSize(int size) const {
@@ -44888,6 +46907,7 @@ void WidgetProviders::Clear() {
   (void) cached_has_bits;
 
   _impl_.providers_.Clear();
+  _impl_.app_icons_.Clear();
   ::memset(&_impl_.request_id_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.complete_) -
       reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.complete_));
@@ -44926,6 +46946,19 @@ const char* WidgetProviders::_InternalParse(const char* ptr, ::_pbi::ParseContex
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.complete_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            ptr = ctx->ParseMessage(_internal_add_app_icons(), ptr);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<34>(ptr));
         } else
           goto handle_unusual;
         continue;
@@ -44978,6 +47011,14 @@ uint8_t* WidgetProviders::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_complete(), target);
   }
 
+  // repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;
+  for (unsigned i = 0,
+      n = static_cast<unsigned>(this->_internal_app_icons_size()); i < n; i++) {
+    const auto& repfield = this->_internal_app_icons(i);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+        InternalWriteMessage(4, repfield, repfield.GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -44997,6 +47038,13 @@ size_t WidgetProviders::ByteSizeLong() const {
   // repeated .dsa.control.v1.WidgetProvider providers = 2;
   total_size += 1UL * this->_internal_providers_size();
   for (const auto& msg : this->_impl_.providers_) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
+  }
+
+  // repeated .dsa.control.v1.WidgetAppIcon app_icons = 4;
+  total_size += 1UL * this->_internal_app_icons_size();
+  for (const auto& msg : this->_impl_.app_icons_) {
     total_size +=
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
   }
@@ -45033,6 +47081,7 @@ void WidgetProviders::MergeFrom(const WidgetProviders& from) {
   (void) cached_has_bits;
 
   _this->_impl_.providers_.MergeFrom(from._impl_.providers_);
+  _this->_impl_.app_icons_.MergeFrom(from._impl_.app_icons_);
   if (from._internal_request_id() != 0) {
     _this->_internal_set_request_id(from._internal_request_id());
   }
@@ -45057,6 +47106,7 @@ void WidgetProviders::InternalSwap(WidgetProviders* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   _impl_.providers_.InternalSwap(&other->_impl_.providers_);
+  _impl_.app_icons_.InternalSwap(&other->_impl_.app_icons_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(WidgetProviders, _impl_.complete_)
       + sizeof(WidgetProviders::_impl_.complete_)
@@ -71776,6 +73826,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ResizeTask& resize_task(const Envelope* msg);
   static const ::dsa::control::v1::SetTaskDensity& set_task_density(const Envelope* msg);
   static const ::dsa::control::v1::PointerEvent& pointer_event(const Envelope* msg);
+  static const ::dsa::control::v1::SetOverlayDensity& set_overlay_density(const Envelope* msg);
   static const ::dsa::control::v1::AppInfo& app_info(const Envelope* msg);
   static const ::dsa::control::v1::KeyEvent& key_event(const Envelope* msg);
   static const ::dsa::control::v1::ImeComposition& ime_composition(const Envelope* msg);
@@ -71800,6 +73851,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::TasksShown& tasks_shown(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::DisplayRefresh& display_refresh(const Envelope* msg);
+  static const ::dsa::control::v1::DisplaySize& display_size(const Envelope* msg);
   static const ::dsa::control::v1::PowerHint& power_hint(const Envelope* msg);
   static const ::dsa::control::v1::DeveloperMode& developer_mode(const Envelope* msg);
   static const ::dsa::control::v1::ArmTranslationRemove& arm_translation_remove(const Envelope* msg);
@@ -71840,6 +73892,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::NotificationClicked& notification_clicked(const Envelope* msg);
   static const ::dsa::control::v1::NotificationDismissed& notification_dismissed(const Envelope* msg);
   static const ::dsa::control::v1::NotificationButtonClicked& notification_button_clicked(const Envelope* msg);
+  static const ::dsa::control::v1::RequestTaskFrame& request_task_frame(const Envelope* msg);
   static const ::dsa::control::v1::BackgroundApp& background_app(const Envelope* msg);
   static const ::dsa::control::v1::BackgroundAppGone& background_app_gone(const Envelope* msg);
   static const ::dsa::control::v1::BackgroundAppAction& background_app_action(const Envelope* msg);
@@ -71968,6 +74021,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::DnsAnswer& dns_answer(const Envelope* msg);
   static const ::dsa::control::v1::LaunchPlacement& launch_placement(const Envelope* msg);
   static const ::dsa::control::v1::CaptionCompat& caption_compat(const Envelope* msg);
+  static const ::dsa::control::v1::GetWidgetPreviews& get_widget_previews(const Envelope* msg);
+  static const ::dsa::control::v1::WidgetPreviews& widget_previews(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -72021,6 +74076,10 @@ Envelope::_Internal::set_task_density(const Envelope* msg) {
 const ::dsa::control::v1::PointerEvent&
 Envelope::_Internal::pointer_event(const Envelope* msg) {
   return *msg->_impl_.body_.pointer_event_;
+}
+const ::dsa::control::v1::SetOverlayDensity&
+Envelope::_Internal::set_overlay_density(const Envelope* msg) {
+  return *msg->_impl_.body_.set_overlay_density_;
 }
 const ::dsa::control::v1::AppInfo&
 Envelope::_Internal::app_info(const Envelope* msg) {
@@ -72117,6 +74176,10 @@ Envelope::_Internal::power_state(const Envelope* msg) {
 const ::dsa::control::v1::DisplayRefresh&
 Envelope::_Internal::display_refresh(const Envelope* msg) {
   return *msg->_impl_.body_.display_refresh_;
+}
+const ::dsa::control::v1::DisplaySize&
+Envelope::_Internal::display_size(const Envelope* msg) {
+  return *msg->_impl_.body_.display_size_;
 }
 const ::dsa::control::v1::PowerHint&
 Envelope::_Internal::power_hint(const Envelope* msg) {
@@ -72277,6 +74340,10 @@ Envelope::_Internal::notification_dismissed(const Envelope* msg) {
 const ::dsa::control::v1::NotificationButtonClicked&
 Envelope::_Internal::notification_button_clicked(const Envelope* msg) {
   return *msg->_impl_.body_.notification_button_clicked_;
+}
+const ::dsa::control::v1::RequestTaskFrame&
+Envelope::_Internal::request_task_frame(const Envelope* msg) {
+  return *msg->_impl_.body_.request_task_frame_;
 }
 const ::dsa::control::v1::BackgroundApp&
 Envelope::_Internal::background_app(const Envelope* msg) {
@@ -72790,6 +74857,14 @@ const ::dsa::control::v1::CaptionCompat&
 Envelope::_Internal::caption_compat(const Envelope* msg) {
   return *msg->_impl_.body_.caption_compat_;
 }
+const ::dsa::control::v1::GetWidgetPreviews&
+Envelope::_Internal::get_widget_previews(const Envelope* msg) {
+  return *msg->_impl_.body_.get_widget_previews_;
+}
+const ::dsa::control::v1::WidgetPreviews&
+Envelope::_Internal::widget_previews(const Envelope* msg) {
+  return *msg->_impl_.body_.widget_previews_;
+}
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -72984,6 +75059,21 @@ void Envelope::set_allocated_pointer_event(::dsa::control::v1::PointerEvent* poi
     _impl_.body_.pointer_event_ = pointer_event;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.pointer_event)
+}
+void Envelope::set_allocated_set_overlay_density(::dsa::control::v1::SetOverlayDensity* set_overlay_density) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (set_overlay_density) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(set_overlay_density);
+    if (message_arena != submessage_arena) {
+      set_overlay_density = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, set_overlay_density, submessage_arena);
+    }
+    set_has_set_overlay_density();
+    _impl_.body_.set_overlay_density_ = set_overlay_density;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.set_overlay_density)
 }
 void Envelope::set_allocated_app_info(::dsa::control::v1::AppInfo* app_info) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -73344,6 +75434,21 @@ void Envelope::set_allocated_display_refresh(::dsa::control::v1::DisplayRefresh*
     _impl_.body_.display_refresh_ = display_refresh;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.display_refresh)
+}
+void Envelope::set_allocated_display_size(::dsa::control::v1::DisplaySize* display_size) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (display_size) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(display_size);
+    if (message_arena != submessage_arena) {
+      display_size = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, display_size, submessage_arena);
+    }
+    set_has_display_size();
+    _impl_.body_.display_size_ = display_size;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.display_size)
 }
 void Envelope::set_allocated_power_hint(::dsa::control::v1::PowerHint* power_hint) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -73944,6 +76049,21 @@ void Envelope::set_allocated_notification_button_clicked(::dsa::control::v1::Not
     _impl_.body_.notification_button_clicked_ = notification_button_clicked;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.notification_button_clicked)
+}
+void Envelope::set_allocated_request_task_frame(::dsa::control::v1::RequestTaskFrame* request_task_frame) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (request_task_frame) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(request_task_frame);
+    if (message_arena != submessage_arena) {
+      request_task_frame = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, request_task_frame, submessage_arena);
+    }
+    set_has_request_task_frame();
+    _impl_.body_.request_task_frame_ = request_task_frame;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.request_task_frame)
 }
 void Envelope::set_allocated_background_app(::dsa::control::v1::BackgroundApp* background_app) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -75865,6 +77985,36 @@ void Envelope::set_allocated_caption_compat(::dsa::control::v1::CaptionCompat* c
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.caption_compat)
 }
+void Envelope::set_allocated_get_widget_previews(::dsa::control::v1::GetWidgetPreviews* get_widget_previews) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (get_widget_previews) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(get_widget_previews);
+    if (message_arena != submessage_arena) {
+      get_widget_previews = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, get_widget_previews, submessage_arena);
+    }
+    set_has_get_widget_previews();
+    _impl_.body_.get_widget_previews_ = get_widget_previews;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.get_widget_previews)
+}
+void Envelope::set_allocated_widget_previews(::dsa::control::v1::WidgetPreviews* widget_previews) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (widget_previews) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(widget_previews);
+    if (message_arena != submessage_arena) {
+      widget_previews = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, widget_previews, submessage_arena);
+    }
+    set_has_widget_previews();
+    _impl_.body_.widget_previews_ = widget_previews;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.widget_previews)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -75945,6 +78095,11 @@ Envelope::Envelope(const Envelope& from)
     case kPointerEvent: {
       _this->_internal_mutable_pointer_event()->::dsa::control::v1::PointerEvent::MergeFrom(
           from._internal_pointer_event());
+      break;
+    }
+    case kSetOverlayDensity: {
+      _this->_internal_mutable_set_overlay_density()->::dsa::control::v1::SetOverlayDensity::MergeFrom(
+          from._internal_set_overlay_density());
       break;
     }
     case kAppInfo: {
@@ -76065,6 +78220,11 @@ Envelope::Envelope(const Envelope& from)
     case kDisplayRefresh: {
       _this->_internal_mutable_display_refresh()->::dsa::control::v1::DisplayRefresh::MergeFrom(
           from._internal_display_refresh());
+      break;
+    }
+    case kDisplaySize: {
+      _this->_internal_mutable_display_size()->::dsa::control::v1::DisplaySize::MergeFrom(
+          from._internal_display_size());
       break;
     }
     case kPowerHint: {
@@ -76265,6 +78425,11 @@ Envelope::Envelope(const Envelope& from)
     case kNotificationButtonClicked: {
       _this->_internal_mutable_notification_button_clicked()->::dsa::control::v1::NotificationButtonClicked::MergeFrom(
           from._internal_notification_button_clicked());
+      break;
+    }
+    case kRequestTaskFrame: {
+      _this->_internal_mutable_request_task_frame()->::dsa::control::v1::RequestTaskFrame::MergeFrom(
+          from._internal_request_task_frame());
       break;
     }
     case kBackgroundApp: {
@@ -76907,6 +79072,16 @@ Envelope::Envelope(const Envelope& from)
           from._internal_caption_compat());
       break;
     }
+    case kGetWidgetPreviews: {
+      _this->_internal_mutable_get_widget_previews()->::dsa::control::v1::GetWidgetPreviews::MergeFrom(
+          from._internal_get_widget_previews());
+      break;
+    }
+    case kWidgetPreviews: {
+      _this->_internal_mutable_widget_previews()->::dsa::control::v1::WidgetPreviews::MergeFrom(
+          from._internal_widget_previews());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -77024,6 +79199,12 @@ void Envelope::clear_body() {
     case kPointerEvent: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.pointer_event_;
+      }
+      break;
+    }
+    case kSetOverlayDensity: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.set_overlay_density_;
       }
       break;
     }
@@ -77168,6 +79349,12 @@ void Envelope::clear_body() {
     case kDisplayRefresh: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.display_refresh_;
+      }
+      break;
+    }
+    case kDisplaySize: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.display_size_;
       }
       break;
     }
@@ -77408,6 +79595,12 @@ void Envelope::clear_body() {
     case kNotificationButtonClicked: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.notification_button_clicked_;
+      }
+      break;
+    }
+    case kRequestTaskFrame: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.request_task_frame_;
       }
       break;
     }
@@ -78179,6 +80372,18 @@ void Envelope::clear_body() {
       }
       break;
     }
+    case kGetWidgetPreviews: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.get_widget_previews_;
+      }
+      break;
+    }
+    case kWidgetPreviews: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.widget_previews_;
+      }
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -78303,6 +80508,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 13:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 106)) {
           ptr = ctx->ParseMessage(_internal_mutable_pointer_event(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.SetOverlayDensity set_overlay_density = 14;
+      case 14:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 114)) {
+          ptr = ctx->ParseMessage(_internal_mutable_set_overlay_density(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -79483,6 +81696,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.DisplaySize display_size = 416;
+      case 416:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 2)) {
+          ptr = ctx->ParseMessage(_internal_mutable_display_size(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.GeocodeRequest geocode_request = 470;
       case 470:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 178)) {
@@ -79843,6 +82064,30 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.RequestTaskFrame request_task_frame = 731;
+      case 731:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 218)) {
+          ptr = ctx->ParseMessage(_internal_mutable_request_task_frame(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;
+      case 740:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          ptr = ctx->ParseMessage(_internal_mutable_get_widget_previews(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.WidgetPreviews widget_previews = 741;
+      case 741:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          ptr = ctx->ParseMessage(_internal_mutable_widget_previews(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -79961,6 +82206,13 @@ uint8_t* Envelope::_InternalSerialize(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(13, _Internal::pointer_event(this),
         _Internal::pointer_event(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.SetOverlayDensity set_overlay_density = 14;
+  if (_internal_has_set_overlay_density()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(14, _Internal::set_overlay_density(this),
+        _Internal::set_overlay_density(this).GetCachedSize(), target, stream);
   }
 
   // .dsa.control.v1.AppInfo app_info = 15;
@@ -80992,6 +83244,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::addon_image_part(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.DisplaySize display_size = 416;
+  if (_internal_has_display_size()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(416, _Internal::display_size(this),
+        _Internal::display_size(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.GeocodeRequest geocode_request = 470;
   if (_internal_has_geocode_request()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -81307,6 +83566,27 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::notification_button_clicked(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.RequestTaskFrame request_task_frame = 731;
+  if (_internal_has_request_task_frame()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(731, _Internal::request_task_frame(this),
+        _Internal::request_task_frame(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;
+  if (_internal_has_get_widget_previews()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(740, _Internal::get_widget_previews(this),
+        _Internal::get_widget_previews(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.WidgetPreviews widget_previews = 741;
+  if (_internal_has_widget_previews()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(741, _Internal::widget_previews(this),
+        _Internal::widget_previews(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -81413,6 +83693,13 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.pointer_event_);
+      break;
+    }
+    // .dsa.control.v1.SetOverlayDensity set_overlay_density = 14;
+    case kSetOverlayDensity: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.set_overlay_density_);
       break;
     }
     // .dsa.control.v1.AppInfo app_info = 15;
@@ -81581,6 +83868,13 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.display_refresh_);
+      break;
+    }
+    // .dsa.control.v1.DisplaySize display_size = 416;
+    case kDisplaySize: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.display_size_);
       break;
     }
     // .dsa.control.v1.PowerHint power_hint = 110;
@@ -81861,6 +84155,13 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.notification_button_clicked_);
+      break;
+    }
+    // .dsa.control.v1.RequestTaskFrame request_task_frame = 731;
+    case kRequestTaskFrame: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.request_task_frame_);
       break;
     }
     // .dsa.control.v1.BackgroundApp background_app = 74;
@@ -82759,6 +85060,20 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.caption_compat_);
       break;
     }
+    // .dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;
+    case kGetWidgetPreviews: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.get_widget_previews_);
+      break;
+    }
+    // .dsa.control.v1.WidgetPreviews widget_previews = 741;
+    case kWidgetPreviews: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.widget_previews_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -82848,6 +85163,11 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kPointerEvent: {
       _this->_internal_mutable_pointer_event()->::dsa::control::v1::PointerEvent::MergeFrom(
           from._internal_pointer_event());
+      break;
+    }
+    case kSetOverlayDensity: {
+      _this->_internal_mutable_set_overlay_density()->::dsa::control::v1::SetOverlayDensity::MergeFrom(
+          from._internal_set_overlay_density());
       break;
     }
     case kAppInfo: {
@@ -82968,6 +85288,11 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kDisplayRefresh: {
       _this->_internal_mutable_display_refresh()->::dsa::control::v1::DisplayRefresh::MergeFrom(
           from._internal_display_refresh());
+      break;
+    }
+    case kDisplaySize: {
+      _this->_internal_mutable_display_size()->::dsa::control::v1::DisplaySize::MergeFrom(
+          from._internal_display_size());
       break;
     }
     case kPowerHint: {
@@ -83168,6 +85493,11 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kNotificationButtonClicked: {
       _this->_internal_mutable_notification_button_clicked()->::dsa::control::v1::NotificationButtonClicked::MergeFrom(
           from._internal_notification_button_clicked());
+      break;
+    }
+    case kRequestTaskFrame: {
+      _this->_internal_mutable_request_task_frame()->::dsa::control::v1::RequestTaskFrame::MergeFrom(
+          from._internal_request_task_frame());
       break;
     }
     case kBackgroundApp: {
@@ -83810,6 +86140,16 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_caption_compat());
       break;
     }
+    case kGetWidgetPreviews: {
+      _this->_internal_mutable_get_widget_previews()->::dsa::control::v1::GetWidgetPreviews::MergeFrom(
+          from._internal_get_widget_previews());
+      break;
+    }
+    case kWidgetPreviews: {
+      _this->_internal_mutable_widget_previews()->::dsa::control::v1::WidgetPreviews::MergeFrom(
+          from._internal_widget_previews());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -83889,6 +86229,10 @@ template<> PROTOBUF_NOINLINE ::dsa::control::v1::TaskFrames*
 Arena::CreateMaybeMessage< ::dsa::control::v1::TaskFrames >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::TaskFrames >(arena);
 }
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::RequestTaskFrame*
+Arena::CreateMaybeMessage< ::dsa::control::v1::RequestTaskFrame >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::RequestTaskFrame >(arena);
+}
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::CloseTask*
 Arena::CreateMaybeMessage< ::dsa::control::v1::CloseTask >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::CloseTask >(arena);
@@ -83908,6 +86252,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ResizeTask >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::SetTaskDensity*
 Arena::CreateMaybeMessage< ::dsa::control::v1::SetTaskDensity >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::SetTaskDensity >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::SetOverlayDensity*
+Arena::CreateMaybeMessage< ::dsa::control::v1::SetOverlayDensity >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::SetOverlayDensity >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::LaunchPlacement*
 Arena::CreateMaybeMessage< ::dsa::control::v1::LaunchPlacement >(Arena* arena) {
@@ -84036,6 +86384,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::DisplayRefresh*
 Arena::CreateMaybeMessage< ::dsa::control::v1::DisplayRefresh >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::DisplayRefresh >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DisplaySize*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DisplaySize >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DisplaySize >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestMemoryPressure*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestMemoryPressure >(Arena* arena) {
@@ -84392,6 +86744,22 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ClockAnswer >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ListWidgetProviders*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ListWidgetProviders >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::ListWidgetProviders >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::WidgetAppIcon*
+Arena::CreateMaybeMessage< ::dsa::control::v1::WidgetAppIcon >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::WidgetAppIcon >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GetWidgetPreviews*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GetWidgetPreviews >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GetWidgetPreviews >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::WidgetPreview*
+Arena::CreateMaybeMessage< ::dsa::control::v1::WidgetPreview >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::WidgetPreview >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::WidgetPreviews*
+Arena::CreateMaybeMessage< ::dsa::control::v1::WidgetPreviews >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::WidgetPreviews >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::WidgetProvider*
 Arena::CreateMaybeMessage< ::dsa::control::v1::WidgetProvider >(Arena* arena) {

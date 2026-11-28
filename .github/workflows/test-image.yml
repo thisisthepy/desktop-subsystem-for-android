@@ -938,7 +938,9 @@ jobs:
       - name: Download the patched DocumentsUI
         env:
           GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/apps/download-documentsui.sh ${{ matrix.android }} .scratch/default-apps
+        run: |
+          .github/scripts/apps/download-documentsui.sh ${{ matrix.android }} .scratch/default-apps
+          .github/scripts/apps/download-documentsui.sh ${{ matrix.android }} .scratch/default-apps system-screens
 
       # The default ARM translator a released x86_64 Android 17 image carries, from the newest
       # release that has one, so the image booted below lays it over its system as a release

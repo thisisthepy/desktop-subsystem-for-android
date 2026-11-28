@@ -138,7 +138,10 @@ pub struct ResizeTask {
 /// the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 /// With `recreate`, the move has ended and Android recreates the task's top activity at the
 /// new density, restoring its saved state, even when the app says it handles a change of
-/// density itself (see the control protocol's SetTaskDensity).
+/// density itself (see the control protocol's SetTaskDensity). With `forced`, the task's app
+/// is set to System (forced) scaling: Android is to give the task the density without
+/// relaunching its activity, and gives it none if it cannot (the control protocol's
+/// SetTaskDensity.forced).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetTaskDensity {
     #[prost(int32, tag = "1")]
@@ -147,6 +150,19 @@ pub struct SetTaskDensity {
     pub density_dpi: u32,
     #[prost(bool, tag = "3")]
     pub recreate: bool,
+    #[prost(bool, tag = "4")]
+    pub forced: bool,
+}
+/// An app overlay window's window is on a monitor whose density differs from the one its app,
+/// set to System (forced) scaling, draws at: asks the caller's Android to draw that window alone
+/// at `density_dpi`, or at its app's own density again with 0 (the control protocol's
+/// SetOverlayDensity).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOverlayDensity {
+    #[prost(int32, tag = "1")]
+    pub overlay_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
 }
 /// The monitor the window of the next task opens on: asks the caller's Android to start the
 /// tasks it starts from now on at that monitor's density and size, so an app's first frame is
@@ -188,11 +204,15 @@ pub struct SetTaskCaption {
 }
 /// Tells the caller's Android which apps start below the title bar: the packages whose
 /// AppWindowSettings.below_title_bar is on. The list replaces the one before, and counts for
-/// the tasks that start after it.
+/// the tasks that start after it. keep_focus: the packages whose AppWindowSettings.keep_focus
+/// is on, which Android does not tell that they lost the focus to another app's window while
+/// their task stays visible. That list replaces the one before too, and counts at once.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetCaptionCompat {
     #[prost(string, repeated, tag = "1")]
     pub below_title_bar: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "2")]
+    pub keep_focus: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Where a task's window shows a clear full screen request of its app: asks the caller's
 /// Android to keep a task that leaves freeform for fullscreen inside its window, at the bounds
@@ -203,6 +223,13 @@ pub struct SetTaskFullScreen {
     pub task_id: i32,
     #[prost(bool, tag = "2")]
     pub in_window: bool,
+}
+/// Asks the caller's Android for the current frame of a task whose window has none yet, as a
+/// window reopened after the agent restarted: the frame is sent even when nothing changed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RequestTaskFrame {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
 }
 /// Turns the connection into a stream of input for the caller's Android: after the answer
 /// (Done), the client sends only PointerEvent, KeyEvent and text input frames, which the
@@ -926,7 +953,47 @@ pub struct SetAppVolume {
 /// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 /// Needs the caller's Android to be running.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListWidgetProviders {}
+pub struct ListWidgetProviders {
+    /// Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+    /// icon comes once, in `app_icons`, instead. A gallery that groups the widgets by app and
+    /// shows only those of the apps the user opens asks so, and asks for their previews with
+    /// GetWidgetPreviews: an app may offer hundreds of widgets.
+    #[prost(bool, tag = "1")]
+    pub lazy_previews: bool,
+}
+/// An app's icon, a PNG image of at most 160 pixels on a side.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetAppIcon {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
+/// Asks for the previews of some widgets on offer, at most 64 at once. The answer is
+/// WidgetPreviews. Needs the caller's Android to be running.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetWidgetPreviews {
+    /// The providers' components, as `package/class`.
+    #[prost(string, repeated, tag = "1")]
+    pub providers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// One widget's preview, a PNG image of at most 256 pixels on a side; empty for none.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetPreview {
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub preview_png: ::prost::alloc::vec::Vec<u8>,
+    #[prost(enumeration = "WidgetPreviewSource", tag = "3")]
+    pub source: i32,
+}
+/// The answer to GetWidgetPreviews, in the order asked, each widget once. A widget that is not
+/// on offer has no entry.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WidgetPreviews {
+    #[prost(message, repeated, tag = "1")]
+    pub previews: ::prost::alloc::vec::Vec<WidgetPreview>,
+}
 /// One widget an app in the caller's Android offers.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WidgetProvider {
@@ -973,6 +1040,9 @@ pub struct WidgetProvider {
 pub struct WidgetProviders {
     #[prost(message, repeated, tag = "1")]
     pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
+    /// With `lazy_previews`: the icon of each app that offers a widget, each app once.
+    #[prost(message, repeated, tag = "2")]
+    pub app_icons: ::prost::alloc::vec::Vec<WidgetAppIcon>,
 }
 /// Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
 /// it up, its setup shows as a window first, and the answer waits for the user. The answer is
@@ -1434,6 +1504,11 @@ pub struct Task {
     /// redraws at a new density rather than being relaunched. False when unknown.
     #[prost(bool, tag = "26")]
     pub handles_density_change: bool,
+    /// Whether the caller's Android can give the task a new density without relaunching its
+    /// activity although the activity does not say it handles one (see the control protocol's
+    /// TaskUpdated.forced_density_available). False on an image without it.
+    #[prost(bool, tag = "29")]
+    pub forced_density_available: bool,
     /// Which kind of full screen the task's app asks for, if any.
     #[prost(enumeration = "FullScreenRequest", tag = "27")]
     pub fullscreen_request: i32,
@@ -1468,6 +1543,10 @@ pub struct OverlayWindow {
     /// Whether the window takes pointer input; the pointer passes through one that does not.
     #[prost(bool, tag = "3")]
     pub touchable: bool,
+    /// The density the app draws this window at once it took the one the window manager asked
+    /// for it (SetOverlayDensity); 0 while it draws it as the rest of its process.
+    #[prost(uint32, tag = "4")]
+    pub density_dpi: u32,
 }
 /// The task ended.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1550,6 +1629,11 @@ pub struct AppInfo {
     /// app shows them together. Empty for an app with a user ID of its own, and for a task's app.
     #[prost(string, tag = "18")]
     pub shared_user_id: ::prost::alloc::string::String,
+    /// Whether the app says it is a game (ApplicationInfo.category CATEGORY_GAME, or the older
+    /// android:isGame), in the list of installed apps. A settings app lists games first. False
+    /// for a task's app.
+    #[prost(bool, tag = "19")]
+    pub game: bool,
 }
 /// One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
 /// one it published, or one pinned at its request. The host's jump list (Dock menu, desktop
@@ -1835,6 +1919,15 @@ pub struct GuestMemory {
     /// does not count it.
     #[prost(uint64, tag = "33")]
     pub ballooned_kb: u64,
+    /// The swap cache, and the page structures the guest's kernel made after boot (persistent
+    /// memory and hot-added memory) and at boot, in KiB, as the control channel's GuestMemory
+    /// says. 0 from a guest or a service that does not count them.
+    #[prost(uint64, tag = "34")]
+    pub swap_cached_kb: u64,
+    #[prost(uint64, tag = "35")]
+    pub memmap_kb: u64,
+    #[prost(uint64, tag = "36")]
+    pub memmap_boot_kb: u64,
 }
 /// One host process that runs the caller's Android: its VM's memory process, the window
 /// manager, the graphics renderer, an app window, the settings app, the service.
@@ -3282,6 +3375,12 @@ pub struct AppWindowSettings {
     /// from the next time a window of the app opens.
     #[prost(bool, tag = "8")]
     pub below_title_bar: bool,
+    /// Whether the app keeps its focus while another app's window has it ("keep game focus"):
+    /// while its task stays visible, Android does not tell it that it lost the focus, so a game
+    /// that pauses when it loses the focus keeps running while the user works in another app's
+    /// window. Keys and text still go only to the window that has the focus. Off by default.
+    #[prost(bool, tag = "9")]
+    pub keep_focus: bool,
 }
 /// The user's full screen choices for every app, which an app's own choice overrides. Never
 /// DEFAULT in an answer from the service.
@@ -3320,7 +3419,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 49, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 48, 716, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 351, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702, 710, 715, 740"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -3352,6 +3451,8 @@ pub mod request {
         ResizeTask(super::ResizeTask),
         #[prost(message, tag = "13")]
         SetTaskDensity(super::SetTaskDensity),
+        #[prost(message, tag = "49")]
+        SetOverlayDensity(super::SetOverlayDensity),
         #[prost(message, tag = "14")]
         GetMemory(super::GetMemory),
         #[prost(message, tag = "15")]
@@ -3406,6 +3507,8 @@ pub mod request {
         SetTaskCaption(super::SetTaskCaption),
         #[prost(message, tag = "48")]
         SetTaskFullScreen(super::SetTaskFullScreen),
+        #[prost(message, tag = "716")]
+        RequestTaskFrame(super::RequestTaskFrame),
         #[prost(message, tag = "70")]
         WatchLog(super::WatchLog),
         #[prost(message, tag = "71")]
@@ -3520,6 +3623,8 @@ pub mod request {
         LaunchPlacement(super::LaunchPlacement),
         #[prost(message, tag = "715")]
         SetCaptionCompat(super::SetCaptionCompat),
+        #[prost(message, tag = "740")]
+        GetWidgetPreviews(super::GetWidgetPreviews),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -3528,7 +3633,7 @@ pub struct Response {
     pub id: u64,
     #[prost(
         oneof = "response::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660, 700"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660, 700, 740"
     )]
     pub body: ::core::option::Option<response::Body>,
 }
@@ -3602,6 +3707,8 @@ pub mod response {
         AppAudio(super::AppAudio),
         #[prost(message, tag = "700")]
         Widevine(super::Widevine),
+        #[prost(message, tag = "740")]
+        WidgetPreviews(super::WidgetPreviews),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -4246,6 +4353,40 @@ impl MediaCommand {
             "MEDIA_COMMAND_NEXT" => Some(Self::Next),
             "MEDIA_COMMAND_PREVIOUS" => Some(Self::Previous),
             "MEDIA_COMMAND_STOP" => Some(Self::Stop),
+            _ => None,
+        }
+    }
+}
+/// Where a widget's preview comes from, best first: the layout its app gives for a preview,
+/// drawn at the widget's default size; the app's preview image; else the app's icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WidgetPreviewSource {
+    Unspecified = 0,
+    Layout = 1,
+    Image = 2,
+    Icon = 3,
+}
+impl WidgetPreviewSource {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WIDGET_PREVIEW_SOURCE_UNSPECIFIED",
+            Self::Layout => "WIDGET_PREVIEW_SOURCE_LAYOUT",
+            Self::Image => "WIDGET_PREVIEW_SOURCE_IMAGE",
+            Self::Icon => "WIDGET_PREVIEW_SOURCE_ICON",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WIDGET_PREVIEW_SOURCE_UNSPECIFIED" => Some(Self::Unspecified),
+            "WIDGET_PREVIEW_SOURCE_LAYOUT" => Some(Self::Layout),
+            "WIDGET_PREVIEW_SOURCE_IMAGE" => Some(Self::Image),
+            "WIDGET_PREVIEW_SOURCE_ICON" => Some(Self::Icon),
             _ => None,
         }
     }

@@ -20,8 +20,8 @@
 //! Nothing here names a host operating system API. The platform supplies the cameras through
 //! [`Cameras`].
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -32,7 +32,7 @@ use dsa_protocol::control::{
 };
 use dsa_protocol::handshake::{host_accept_open, local_hello};
 use dsa_protocol::{decode, encode};
-use dsa_transport::{Connection, Listener, TransportError};
+use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 /// The vsock port the guest's camera provider HAL connects to.
 pub const CAMERA_PORT: u32 = 5572;
@@ -51,9 +51,10 @@ pub const MAX_SIDE: u32 = 4096;
 /// one frame of the transport.
 pub const MAX_PIXELS: u64 = 4096 * 2304;
 
-/// How long the host waits for the guest's next message while a camera runs, before it
-/// takes the camera's next picture.
-const POLL: Duration = Duration::from_millis(1);
+/// How long letting a camera go waits for its thread to drop the stream. A camera whose
+/// stream has a [`CameraStream::releaser`] is already let go by then; the wait only keeps a
+/// picture of the old camera from following the next answer to the guest.
+const RELEASE_WAIT: Duration = Duration::from_secs(1);
 
 /// Where a camera faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,6 +232,15 @@ impl Frame {
 pub trait CameraStream: Send {
     /// Waits for the camera's next picture.
     fn next(&mut self) -> Result<Frame, String>;
+
+    /// A way to let the camera go from another thread at once, even while [`next`] waits
+    /// for a picture or the stream's thread is busy sending one; [`next`] then fails. `None`
+    /// when the camera goes only when the stream is dropped.
+    ///
+    /// [`next`]: CameraStream::next
+    fn releaser(&self) -> Option<Box<dyn Fn() + Send>> {
+        None
+    }
 }
 
 /// The host's cameras.
@@ -300,8 +310,45 @@ pub fn choose_mode(modes: &[Mode], width: u32, height: u32, fps: u32) -> Option<
     Some((mode, rate))
 }
 
+/// A region of a camera's picture: its left and top edges, width and height.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Crop {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The region of a `picture_width` by `picture_height` picture that a `width` by `height`
+/// picture is made from: the largest one of that shape, at the centre, at even offsets so it
+/// starts on a chroma sample. A picture of another shape is cropped, never stretched, so a
+/// 4:3 photo of a 16:9 camera is not distorted. The guest's camera HAL crops its streams by
+/// the same rule.
+pub fn center_crop(picture_width: u32, picture_height: u32, width: u32, height: u32) -> Crop {
+    let mut crop = Crop {
+        x: 0,
+        y: 0,
+        width: picture_width,
+        height: picture_height,
+    };
+    if picture_width == 0 || picture_height == 0 || width == 0 || height == 0 {
+        return crop;
+    }
+    let wide = u64::from(picture_width) * u64::from(height);
+    let tall = u64::from(picture_height) * u64::from(width);
+    if wide > tall {
+        crop.width = ((tall / u64::from(height)) as u32).max(1);
+    } else if tall > wide {
+        crop.height = ((wide / u64::from(width)) as u32).max(1);
+    }
+    crop.x = ((picture_width - crop.width) / 2) & !1;
+    crop.y = ((picture_height - crop.height) / 2) & !1;
+    crop
+}
+
 /// `frame` scaled to `width` by `height` (each even and at least 2) by taking the nearest
-/// pixel, which is what a still or a smaller stream needs from a camera's picture.
+/// pixel, which is what a still or a smaller stream needs from a camera's picture. A size of
+/// another shape is cut from the centre first ([`center_crop`]).
 pub fn scale_nv12(frame: &Frame, width: u32, height: u32) -> Option<Frame> {
     if !frame.is_whole() || width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
         return None;
@@ -309,29 +356,37 @@ pub fn scale_nv12(frame: &Frame, width: u32, height: u32) -> Option<Frame> {
     if width == frame.width && height == frame.height {
         return Some(frame.clone());
     }
+    let crop = center_crop(frame.width, frame.height, width, height);
     let (sw, sh, ss) = (
         frame.width as usize,
         frame.height as usize,
         frame.stride as usize,
     );
+    let (cx, cy, cw, ch) = (
+        crop.x as usize,
+        crop.y as usize,
+        crop.width as usize,
+        crop.height as usize,
+    );
     let (dw, dh) = (width as usize, height as usize);
     let mut nv12 = vec![0u8; dw * (dh + dh / 2)];
     for y in 0..dh {
-        let sy = y * sh / dh;
+        let sy = cy + y * ch / dh;
         let src = &frame.nv12[sy * ss..sy * ss + sw];
         let dst = &mut nv12[y * dw..(y + 1) * dw];
         for (x, out) in dst.iter_mut().enumerate() {
-            *out = src[x * sw / dw];
+            *out = src[cx + x * cw / dw];
         }
     }
     let chroma = ss * sh;
     let (scw, sch) = (sw.div_ceil(2), sh.div_ceil(2));
+    let (ccx, ccy, ccw, cch) = (cx / 2, cy / 2, cw.div_ceil(2), ch.div_ceil(2));
     for y in 0..dh / 2 {
-        let sy = (y * sch / (dh / 2)).min(sch - 1);
+        let sy = (ccy + y * cch / (dh / 2)).min(sch - 1);
         let row = chroma + sy * ss;
         let out = dw * dh + y * dw;
         for x in 0..dw / 2 {
-            let sx = (x * scw / (dw / 2)).min(scw - 1);
+            let sx = (ccx + x * ccw / (dw / 2)).min(scw - 1);
             nv12[out + 2 * x] = frame.nv12[row + 2 * sx];
             nv12[out + 2 * x + 1] = frame.nv12[row + 2 * sx + 1];
         }
@@ -430,20 +485,137 @@ fn refused(why: String) -> Body {
     })
 }
 
-/// The running camera of a connection.
-struct Running {
-    stream: Box<dyn CameraStream>,
-    /// The newest picture, from which a still is made.
-    last: Option<Frame>,
+/// The sending half of a connection, shared by the connection's thread (answers) and its
+/// camera's thread (pictures), so their frames never interleave.
+type SharedSender = Arc<Mutex<Box<dyn FrameSender>>>;
+
+fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Sends `frame` to the guest and keeps it as the newest picture.
+fn send_shared(sender: &SharedSender, body: Body) -> Result<(), TransportError> {
+    lock(sender).send(&encode(&Envelope { body: Some(body) }))
+}
+
+/// The running camera of a connection, on a thread of its own that takes its pictures and
+/// sends them to the guest. The connection's thread keeps reading the guest's messages
+/// meanwhile, so a stop or a closed connection lets the camera go at once, even while the
+/// camera waits for a picture or a picture waits to go out.
+///
+/// Dropping it lets the camera go: through the stream's releaser at once when it has one, and
+/// in any case when its thread ends and drops the stream, which is waited for up to
+/// [`RELEASE_WAIT`].
+struct Running {
+    stop: Arc<AtomicBool>,
+    release: Option<Box<dyn Fn() + Send>>,
+    /// The newest picture, from which a still is made.
+    last: Arc<Mutex<Option<Frame>>>,
+    /// Disconnected once the camera's thread has dropped the stream.
+    done: mpsc::Receiver<()>,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(release) = &self.release {
+            release();
+        }
+        let _ = self.done.recv_timeout(RELEASE_WAIT);
+    }
+}
+
+/// Starts `stream` on a thread of its own that sends its pictures through `sender`, numbered
+/// from `sequence`.
+fn start_capture(
+    stream: Box<dyn CameraStream>,
+    sender: &SharedSender,
+    sequence: &Arc<AtomicU64>,
+) -> Result<Running, String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let last = Arc::new(Mutex::new(None));
+    let (done_tx, done) = mpsc::channel::<()>();
+    let release = stream.releaser();
+    let (thread_stop, thread_last, thread_sender, thread_sequence) = (
+        Arc::clone(&stop),
+        Arc::clone(&last),
+        Arc::clone(sender),
+        Arc::clone(sequence),
+    );
+    thread::Builder::new()
+        .name("dsa-camera-capture".into())
+        .spawn(move || {
+            capture(
+                stream,
+                &thread_sender,
+                &thread_stop,
+                &thread_last,
+                &thread_sequence,
+            );
+            drop(done_tx);
+        })
+        .map_err(|error| format!("the camera's thread did not start: {error}"))?;
+    Ok(Running {
+        stop,
+        release,
+        last,
+        done,
+    })
+}
+
+/// Takes the pictures of `stream` and sends them until `stop` is set, the connection goes or
+/// the camera fails, which is reported to the guest. The stream is dropped, letting the
+/// camera go, before the thread ends and before a failure is reported.
+fn capture(
+    mut stream: Box<dyn CameraStream>,
+    sender: &SharedSender,
+    stop: &AtomicBool,
+    last: &Mutex<Option<Frame>>,
+    sequence: &AtomicU64,
+) {
+    let failure = loop {
+        if stop.load(Ordering::SeqCst) {
+            break None;
+        }
+        match stream.next() {
+            Ok(frame) if frame.is_whole() => {
+                let mut out = lock(sender);
+                // Checked while holding the sender: once a stop is set, no picture of this
+                // camera follows what the connection's thread sends next.
+                if stop.load(Ordering::SeqCst) {
+                    break None;
+                }
+                let sequence = sequence.fetch_add(1, Ordering::SeqCst);
+                let (sent, frame) = send_frame(out.as_mut(), frame, sequence);
+                *lock(last) = Some(frame);
+                if sent.is_err() {
+                    // The connection is gone; its thread sees that and ends.
+                    break None;
+                }
+            }
+            // A picture whose size does not match its bytes is dropped.
+            Ok(_) => {}
+            Err(why) => break Some(why),
+        }
+    };
+    drop(stream);
+    if let Some(why) = failure {
+        *lock(last) = None;
+        let mut out = lock(sender);
+        if !stop.load(Ordering::SeqCst) {
+            let failed = Body::CameraError(CameraError { error: why });
+            let _ = out.send(&encode(&Envelope { body: Some(failed) }));
+        }
+    }
+}
+
+/// Sends `frame` to the guest, and gives it back to be kept as the newest picture.
 fn send_frame(
-    connection: &mut dyn Connection,
-    running: &mut Running,
+    sender: &mut dyn FrameSender,
     mut frame: Frame,
     sequence: u64,
-) -> Result<(), TransportError> {
+) -> (Result<(), TransportError>, Frame) {
     let envelope = Envelope {
         body: Some(Body::CameraFrame(CameraFrame {
             sequence,
@@ -454,12 +626,11 @@ fn send_frame(
             nv12: std::mem::take(&mut frame.nv12),
         })),
     };
-    let sent = connection.send(&encode(&envelope));
+    let sent = sender.send(&encode(&envelope));
     if let Some(Body::CameraFrame(message)) = envelope.body {
         frame.nv12 = message.nv12;
     }
-    running.last = Some(frame);
-    sent
+    (sent, frame)
 }
 
 /// Runs one connection on the camera port to its end. `build` names this host in its Hello.
@@ -479,96 +650,102 @@ pub fn serve_connection(
     if let Err(error) = send(connection.as_mut(), Body::CameraList(list)) {
         return send_failed("the camera list", error);
     }
+    let Some(sender) = connection.try_clone_sender() else {
+        return CameraEnd::Failed("the connection gives no second handle to send on".into());
+    };
+    let sender: SharedSender = Arc::new(Mutex::new(sender));
 
+    // Declared after the sender, so it is dropped (the camera let go) first on every return.
     let mut running: Option<Running> = None;
-    let mut sequence = 0u64;
+    let sequence = Arc::new(AtomicU64::new(0));
     loop {
-        let timeout = running.as_ref().map(|_| POLL);
-        let message = match connection.recv(timeout) {
-            Ok(frame) => Some(frame),
-            Err(TransportError::Timeout) => None,
+        let frame = match connection.recv(None) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => continue,
             Err(TransportError::Closed) => return CameraEnd::Closed,
             Err(error) => return CameraEnd::Failed(format!("the connection failed: {error}")),
         };
-        if let Some(frame) = message {
-            let sent = match decode(&frame).ok().and_then(|e| e.body) {
-                Some(Body::CameraOpen(open)) => {
-                    // The camera running before is let go first, so a new size never needs
-                    // the camera twice.
-                    running = None;
-                    // Listed again, so a camera blocked since the list does not open.
-                    let present = listed(cameras);
-                    let answer = match present.iter().find(|c| c.id == open.id) {
-                        None => refused(format!(
-                            "the camera {:?} is not there or the user has blocked it in the \
-                             computer's privacy settings",
-                            open.id
-                        )),
-                        Some(camera) => {
-                            match choose_mode(&camera.modes, open.width, open.height, open.fps) {
-                                None => refused(format!("{} has no mode to run", camera.name)),
-                                Some((mode, fps)) => match cameras.open(&camera.id, mode, fps) {
-                                    Ok(stream) => {
-                                        running = Some(Running { stream, last: None });
-                                        Body::CameraOpened(CameraOpened {
-                                            ok: true,
-                                            error: String::new(),
-                                            width: mode.width,
-                                            height: mode.height,
-                                            fps,
-                                        })
-                                    }
-                                    Err(why) => refused(why),
-                                },
+        let sent = match decode(&frame).ok().and_then(|e| e.body) {
+            Some(Body::CameraOpen(open)) => {
+                // The camera running before is let go first, so a new size never needs the
+                // camera twice.
+                running = None;
+                let (answer, stream) = open_camera(cameras, &open);
+                let sent = send_shared(&sender, answer);
+                if let (Ok(()), Some(stream)) = (&sent, stream) {
+                    match start_capture(stream, &sender, &sequence) {
+                        Ok(started) => running = Some(started),
+                        Err(why) => {
+                            let failed = Body::CameraError(CameraError { error: why });
+                            if let Err(error) = send_shared(&sender, failed) {
+                                return send_failed("the error", error);
                             }
                         }
-                    };
-                    send(connection.as_mut(), answer)
+                    }
                 }
-                Some(Body::CameraStop(_)) => {
-                    running = None;
-                    Ok(())
-                }
-                Some(Body::CameraStill(still)) => {
-                    let answer = still_of(cameras, running.as_ref(), &still);
-                    send(connection.as_mut(), Body::CameraStillTaken(answer))
-                }
-                _ => {
-                    let why = "the guest sent a message the camera port does not take";
-                    return CameraEnd::Failed(why.into());
-                }
-            };
-            if let Err(error) = sent {
-                return send_failed("a message to the guest", error);
+                sent
             }
-        }
-
-        let Some(run) = running.as_mut() else {
-            continue;
-        };
-        match run.stream.next() {
-            Ok(frame) if frame.is_whole() => {
-                if let Err(error) = send_frame(connection.as_mut(), run, frame, sequence) {
-                    return send_failed("a picture", error);
-                }
-                sequence += 1;
-            }
-            // A picture whose size does not match its bytes is dropped.
-            Ok(_) => {}
-            Err(why) => {
+            Some(Body::CameraStop(_)) => {
                 running = None;
-                let failed = Body::CameraError(CameraError { error: why });
-                if let Err(error) = send(connection.as_mut(), failed) {
-                    return send_failed("the error", error);
-                }
+                Ok(())
             }
+            Some(Body::CameraStill(still)) => {
+                // Read while holding the sender, which the camera's thread holds from sending
+                // a picture until it is kept: the newest picture the guest has is the one here.
+                let last = {
+                    let _sending = lock(&sender);
+                    running.as_ref().and_then(|r| lock(&r.last).clone())
+                };
+                let answer = still_of(cameras, last.as_ref(), &still);
+                send_shared(&sender, Body::CameraStillTaken(answer))
+            }
+            _ => {
+                let why = "the guest sent a message the camera port does not take";
+                return CameraEnd::Failed(why.into());
+            }
+        };
+        if let Err(error) = sent {
+            return send_failed("a message to the guest", error);
         }
+    }
+}
+
+/// The answer to the guest's `open`, and the camera's stream when it opened.
+fn open_camera(
+    cameras: &dyn Cameras,
+    open: &dsa_protocol::control::CameraOpen,
+) -> (Body, Option<Box<dyn CameraStream>>) {
+    // Listed again, so a camera blocked since the list does not open.
+    let present = listed(cameras);
+    let Some(camera) = present.iter().find(|c| c.id == open.id) else {
+        let why = format!(
+            "the camera {:?} is not there or the user has blocked it in the computer's \
+             privacy settings",
+            open.id
+        );
+        return (refused(why), None);
+    };
+    let Some((mode, fps)) = choose_mode(&camera.modes, open.width, open.height, open.fps) else {
+        return (refused(format!("{} has no mode to run", camera.name)), None);
+    };
+    match cameras.open(&camera.id, mode, fps) {
+        Ok(stream) => {
+            let opened = Body::CameraOpened(CameraOpened {
+                ok: true,
+                error: String::new(),
+                width: mode.width,
+                height: mode.height,
+                fps,
+            });
+            (opened, Some(stream))
+        }
+        Err(why) => (refused(why), None),
     }
 }
 
 fn still_of(
     cameras: &dyn Cameras,
-    running: Option<&Running>,
+    last: Option<&Frame>,
     still: &dsa_protocol::control::CameraStill,
 ) -> CameraStillTaken {
     let fail = |why: String| CameraStillTaken {
@@ -576,7 +753,7 @@ fn still_of(
         jpeg: Vec::new(),
         error: why,
     };
-    let Some(last) = running.and_then(|r| r.last.as_ref()) else {
+    let Some(last) = last else {
         return fail("the camera has no picture yet".into());
     };
     let (width, height) = (still.width, still.height);

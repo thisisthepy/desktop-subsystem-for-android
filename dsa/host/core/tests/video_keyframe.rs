@@ -218,7 +218,10 @@ fn fr26_the_streams_numbers_count_the_packets_before_a_key_frame() {
         .expect("a line once the interval has passed");
     assert!(line.contains("5 packets, 1 pictures decoded"), "{line}");
     assert!(
-        line.contains("4 dropped (0 flushed, 0 malformed, 4 before a key frame)"),
+        line.contains(
+            "4 dropped (0 flushed, 0 malformed, 4 before a key frame, 0 not written by the \
+             decoder)"
+        ),
         "{line}"
     );
 }

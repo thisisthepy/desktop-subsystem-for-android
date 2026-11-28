@@ -764,8 +764,15 @@ fn nfr2_the_guest_kernel_sets_little_memory_aside_at_boot() {
             config().full_kernel_cmdline_for(arch)
         };
         let words: Vec<&str> = cmdline.split_whitespace().collect();
-        // A 4 MiB bounce buffer, not the 64 MiB default, which the VMBus devices never use.
-        assert!(words.contains(&"swiotlb=2048"), "{cmdline}");
+        // No bounce buffer on x86_64, whose VMBus devices never use one. arm64 keeps 4 MiB, not
+        // the 64 MiB default: without one its kmalloc rounds every allocation up to 128 bytes.
+        let swiotlb: Vec<&&str> = words.iter().filter(|w| w.starts_with("swiotlb=")).collect();
+        let expected = if arch == GuestArch::Arm64 {
+            "swiotlb=2048"
+        } else {
+            "swiotlb=noforce"
+        };
+        assert_eq!(swiotlb, [&expected], "{cmdline}");
         // No KFENCE pool, and hash tables sized for a desktop guest rather than its memory.
         for word in [
             "kfence.sample_interval=0",

@@ -1,0 +1,184 @@
+Subject: Send a memory trim to an app the host hides although Android shows its task
+
+DSA shows each task in its own host window, and the guest's tasks never cover each other, so a
+task whose host window the user minimized, covered with other windows or left on another
+virtual desktop is still a visible freeform task to Android. Its process stays in the
+foreground (PROCESS_STATE_TOP), so the activity manager never sends it TRIM_MEMORY_UI_HIDDEN
+as a phone's app gets when it goes to the background. The DSA agent sends the trim itself
+through the shell's "am send-trim-memory", but setProcessMemoryTrimLevel refuses any level from
+TRIM_MEMORY_UI_HIDDEN up for a process at PROCESS_STATE_IMPORTANT_FOREGROUND or above ("Unable
+to set a background trim level on a foreground process"), so the trim never reaches the app.
+
+The activity manager's shell command "dsa-hidden-trim" now sends it:
+
+- "dsa-hidden-trim hidden [PACKAGE...]" sets the packages every task of which the host hides,
+  replacing those before ("hidden" alone means none). The DSA agent, which holds
+  MANAGE_ACTIVITY_TASKS, sets them whenever the host says which windows the user can see.
+- "dsa-hidden-trim send <PROCESS> <HIDDEN|BACKGROUND>" sends the process the level, as
+  setProcessMemoryTrimLevel does for a process in the background, but without waiting for the
+  process to leave the foreground. Only the shell may send (the agent's trim script runs as the
+  shell), only TRIM_MEMORY_UI_HIDDEN or TRIM_MEMORY_BACKGROUND, and only to a process whose
+  package is set. A refusal is one line on the error output ("Error: <reason>").
+- Without arguments the command prints "supported", which is how the agent and its trim script
+  tell an image with this change from one without it, which answers "Unknown command".
+
+Only the trim callback is sent. The process keeps its state and importance, its activities are
+neither stopped nor hidden, and its windows do not change. "am send-trim-memory" and every app
+whose package is not set behave as before, and nothing is set until the agent sets it. The set
+lives in the activity manager's process, so it ends when that process does.
+
+Applies to frameworks/base at 45034f0663f960d9ee5fb0a101a4732b71f6e2f4 (Android 16), after 0012.
+---
+diff --git a/services/core/java/com/android/server/am/ActivityManagerService.java b/services/core/java/com/android/server/am/ActivityManagerService.java
+--- a/services/core/java/com/android/server/am/ActivityManagerService.java
++++ b/services/core/java/com/android/server/am/ActivityManagerService.java
+@@ -3222,6 +3222,58 @@ public class ActivityManagerService extends IActivityManager.Stub
+         }
+     }
+ 
++    /**
++     * DSA: the packages every task of which the host hides from the user (all its windows
++     * minimized, covered by other windows or on another virtual desktop), as the DSA agent last
++     * set them with the shell command "dsa-hidden-trim hidden". Android still counts such a
++     * task as visible, since its freeform window stays on the guest's display, so its process
++     * stays in the foreground and setProcessMemoryTrimLevel refuses it a background trim level.
++     * The set is replaced, never changed in place.
++     */
++    volatile java.util.Set<String> mDsaHiddenPackages = java.util.Collections.emptySet();
++
++    /**
++     * DSA: sends a process of a package the host hides a background trim level (HIDDEN or
++     * BACKGROUND), as setProcessMemoryTrimLevel sends one to a process in the background. As
++     * there, only the shell may ask; and only for a process whose package is in
++     * mDsaHiddenPackages, for which it does not wait for the process to leave the foreground,
++     * which the process of a task Android shows never does. Nothing else changes: the process
++     * keeps its state and importance, and its activities are neither stopped nor hidden.
++     */
++    boolean dsaSetHiddenProcessMemoryTrimLevel(String process, @UserIdInt int userId, int level)
++            throws RemoteException {
++        if (!isCallerShell()) {
++            throw new SecurityException("Only shell can call it");
++        }
++        if (level < ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
++            throw new IllegalArgumentException("Only a background trim level is sent this way");
++        }
++        synchronized (this) {
++            final ProcessRecord app = findProcessLOSP(process, userId,
++                    "dsaSetHiddenProcessMemoryTrimLevel");
++            if (app == null) {
++                throw new IllegalArgumentException("Unknown process: " + process);
++            }
++            final IApplicationThread thread = app.getThread();
++            if (thread == null) {
++                throw new IllegalArgumentException("Process has no app thread");
++            }
++            if (app.info == null || !mDsaHiddenPackages.contains(app.info.packageName)) {
++                throw new IllegalArgumentException(
++                        "The host has not hidden the tasks of " + process);
++            }
++            if (app.mProfile.getTrimMemoryLevel() >= level) {
++                throw new IllegalArgumentException(
++                        "Unable to set a higher trim level than current level");
++            }
++            thread.scheduleTrimMemory(level);
++            synchronized (mProcLock) {
++                app.mProfile.setTrimMemoryLevel(level);
++            }
++            return true;
++        }
++    }
++
+     void dispatchOomAdjObserver(String msg) {
+         OomAdjObserver observer;
+         synchronized (mOomAdjObserverLock) {
+diff --git a/services/core/java/com/android/server/am/ActivityManagerShellCommand.java b/services/core/java/com/android/server/am/ActivityManagerShellCommand.java
+--- a/services/core/java/com/android/server/am/ActivityManagerShellCommand.java
++++ b/services/core/java/com/android/server/am/ActivityManagerShellCommand.java
+@@ -394,6 +394,9 @@ final class ActivityManagerShellCommand extends ShellCommand {
+                     return runGetStandbyBucket(pw);
+                 case "send-trim-memory":
+                     return runSendTrimMemory(pw);
++                // DSA: a memory trim for an app the host hides, which Android shows.
++                case "dsa-hidden-trim":
++                    return runDsaHiddenTrim(pw);
+                 case "display":
+                     return runDisplay(pw);
+                 case "stack":
+@@ -3677,6 +3680,67 @@ final class ActivityManagerShellCommand extends ShellCommand {
+         return 0;
+     }
+ 
++    /**
++     * DSA: sends a memory trim to the process of an app the host hides from the user, whose
++     * task Android still shows and so counts as in the foreground
++     * (ActivityManagerService.dsaSetHiddenProcessMemoryTrimLevel).
++     *
++     *     dsa-hidden-trim                                    prints "supported"
++     *     dsa-hidden-trim hidden [PACKAGE...]                the packages the host hides,
++     *                                                        replacing those before
++     *     dsa-hidden-trim send <PROCESS> <HIDDEN|BACKGROUND> sends the process the level
++     *
++     * The DSA agent, which holds MANAGE_ACTIVITY_TASKS, sets the packages whenever the host says
++     * which windows the user can see; "hidden" alone means none. Only the shell may send, as
++     * for send-trim-memory, and only to a process of a package that is set: send-trim-memory
++     * itself, and every other app, behave as before. Without arguments the command only
++     * answers, which tells the agent and its trim script that this framework has the change:
++     * one without it answers "Unknown command". The set lives in this process, so it ends when
++     * the process does, and the agent sets it again when it starts.
++     */
++    int runDsaHiddenTrim(PrintWriter pw) throws RemoteException {
++        final String verb = getNextArg();
++        if (verb == null) {
++            pw.println("supported");
++            return 0;
++        }
++        if ("hidden".equals(verb)) {
++            mInternal.mContext.enforceCallingOrSelfPermission(
++                    android.Manifest.permission.MANAGE_ACTIVITY_TASKS, "dsa-hidden-trim");
++            final android.util.ArraySet<String> packages = new android.util.ArraySet<>();
++            for (String arg = getNextArg(); arg != null; arg = getNextArg()) {
++                if (!arg.isEmpty()) {
++                    packages.add(arg);
++                }
++            }
++            mInternal.mDsaHiddenPackages = java.util.Collections.unmodifiableSet(packages);
++            return 0;
++        }
++        if (!"send".equals(verb)) {
++            getErrPrintWriter().println("Error: expected hidden or send, not " + verb);
++            return -1;
++        }
++        final String proc = getNextArgRequired();
++        final String levelArg = getNextArgRequired();
++        final int level;
++        if ("HIDDEN".equals(levelArg)) {
++            level = ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN;
++        } else if ("BACKGROUND".equals(levelArg)) {
++            level = ComponentCallbacks2.TRIM_MEMORY_BACKGROUND;
++        } else {
++            getErrPrintWriter().println("Error: expected HIDDEN or BACKGROUND, not " + levelArg);
++            return -1;
++        }
++        try {
++            mInternal.dsaSetHiddenProcessMemoryTrimLevel(proc, UserHandle.USER_CURRENT, level);
++        } catch (IllegalArgumentException | SecurityException e) {
++            // The reason goes to the caller as one line, so the trim script can log it.
++            getErrPrintWriter().println("Error: " + e.getMessage());
++            return -1;
++        }
++        return 0;
++    }
++
+     int runSendTrimMemory(PrintWriter pw) throws RemoteException {
+         int userId = UserHandle.USER_CURRENT;
+         String opt;
+@@ -5029,6 +5093,9 @@ final class ActivityManagerShellCommand extends ShellCommand {
+             pw.println("  send-trim-memory [--user <USER_ID>] <PROCESS>");
+             pw.println("          [HIDDEN|RUNNING_MODERATE|BACKGROUND|RUNNING_LOW|MODERATE|RUNNING_CRITICAL|COMPLETE]");
+             pw.println("      Send a memory trim event to a <PROCESS>.  May also supply a raw trim int level.");
++            pw.println("  dsa-hidden-trim [hidden [PACKAGE...] | send <PROCESS> <HIDDEN|BACKGROUND>]");
++            pw.println("      DSA: set the packages the host hides, or send a process of one of them a");
++            pw.println("      background trim level although its task is shown.");
+             pw.println("  display [COMMAND] [...]: sub-commands for operating on displays.");
+             pw.println("       move-stack <STACK_ID> <DISPLAY_ID>");
+             pw.println("           Move <STACK_ID> from its current display to <DISPLAY_ID>.");

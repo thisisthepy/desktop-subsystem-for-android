@@ -17,7 +17,9 @@
 //! CPU. When the renderer ends, the window manager and the app windows stay with their last
 //! frame, and the window manager starts the renderer again (see
 //! [`dsa_host_core::renderer::supervise`]); the guest's streams drop with the old process and
-//! the guest connects again to the new one.
+//! the guest connects again to the new one. When the window manager ends without stopping the
+//! renderer, the renderer waits for the next window manager, which takes it over
+//! ([`adoption_pipe`]).
 //!
 //! This file turns the render GPU request and the renderer's report into the messages and
 //! back, which every build tests.
@@ -37,6 +39,14 @@ pub mod process;
 
 /// The renderer's program file, installed beside the window manager.
 pub const RENDERER_EXE: &str = "dsa-gfx.exe";
+
+/// The pipe a renderer whose window manager ended without stopping it waits on, for the next
+/// window manager in this session to take it over. One per session: one window manager runs
+/// in each.
+#[cfg(windows)]
+pub fn adoption_pipe() -> String {
+    format!("dsa-gfx-adopt-{}", crate::compositor::current_session())
+}
 
 /// The `Start` that asks for `request`, with the guest's streams on the vsock ports
 /// `ports` (the command stream's, then the process pipe's).

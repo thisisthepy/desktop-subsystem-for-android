@@ -11,7 +11,7 @@
 //! }
 //! ```
 //!
-//! Without `memory_mb`, which an installation leaves out, the VM starts at 2 GiB and grows to the
+//! Without `memory_mb`, which an installation leaves out, the VM starts at 1.5 GiB and grows to the
 //! limit the user set (`dsa settings set memory-limit <MiB>`), or with none to the computer's
 //! memory less what Windows keeps. It holds only what Android uses.
 //!
@@ -271,7 +271,7 @@ pub struct HostConfig {
     /// to the most it used, until the VM stops, and memory is taken only while video plays.
     #[serde(default)]
     pub video_shared_memory_mb: Option<u64>,
-    /// The size in MiB of the memory the VM shares with the graphics renderer (256 when absent,
+    /// The size in MiB of the memory the VM shares with the graphics renderer (512 when absent,
     /// 0 for none). Apps' Vulkan host-visible memory and gralloc buffers' CPU uploads and read
     /// backs go there instead of through the graphics stream; the size is fixed when the VM is
     /// made and only reserved. The system's commit limit is charged only for what grants used,

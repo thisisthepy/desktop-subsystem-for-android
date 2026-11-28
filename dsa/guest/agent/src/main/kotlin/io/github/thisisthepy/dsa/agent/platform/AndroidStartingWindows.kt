@@ -2,12 +2,14 @@ package io.github.thisisthepy.dsa.agent.platform
 
 import android.app.ActivityManager
 import android.app.ActivityTaskManager
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.HardwareRenderer
 import android.graphics.PixelFormat
 import android.graphics.Point
 import android.graphics.Rect
@@ -20,6 +22,7 @@ import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.SurfaceControl
 import android.view.View
@@ -30,6 +33,8 @@ import android.window.StartingWindowInfo
 import android.window.StartingWindowRemovalInfo
 import android.window.TaskOrganizer
 import io.github.thisisthepy.dsa.agent.Log
+import io.github.thisisthepy.dsa.agent.Scheduler
+import io.github.thisisthepy.dsa.agent.memory.IdleRelease
 import io.github.thisisthepy.dsa.agent.splash.IconKind
 import io.github.thisisthepy.dsa.agent.splash.IconSource
 import io.github.thisisthepy.dsa.agent.splash.LeashPlace
@@ -68,6 +73,28 @@ class AndroidStartingWindows(
 ) {
     private val handler = Handler(looper)
     private val windows = StartingWindows()
+
+    /**
+     * A starting window's surface stays in the agent's renderer after the window is removed:
+     * the GPU driver frees its images (each the size of the task) only once it sees the GPU
+     * finish the work that last used them, which it checks when the renderer draws again, and
+     * the agent's other windows draw rarely. So a second after the last starting window went,
+     * the renderer is asked to finish its work and trim its caches, as when an app's UI is
+     * hidden. A burst of app starts asks once.
+     */
+    private val idleRenderer = IdleRelease(
+        object : Scheduler {
+            override fun post(work: () -> Unit) {
+                handler.post(work)
+            }
+
+            override fun postDelayed(delayMillis: Long, work: () -> Unit) {
+                handler.postDelayed(work, delayMillis)
+            }
+        },
+        SystemClock::uptimeMillis,
+        RENDERER_TRIM_IDLE_MILLIS,
+    ) { trimRenderer() }
     private val leashes = TaskLeashes(object : LeashSurfaces<SurfaceControl> {
         override fun place(leash: SurfaceControl, x: Int, y: Int, width: Int, height: Int) {
             if (!leash.isValid) return
@@ -87,7 +114,9 @@ class AndroidStartingWindows(
 
         override fun removeStartingWindow(removalInfo: StartingWindowRemovalInfo) = guarded("remove a starting window") {
             removalInfo.windowAnimationLeash?.let { if (it.isValid) it.release() }
+            val had = removalInfo.taskId in windows.tasks()
             windows.remove(removalInfo.taskId).forEach { log.warn("could not remove the starting window of task ${removalInfo.taskId}", it) }
+            if (had) idleRenderer.used()
         }
 
         override fun copySplashScreenView(taskId: Int) = guarded("answer a splash screen copy") { declineCopy(taskId) }
@@ -100,7 +129,9 @@ class AndroidStartingWindows(
 
         override fun onTaskVanished(taskInfo: ActivityManager.RunningTaskInfo) = guarded("forget a task") {
             leashes.vanished(taskInfo.taskId)
+            val had = taskInfo.taskId in windows.tasks()
             windows.remove(taskInfo.taskId)
+            if (had) idleRenderer.used()
         }
 
         override fun onTaskInfoChanged(taskInfo: ActivityManager.RunningTaskInfo) = guarded("place a task") {
@@ -425,6 +456,25 @@ class AndroidStartingWindows(
         method.invoke(service, taskId, null)
     }
 
+    /**
+     * Has the agent's renderer finish its GPU work and trim its caches, as the framework does
+     * when an app's UI is hidden (HardwareRenderer.trimMemory, not in the SDK). Its windows keep
+     * their surfaces; what the next frame needs it uploads again.
+     */
+    private fun trimRenderer() {
+        try {
+            HardwareRenderer::class.java.getMethod("trimMemory", Int::class.javaPrimitiveType)
+                .invoke(null, ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN)
+        } catch (e: ReflectiveOperationException) {
+            log.warn("could not trim the agent's renderer; a removed starting window's GPU memory stays until it draws again", e)
+            return
+        } catch (e: RuntimeException) {
+            log.warn("could not trim the agent's renderer; a removed starting window's GPU memory stays until it draws again", e)
+            return
+        }
+        log.info("trimmed the agent's renderer: the removed starting windows' surfaces are let go of")
+    }
+
     /** The task's position in its parent (TaskInfo.positionInParent, not in the SDK). */
     private fun position(task: ActivityManager.RunningTaskInfo): Point = field<Point>(task, "positionInParent") ?: Point()
 
@@ -457,6 +507,11 @@ class AndroidStartingWindows(
     private companion object {
         // WindowConfiguration.ACTIVITY_TYPE_HOME.
         const val ACTIVITY_TYPE_HOME = 2
+
+        // How long after the last starting window went the agent's renderer is trimmed: long
+        // enough that the removed window's renderer is gone, and that the starting windows of
+        // apps opened together are trimmed for once.
+        const val RENDERER_TRIM_IDLE_MILLIS = 1_000L
 
         const val FALLBACK_DAY = 0xFFFFFFFF.toInt()
         const val FALLBACK_NIGHT = 0xFF202124.toInt()

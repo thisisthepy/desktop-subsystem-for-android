@@ -1,0 +1,140 @@
+diff --git a/drivers/nvdimm/Kconfig b/drivers/nvdimm/Kconfig
+--- a/drivers/nvdimm/Kconfig
++++ b/drivers/nvdimm/Kconfig
+@@ -19,6 +19,7 @@ if LIBNVDIMM
+ config BLK_DEV_PMEM
+ 	tristate "PMEM: Persistent memory block device support"
+ 	default LIBNVDIMM
++	select CRC32
+ 	select DAX
+ 	select ND_BTT if BTT
+ 	select ND_PFN if NVDIMM_PFN
+diff --git a/drivers/nvdimm/pmem.c b/drivers/nvdimm/pmem.c
+--- a/drivers/nvdimm/pmem.c
++++ b/drivers/nvdimm/pmem.c
+@@ -8,6 +8,7 @@
+  */
+
+ #include <linux/blkdev.h>
++#include <linux/crc32.h>
+ #include <linux/pagemap.h>
+ #include <linux/hdreg.h>
+ #include <linux/init.h>
+@@ -454,6 +455,66 @@ static const struct dev_pagemap_ops fsdax_pagemap_ops = {
+ 	.memory_failure		= pmem_pagemap_memory_failure,
+ };
+
++/* The start of a GPT header, which sits in the disk's second sector. */
++struct pmem_gpt_header {
++	__le64 signature;
++	__le32 revision;
++	__le32 header_size;
++	__le32 header_crc32;
++	__le32 reserved;
++	__le64 my_lba;
++	__le64 alternate_lba;
++};
++
++#define PMEM_GPT_SIGNATURE 0x5452415020494645ULL /* "EFI PART" */
++#define PMEM_GPT_HEADER_MIN 92
++
++/*
++ * The size of the disk image at the start of a namespace, from its GPT: the backup header
++ * is the image's last sector. 0 when the namespace holds no valid GPT header, or one whose
++ * disk does not end inside the namespace.
++ *
++ * Hyper-V gives every persistent memory device of a VM the size of the largest one (the
++ * size is the controller's, not the device's), so a small disk image sits at the start of
++ * a much larger region. Page structs for the rest of it (64 bytes for each 4 KiB) would be
++ * guest memory held for the VM's whole life for nothing: 32 MiB for a 370 MiB disk in a
++ * 2422 MiB region.
++ *
++ * Reads through the namespace's raw access, so it must run while that is enabled.
++ */
++static u64 pmem_disk_image_bytes(struct nd_namespace_common *ndns,
++				 resource_size_t namespace_bytes)
++{
++	struct pmem_gpt_header *gpt;
++	u32 header_size, crc;
++	u64 alternate, bytes = 0;
++	u8 *sector;
++
++	sector = kmalloc(SECTOR_SIZE, GFP_KERNEL);
++	if (!sector)
++		return 0;
++	if (nvdimm_read_bytes(ndns, SECTOR_SIZE, sector, SECTOR_SIZE, 0))
++		goto out;
++	gpt = (struct pmem_gpt_header *)sector;
++	if (le64_to_cpu(gpt->signature) != PMEM_GPT_SIGNATURE ||
++	    le64_to_cpu(gpt->my_lba) != 1)
++		goto out;
++	header_size = le32_to_cpu(gpt->header_size);
++	if (header_size < PMEM_GPT_HEADER_MIN || header_size > SECTOR_SIZE)
++		goto out;
++	crc = le32_to_cpu(gpt->header_crc32);
++	gpt->header_crc32 = 0;
++	if ((crc32_le(~0U, sector, header_size) ^ ~0U) != crc)
++		goto out;
++	alternate = le64_to_cpu(gpt->alternate_lba);
++	if (alternate < 2 || alternate >= namespace_bytes / SECTOR_SIZE)
++		goto out;
++	bytes = (alternate + 1) * SECTOR_SIZE;
++out:
++	kfree(sector);
++	return bytes;
++}
++
+ static int pmem_attach_disk(struct device *dev,
+ 		struct nd_namespace_common *ndns)
+ {
+@@ -474,6 +535,8 @@ static int pmem_attach_disk(struct device *dev,
+ 	struct nd_pfn_sb *pfn_sb;
+ 	struct pmem_device *pmem;
+ 	struct gendisk *disk;
++	u64 image_bytes = 0;
++	bool image_only;
+ 	void *addr;
+ 	int rc;
+
+@@ -493,12 +556,32 @@ static int pmem_attach_disk(struct device *dev,
+ 			return rc;
+ 	}
+
++	/*
++	 * A read-only region's raw namespace with page structs holds one disk image the host
++	 * maps read only: map that image, not the whole region (pmem_disk_image_bytes()).
++	 */
++	image_only = !is_nd_pfn(dev) && pmem_should_map_pages(dev) &&
++		     test_bit(ND_REGION_READONLY, &nd_region->flags);
++	if (image_only)
++		image_bytes = pmem_disk_image_bytes(ndns, resource_size(res));
++
+ 	/* we're attaching a block device, disable raw namespace access */
+ 	devm_namespace_disable(dev, ndns);
+
+ 	dev_set_drvdata(dev, pmem);
+ 	pmem->phys_addr = res->start;
+ 	pmem->size = resource_size(res);
++	if (image_only && image_bytes) {
++		u64 mapped = min_t(u64, ALIGN(image_bytes, memremap_compat_align()),
++				   pmem->size);
++
++		dev_info(dev, "maps %llu MiB of its %llu MiB region: the disk image its GPT describes\n",
++			 mapped >> 20, (u64)pmem->size >> 20);
++		pmem->size = mapped;
++	} else if (image_only) {
++		dev_info(dev, "maps all %llu MiB of its region: no GPT tells the disk image's size\n",
++			 (u64)pmem->size >> 20);
++	}
+ 	fua = nvdimm_has_flush(nd_region);
+ 	if (!IS_ENABLED(CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE) || fua < 0) {
+ 		dev_warn(dev, "unable to guarantee persistence of writes\n");
+@@ -533,7 +616,7 @@ static int pmem_attach_disk(struct device *dev,
+ 		bb_range.start += pmem->data_offset;
+ 	} else if (pmem_should_map_pages(dev)) {
+ 		pmem->pgmap.range.start = res->start;
+-		pmem->pgmap.range.end = res->end;
++		pmem->pgmap.range.end = res->start + pmem->size - 1;
+ 		pmem->pgmap.nr_range = 1;
+ 		pmem->pgmap.type = MEMORY_DEVICE_FS_DAX;
+ 		pmem->pgmap.ops = &fsdax_pagemap_ops;

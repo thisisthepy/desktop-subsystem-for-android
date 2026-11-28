@@ -151,6 +151,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent();
 
   /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   * @return Whether the setOverlayDensity field is set.
+   */
+  boolean hasSetOverlayDensity();
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   * @return The setOverlayDensity.
+   */
+  io.github.thisisthepy.dsa.control.v1.SetOverlayDensity getSetOverlayDensity();
+
+  /**
    * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
    * @return Whether the appInfo field is set.
    */
@@ -413,6 +424,17 @@ public interface EnvelopeOrBuilder extends
    * @return The displayRefresh.
    */
   io.github.thisisthepy.dsa.control.v1.DisplayRefresh getDisplayRefresh();
+
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   * @return Whether the displaySize field is set.
+   */
+  boolean hasDisplaySize();
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   * @return The displaySize.
+   */
+  io.github.thisisthepy.dsa.control.v1.DisplaySize getDisplaySize();
 
   /**
    * <code>.dsa.control.v1.PowerHint power_hint = 110;</code>
@@ -853,6 +875,17 @@ public interface EnvelopeOrBuilder extends
    * @return The notificationButtonClicked.
    */
   io.github.thisisthepy.dsa.control.v1.NotificationButtonClicked getNotificationButtonClicked();
+
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   * @return Whether the requestTaskFrame field is set.
+   */
+  boolean hasRequestTaskFrame();
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   * @return The requestTaskFrame.
+   */
+  io.github.thisisthepy.dsa.control.v1.RequestTaskFrame getRequestTaskFrame();
 
   /**
    * <code>.dsa.control.v1.BackgroundApp background_app = 74;</code>
@@ -2261,6 +2294,28 @@ public interface EnvelopeOrBuilder extends
    * @return The captionCompat.
    */
   io.github.thisisthepy.dsa.control.v1.CaptionCompat getCaptionCompat();
+
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   * @return Whether the getWidgetPreviews field is set.
+   */
+  boolean hasGetWidgetPreviews();
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   * @return The getWidgetPreviews.
+   */
+  io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews getGetWidgetPreviews();
+
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   * @return Whether the widgetPreviews field is set.
+   */
+  boolean hasWidgetPreviews();
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   * @return The widgetPreviews.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetPreviews getWidgetPreviews();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

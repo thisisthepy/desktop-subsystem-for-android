@@ -207,11 +207,24 @@ message ResizeTask {
 // the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 // With `recreate`, the move has ended and Android recreates the task's top activity at the
 // new density, restoring its saved state, even when the app says it handles a change of
-// density itself (see the control protocol's SetTaskDensity).
+// density itself (see the control protocol's SetTaskDensity). With `forced`, the task's app
+// is set to System (forced) scaling: Android is to give the task the density without
+// relaunching its activity, and gives it none if it cannot (the control protocol's
+// SetTaskDensity.forced).
 message SetTaskDensity {
   int32 task_id = 1;
   uint32 density_dpi = 2;
   bool recreate = 3;
+  bool forced = 4;
+}
+
+// An app overlay window's window is on a monitor whose density differs from the one its app,
+// set to System (forced) scaling, draws at: asks the caller's Android to draw that window alone
+// at `density_dpi`, or at its app's own density again with 0 (the control protocol's
+// SetOverlayDensity).
+message SetOverlayDensity {
+  int32 overlay_id = 1;
+  uint32 density_dpi = 2;
 }
 
 // The monitor the window of the next task opens on: asks the caller's Android to start the
@@ -245,9 +258,12 @@ message SetTaskCaption {
 
 // Tells the caller's Android which apps start below the title bar: the packages whose
 // AppWindowSettings.below_title_bar is on. The list replaces the one before, and counts for
-// the tasks that start after it.
+// the tasks that start after it. keep_focus: the packages whose AppWindowSettings.keep_focus
+// is on, which Android does not tell that they lost the focus to another app's window while
+// their task stays visible. That list replaces the one before too, and counts at once.
 message SetCaptionCompat {
   repeated string below_title_bar = 1;
+  repeated string keep_focus = 2;
 }
 
 // Where a task's window shows a clear full screen request of its app: asks the caller's
@@ -256,6 +272,12 @@ message SetCaptionCompat {
 message SetTaskFullScreen {
   int32 task_id = 1;
   bool in_window = 2;
+}
+
+// Asks the caller's Android for the current frame of a task whose window has none yet, as a
+// window reopened after the agent restarted: the frame is sent even when nothing changed.
+message RequestTaskFrame {
+  int32 task_id = 1;
 }
 
 // Turns the connection into a stream of input for the caller's Android: after the answer
@@ -896,7 +918,48 @@ message SetAppVolume {
 
 // Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 // Needs the caller's Android to be running.
-message ListWidgetProviders {}
+message ListWidgetProviders {
+  // Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+  // icon comes once, in `app_icons`, instead. A gallery that groups the widgets by app and
+  // shows only those of the apps the user opens asks so, and asks for their previews with
+  // GetWidgetPreviews: an app may offer hundreds of widgets.
+  bool lazy_previews = 1;
+}
+
+// Where a widget's preview comes from, best first: the layout its app gives for a preview,
+// drawn at the widget's default size; the app's preview image; else the app's icon.
+enum WidgetPreviewSource {
+  WIDGET_PREVIEW_SOURCE_UNSPECIFIED = 0;
+  WIDGET_PREVIEW_SOURCE_LAYOUT = 1;
+  WIDGET_PREVIEW_SOURCE_IMAGE = 2;
+  WIDGET_PREVIEW_SOURCE_ICON = 3;
+}
+
+// An app's icon, a PNG image of at most 160 pixels on a side.
+message WidgetAppIcon {
+  string package_name = 1;
+  bytes icon_png = 2;
+}
+
+// Asks for the previews of some widgets on offer, at most 64 at once. The answer is
+// WidgetPreviews. Needs the caller's Android to be running.
+message GetWidgetPreviews {
+  // The providers' components, as `package/class`.
+  repeated string providers = 1;
+}
+
+// One widget's preview, a PNG image of at most 256 pixels on a side; empty for none.
+message WidgetPreview {
+  string provider = 1;
+  bytes preview_png = 2;
+  WidgetPreviewSource source = 3;
+}
+
+// The answer to GetWidgetPreviews, in the order asked, each widget once. A widget that is not
+// on offer has no entry.
+message WidgetPreviews {
+  repeated WidgetPreview previews = 1;
+}
 
 // One widget an app in the caller's Android offers.
 message WidgetProvider {
@@ -928,6 +991,8 @@ message WidgetProvider {
 // The answer to ListWidgetProviders, in label order.
 message WidgetProviders {
   repeated WidgetProvider providers = 1;
+  // With `lazy_previews`: the icon of each app that offers a widget, each app once.
+  repeated WidgetAppIcon app_icons = 2;
 }
 
 // Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
@@ -1346,6 +1411,10 @@ message Task {
   // Whether the task's top activity says it handles a change of density itself, so it
   // redraws at a new density rather than being relaunched. False when unknown.
   bool handles_density_change = 26;
+  // Whether the caller's Android can give the task a new density without relaunching its
+  // activity although the activity does not say it handles one (see the control protocol's
+  // TaskUpdated.forced_density_available). False on an image without it.
+  bool forced_density_available = 29;
   // Which kind of full screen the task's app asks for, if any.
   FullScreenRequest fullscreen_request = 27;
   // Set when this is not an app task but an app overlay window (see OverlayWindow): `task_id`
@@ -1374,6 +1443,9 @@ message OverlayWindow {
   bool focusable = 2;
   // Whether the window takes pointer input; the pointer passes through one that does not.
   bool touchable = 3;
+  // The density the app draws this window at once it took the one the window manager asked
+  // for it (SetOverlayDensity); 0 while it draws it as the rest of its process.
+  uint32 density_dpi = 4;
 }
 
 // How a task's app asks to fill the screen.
@@ -1460,6 +1532,10 @@ message AppInfo {
   // one group for root elevation: their level and grace apply to all of them, and a settings
   // app shows them together. Empty for an app with a user ID of its own, and for a task's app.
   string shared_user_id = 18;
+  // Whether the app says it is a game (ApplicationInfo.category CATEGORY_GAME, or the older
+  // android:isGame), in the list of installed apps. A settings app lists games first. False
+  // for a task's app.
+  bool game = 19;
 }
 
 // One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
@@ -1693,6 +1769,12 @@ message GuestMemory {
   // guest's online memory blocks beyond the VM's size. 0 when none, or from a service that
   // does not count it.
   uint64 ballooned_kb = 33;
+  // The swap cache, and the page structures the guest's kernel made after boot (persistent
+  // memory and hot-added memory) and at boot, in KiB, as the control channel's GuestMemory
+  // says. 0 from a guest or a service that does not count them.
+  uint64 swap_cached_kb = 34;
+  uint64 memmap_kb = 35;
+  uint64 memmap_boot_kb = 36;
 }
 
 // One host process that runs the caller's Android: its VM's memory process, the window
@@ -2900,6 +2982,11 @@ message AppWindowSettings {
   // app whose top bar is squeezed or hidden under the title bar. Off by default; it counts
   // from the next time a window of the app opens.
   bool below_title_bar = 8;
+  // Whether the app keeps its focus while another app's window has it ("keep game focus"):
+  // while its task stays visible, Android does not tell it that it lost the focus, so a game
+  // that pauses when it loses the focus keeps running while the user works in another app's
+  // window. Keys and text still go only to the window that has the focus. Off by default.
+  bool keep_focus = 9;
 }
 
 // Where a window shows an app that asks to fill the screen.
@@ -2973,6 +3060,7 @@ message Request {
     StreamInput stream_input = 11;
     ResizeTask resize_task = 12;
     SetTaskDensity set_task_density = 13;
+    SetOverlayDensity set_overlay_density = 49;
     GetMemory get_memory = 14;
     ListApps list_apps = 15;
     GetSettings get_settings = 16;
@@ -3000,6 +3088,7 @@ message Request {
     UninstallApp uninstall_app = 38;
     SetTaskCaption set_task_caption = 45;
     SetTaskFullScreen set_task_full_screen = 48;
+    RequestTaskFrame request_task_frame = 716;
     WatchLog watch_log = 70;
     CollectDiagnostics collect_diagnostics = 71;
     StopApp stop_app = 37;
@@ -3057,6 +3146,7 @@ message Request {
     RemoveWidevine remove_widevine = 702;
     LaunchPlacement launch_placement = 710;
     SetCaptionCompat set_caption_compat = 715;
+    GetWidgetPreviews get_widget_previews = 740;
   }
 }
 
@@ -3096,6 +3186,7 @@ message Response {
     KeyProtection key_protection = 622;
     AppAudio app_audio = 660;
     Widevine widevine = 700;
+    WidgetPreviews widget_previews = 740;
   }
 }
 

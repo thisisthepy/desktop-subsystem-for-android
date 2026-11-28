@@ -12,6 +12,7 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <string>
 
 #include "dsa_hardware_buffer_import.h"
 #include "dsa_spare_pages.h"
@@ -170,6 +171,7 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
     result = calls.lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr, &address);
     bool send = false;
     bool ok = result == 0 && address;
+    bool noPicture = false;
     uint64_t print = 0;
     uint8_t* packed = nullptr;
     if (ok) {
@@ -185,10 +187,25 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
                 packed = mStaging.data();
             }
             send = ok = dsa::packPlanes(bytes, mapped, sources, planes, layout, packed);
+            // Zeros where a picture should be (no producer wrote this buffer) never go up:
+            // its ColorBuffer would show solid green. The layer keeps its last picture.
+            noPicture = send && dsa::packedHoldsNoPicture(packed, layout);
         }
         calls.unlock(ahb, nullptr);
     }
     calls.release(ahb);
+    if (noPicture) {
+        mTally.heldNoPicture();
+        uint32_t failures = 0;
+        if (mFailures.shouldLog(&failures)) {
+            HWC_LOGE("gralloc buffer %u (%ux%u, format %#x) holds no picture (luma and chroma "
+                     "zeros) when it is shown: it is not copied up, and its layer keeps its last "
+                     "picture (%u in a row)",
+                     buffer.id, buffer.width, buffer.height, buffer.format, failures);
+        }
+        mTracker.forget(buffer.id);
+        return false;
+    }
     if (!ok) {
         uint32_t failures = 0;
         if (mFailures.shouldLog(&failures)) {
@@ -219,13 +236,27 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
         mTracker.forget(buffer.id);
         return false;
     }
+    // Planes in the shared graphics memory are read by the host where they lie. If they are
+    // not what was packed once it has answered, something wrote that memory while the host
+    // read it (a scrub of the region, another writer), and the ColorBuffer may hold zeros: the
+    // layer keeps its last picture rather than show it.
+    if (packed != mStaging.data() && dsa::packedFingerprint(packed, layout) != print) {
+        mTally.changedUnderHost();
+        uint32_t failures = 0;
+        if (mFailures.shouldLog(&failures)) {
+            HWC_LOGE("what was packed for gralloc buffer %u (%ux%u, format %#x) changed in the "
+                     "graphics memory the host shares before the host had read it: its layer "
+                     "keeps its last picture (%u in a row)",
+                     buffer.id, buffer.width, buffer.height, buffer.format, failures);
+        }
+        mTracker.forget(buffer.id);
+        return false;
+    }
     mFailures.reset();
     mTracker.uploaded(buffer.id, print);
-    dsa::UploadRate::Report report;
-    if (mRate.add(monotonicNs(), mStaging.size(), &report)) {
-        HWC_LOGD("copied %" PRIu64 " KiB that a CPU wrote up to the host in %u uploads over "
-                 "%" PRIu64 " ms",
-                 report.bytes / 1024, report.uploads, report.windowNs / 1000000);
+    std::string line;
+    if (mTally.uploaded(monotonicNs(), layout, &line)) {
+        HWC_LOGD("%s", line.c_str());
     }
     return true;
 }

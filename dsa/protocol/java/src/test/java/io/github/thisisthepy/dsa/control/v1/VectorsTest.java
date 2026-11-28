@@ -94,6 +94,23 @@ public final class VectorsTest {
         cases.put("set_task_density", Envelope.newBuilder()
                 .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240))
                 .build());
+        cases.put("set_task_density_forced", Envelope.newBuilder()
+                .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240).setForced(true))
+                .build());
+        cases.put("set_overlay_density", Envelope.newBuilder()
+                .setSetOverlayDensity(SetOverlayDensity.newBuilder().setOverlayId(0x40000001).setDensityDpi(262))
+                .build());
+        cases.put("set_overlay_density_back", Envelope.newBuilder()
+                .setSetOverlayDensity(SetOverlayDensity.newBuilder().setOverlayId(0x40000001))
+                .build());
+        cases.put("task_updated_overlay_density", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(0x40000001)
+                        .setOverlay(OverlayWindow.newBuilder().setWindowType(2038).setDensityDpi(262)))
+                .build());
+        cases.put("task_updated_forced_density", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder().setTaskId(42).setForcedDensityAvailable(true))
+                .build());
         cases.put("task_updated_negative_origin", Envelope.newBuilder()
                 .setTaskUpdated(TaskUpdated.newBuilder()
                         .setTaskId(7)
@@ -217,6 +234,12 @@ public final class VectorsTest {
                 .build());
         cases.put("close_task", Envelope.newBuilder()
                 .setCloseTask(CloseTask.newBuilder().setTaskId(42))
+                .build());
+        cases.put("request_task_frame", Envelope.newBuilder()
+                .setRequestTaskFrame(RequestTaskFrame.newBuilder().setTaskId(42))
+                .build());
+        cases.put("display_size", Envelope.newBuilder()
+                .setDisplaySize(DisplaySize.newBuilder().setWidth(4096).setHeight(4096))
                 .build());
         cases.put("launch_app", Envelope.newBuilder()
                 .setLaunchApp(LaunchApp.newBuilder().setPackageName("com.example.notes"))

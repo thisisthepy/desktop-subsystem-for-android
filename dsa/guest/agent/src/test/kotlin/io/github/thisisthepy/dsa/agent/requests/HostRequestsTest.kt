@@ -84,6 +84,42 @@ class HostRequestsTest {
         assertEquals(RequestResult.Density(3, 320), requests.handle(density(3, 320)))
     }
 
+    @Test
+    fun fr4_a_density_asked_for_with_forced_is_handed_back_forced() {
+        reported += 3
+        val frame = Envelope.newBuilder()
+            .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(3).setDensityDpi(262).setForced(true))
+            .build().toByteArray()
+
+        assertEquals(RequestResult.Density(3, 262, forced = true), requests.handle(frame))
+    }
+
+    private fun overlayDensity(overlayId: Int, densityDpi: Int) = Envelope.newBuilder()
+        .setSetOverlayDensity(
+            io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.newBuilder().setOverlayId(overlayId).setDensityDpi(densityDpi),
+        )
+        .build().toByteArray()
+
+    @Test
+    fun fr41_an_overlays_density_is_handed_back_for_a_reported_overlay() {
+        val overlays = mutableSetOf(LYRICS)
+        val withOverlays = HostRequests(AGENT, actions, overlayReported = { it in overlays }) { it in reported }
+
+        assertEquals(RequestResult.OverlayDensity(LYRICS, 262), withOverlays.handle(overlayDensity(LYRICS, 262)))
+        // 0: the app's own density again.
+        assertEquals(RequestResult.OverlayDensity(LYRICS, 0), withOverlays.handle(overlayDensity(LYRICS, 0)))
+        // An overlay the host was never told of, and a task's ID, are no overlay of the host's.
+        assertTrue(withOverlays.handle(overlayDensity(LYRICS + 1, 262)) is RequestResult.SizeRefused)
+        reported += 3
+        assertTrue(withOverlays.handle(overlayDensity(3, 262)) is RequestResult.SizeRefused)
+        // A density no display is drawn at is dropped.
+        assertTrue(withOverlays.handle(overlayDensity(LYRICS, 5000)) is RequestResult.Malformed)
+    }
+
+    private companion object {
+        const val LYRICS = 0x40000001
+    }
+
     private fun caption(taskId: Int, height: Int) = Envelope.newBuilder()
         .setSetTaskCaption(SetTaskCaption.newBuilder().setTaskId(taskId).setHeight(height))
         .build().toByteArray()
@@ -118,6 +154,28 @@ class HostRequestsTest {
         )
         // An empty list is a list too: no app starts below the title bar any more.
         assertEquals(RequestResult.CaptionCompat(emptySet()), requests.handle(frame(emptyList())))
+    }
+
+    @Test
+    fun fr44_the_apps_that_keep_their_focus_are_handed_back() {
+        val frame = { packages: List<String> ->
+            Envelope.newBuilder()
+                .setCaptionCompat(
+                    io.github.thisisthepy.dsa.control.v1.CaptionCompat.newBuilder()
+                        .addBelowTitleBar("com.example.player")
+                        .addAllKeepFocus(packages),
+                )
+                .build().toByteArray()
+        }
+        assertEquals(
+            RequestResult.CaptionCompat(setOf("com.example.player"), setOf("com.ustwo.monumentvalley")),
+            requests.handle(frame(listOf("com.ustwo.monumentvalley", "", "com.ustwo.monumentvalley"))),
+        )
+        // Every app off, the default, is a list too.
+        assertEquals(
+            RequestResult.CaptionCompat(setOf("com.example.player"), emptySet()),
+            requests.handle(frame(emptyList())),
+        )
     }
 
     @Test

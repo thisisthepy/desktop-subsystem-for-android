@@ -1,0 +1,80 @@
+diff --git a/drivers/net/hyperv/hyperv_net.h b/drivers/net/hyperv/hyperv_net.h
+--- a/drivers/net/hyperv/hyperv_net.h
++++ b/drivers/net/hyperv/hyperv_net.h
+@@ -853,7 +853,12 @@ struct nvsp_message {
+ /* Max buffer sizes allowed by a host */
+ #define NETVSC_RECEIVE_BUFFER_SIZE		(1024 * 1024 * 31) /* 31MB */
+ #define NETVSC_RECEIVE_BUFFER_SIZE_LEGACY	(1024 * 1024 * 15) /* 15MB */
+-#define NETVSC_RECEIVE_BUFFER_DEFAULT		(1024 * 1024 * 16)
++/*
++ * A desktop VM's default: about 2400 packets of 1500 bytes in flight, 32 ms of a 1 Gbps
++ * download. Upstream's 16 MiB is sized for a server's fast adapter, and the guest holds
++ * the buffer for as long as the adapter exists.
++ */
++#define NETVSC_RECEIVE_BUFFER_DEFAULT		(1024 * 1024 * 4)
+
+ #define NETVSC_SEND_BUFFER_SIZE			(1024 * 1024 * 15)  /* 15MB */
+ #define NETVSC_SEND_BUFFER_DEFAULT		(1024 * 1024)
+@@ -863,7 +868,7 @@ struct nvsp_message {
+ #define NETVSC_SEND_SECTION_SIZE		6144
+ #define NETVSC_RECV_SECTION_SIZE		1728
+
+-/* Default size of TX buf: 1MB, RX buf: 16MB */
++/* Default size of TX buf: 1MB, RX buf: 4MB */
+ #define NETVSC_MIN_TX_SECTIONS	10
+ #define NETVSC_DEFAULT_TX	(NETVSC_SEND_BUFFER_DEFAULT \
+ 				 / NETVSC_SEND_SECTION_SIZE)
+diff --git a/drivers/net/hyperv/netvsc.c b/drivers/net/hyperv/netvsc.c
+--- a/drivers/net/hyperv/netvsc.c
++++ b/drivers/net/hyperv/netvsc.c
+@@ -539,6 +539,13 @@ static int netvsc_init_buf(struct hv_device *device,
+ 		goto cleanup;
+ 	}
+
++	/* What the adapter holds of the guest's memory while it exists. */
++	netdev_info(ndev, "receive buffer %u KiB (%u sections of %u bytes), send buffer %u KiB (%u sections of %u bytes), ring %u KiB each way for each channel\n",
++		    net_device->recv_buf_size >> 10, net_device->recv_section_cnt,
++		    net_device->recv_section_size, net_device->send_buf_size >> 10,
++		    net_device->send_section_cnt, net_device->send_section_size,
++		    netvsc_ring_bytes >> 10);
++
+ 	goto exit;
+
+ cleanup:
+diff --git a/drivers/net/hyperv/netvsc_drv.c b/drivers/net/hyperv/netvsc_drv.c
+--- a/drivers/net/hyperv/netvsc_drv.c
++++ b/drivers/net/hyperv/netvsc_drv.c
+@@ -52,6 +52,24 @@ module_param(ring_size, uint, 0444);
+ MODULE_PARM_DESC(ring_size, "Ring buffer size (# of 4K pages)");
+ unsigned int netvsc_ring_bytes __ro_after_init;
+
++/*
++ * The receive buffer a new adapter gets, in KiB (NETVSC_RECEIVE_BUFFER_DEFAULT unless the
++ * command line says otherwise), so its cost can be weighed against throughput without
++ * rebuilding the kernel. ethtool -G still changes it while the adapter runs.
++ */
++static unsigned int recv_buffer_kb __ro_after_init = NETVSC_RECEIVE_BUFFER_DEFAULT / 1024;
++module_param(recv_buffer_kb, uint, 0444);
++MODULE_PARM_DESC(recv_buffer_kb, "Receive buffer size of a new adapter in KiB");
++
++/* The receive sections recv_buffer_kb holds, within what a host takes. */
++static u32 netvsc_default_rx_sections(void)
++{
++	u64 sections = (u64)recv_buffer_kb * 1024 / NETVSC_RECV_SECTION_SIZE;
++
++	return clamp_t(u64, sections, NETVSC_MIN_RX_SECTIONS,
++		       NETVSC_RECEIVE_BUFFER_SIZE / NETVSC_RECV_SECTION_SIZE);
++}
++
+ static const u32 default_msg = NETIF_MSG_DRV | NETIF_MSG_PROBE |
+ 				NETIF_MSG_LINK | NETIF_MSG_IFUP |
+ 				NETIF_MSG_IFDOWN | NETIF_MSG_RX_ERR |
+@@ -958,7 +976,7 @@ struct netvsc_device_info *netvsc_devinfo_get(struct netvsc_device *nvdev)
+ 					netif_get_num_default_rss_queues());
+ 		dev_info->send_sections = NETVSC_DEFAULT_TX;
+ 		dev_info->send_section_size = NETVSC_SEND_SECTION_SIZE;
+-		dev_info->recv_sections = NETVSC_DEFAULT_RX;
++		dev_info->recv_sections = netvsc_default_rx_sections();
+ 		dev_info->recv_section_size = NETVSC_RECV_SECTION_SIZE;
+ 	}
+

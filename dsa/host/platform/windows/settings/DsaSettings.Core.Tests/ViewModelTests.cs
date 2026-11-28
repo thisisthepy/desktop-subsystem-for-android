@@ -51,6 +51,9 @@ internal sealed class KeyText : ITextSource
         "Widgets_At" => "{0},{1} {2}x{3}",
         "Widgets_Placed" => "placed {0}",
         "Widgets_Removed" => "removed {0}",
+        "Widgets_Count" => "{0} widgets",
+        "Widgets_CountOne" => "1 widget",
+        "Widgets_ShowMore" => "show {0} more",
         "Background_Playing" => "playing {0}",
         "Background_Paused" => "paused {0}",
         "Background_Stopped" => "stopped {0}",
@@ -720,39 +723,178 @@ public class ViewModelTests
 
     private const string ClockOffer =
         "{\"provider\":\"com.example.clock/.ClockWidget\",\"package\":\"com.example.clock\",\"label\":\"Clock\"," +
-        "\"preview_png\":\"iVBORw==\",\"default_width_dp\":180,\"default_height_dp\":110,\"needs_configuration\":false,\"app\":\"Clock App\"}";
+        "\"preview_png\":\"\",\"default_width_dp\":180,\"default_height_dp\":110,\"needs_configuration\":false,\"app\":\"Clock App\"}";
 
     private const string NotesOffer =
         "{\"provider\":\"com.example.notes/.NoteWidget\",\"package\":\"com.example.notes\",\"label\":\"\"," +
         "\"preview_png\":\"\",\"default_width_dp\":250,\"default_height_dp\":250,\"needs_configuration\":true}";
 
+    private const string ClockApp =
+        "{\"package\":\"com.example.clock\",\"app\":\"Clock App\",\"icon_png\":\"iVBORw==\",\"widgets\":[" + ClockOffer + "]}";
+
+    private const string NotesApp =
+        "{\"package\":\"com.example.notes\",\"app\":\"\",\"icon_png\":\"\",\"widgets\":[" + NotesOffer + "]}";
+
     private const string PlacedClock =
         "{\"id\":3,\"provider\":\"com.example.clock/.ClockWidget\",\"label\":\"Clock\",\"app\":\"Clock App\"," +
         "\"placement\":{\"x\":64,\"y\":64,\"width_dp\":180,\"height_dp\":110}}";
 
+    private const string ListByApp = "widgets list --by-app --json";
+
+    private static readonly byte[] Png = { 0x89, (byte)'P', (byte)'N', (byte)'G' };
+
+    /// <summary>An app with <paramref name="count"/> widgets, W0 to W(count - 1).</summary>
+    private static string ManyWidgetsApp(int count) =>
+        "{\"package\":\"com.appslab.widgets\",\"app\":\"Material You Widgets\",\"icon_png\":\"iVBORw==\",\"widgets\":[" +
+        string.Join(",", Enumerable.Range(0, count).Select(i =>
+            "{\"provider\":\"com.appslab.widgets/.W" + i + "\",\"package\":\"com.appslab.widgets\",\"label\":\"W" + i + "\"," +
+            "\"preview_png\":\"\",\"default_width_dp\":110,\"default_height_dp\":40,\"needs_configuration\":false," +
+            "\"app\":\"Material You Widgets\"}")) +
+        "]}";
+
+    private static string Previews(IEnumerable<string> providers, string source = "layout") =>
+        "{\"previews\":[" +
+        string.Join(",", providers.Select(p => "{\"provider\":\"" + p + "\",\"source\":\"" + source + "\",\"preview_png\":\"iVBORw0=\"}")) +
+        "]}";
+
     [Fact]
-    public async Task Fr12_widgets_page_lists_the_widgets_on_offer_and_the_ones_placed()
+    public async Task Fr12_widgets_page_lists_one_entry_per_app_closed_with_its_icon_name_and_count()
     {
-        var cli = new FakeCli().Answer("widgets list --json",
-            "{\"providers\":[" + ClockOffer + "," + NotesOffer + "],\"widgets\":[" + PlacedClock + "]}");
+        var cli = new FakeCli().Answer(ListByApp,
+            "{\"apps\":[" + ClockApp + "," + NotesApp + "],\"widgets\":[" + PlacedClock + "]}");
         var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
         await vm.RefreshAsync();
         Assert.False(vm.HasError);
-        Assert.Equal(2, vm.Offers.Count);
-        Assert.Equal("Clock", vm.Offers[0].Label);
-        Assert.Equal("180x110", vm.Offers[0].Detail);
-        Assert.Equal(new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G' }, vm.Offers[0].Preview);
-        // A widget without a name shows its provider, one without a preview none, and one that
-        // asks to be set up says so.
-        Assert.Equal("com.example.notes/.NoteWidget", vm.Offers[1].Label);
-        Assert.Null(vm.Offers[1].Preview);
-        Assert.Equal("250x250 · Widgets_Setup", vm.Offers[1].Detail);
+        Assert.Equal(2, vm.Apps.Count);
+        var clock = vm.Apps[0];
+        Assert.Equal("Clock App", clock.Name);
+        Assert.Equal(Png, clock.Icon);
+        Assert.Equal("1 widget", clock.CountText);
+        // Closed by default: no card is shown, and no preview was asked for.
+        Assert.False(clock.IsExpanded);
+        Assert.Empty(clock.Cards);
+        Assert.Equal(new[] { ListByApp }, cli.Calls);
+        // An app without a name shows its package, and one without an icon none.
+        Assert.Equal("com.example.notes", vm.Apps[1].Name);
+        Assert.True(vm.Apps[1].NoIcon);
         Assert.Equal(new PlacedWidgetRow(3, "Clock", "Clock App", "64,64 180x110"), Assert.Single(vm.Placed));
-        // The app that offers a widget shows by its name, else by its package.
-        Assert.Equal("Clock App", vm.Offers[0].App);
-        Assert.Equal("com.example.notes", vm.Offers[1].App);
         Assert.False(vm.HasNoOffers);
         Assert.False(vm.HasNoPlaced);
+    }
+
+    [Fact]
+    public async Task Fr12_an_opened_app_shows_its_widgets_as_cards_with_name_size_and_drawn_preview()
+    {
+        var cli = new FakeCli()
+            .Answer(ListByApp, "{\"apps\":[" + ClockApp + "," + NotesApp + "],\"widgets\":[]}")
+            .Answer("widgets previews com.example.notes/.NoteWidget --json", Previews(new[] { "com.example.notes/.NoteWidget" }));
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        await vm.SetExpandedAsync("com.example.notes", true);
+        var notes = vm.Apps[1];
+        Assert.True(notes.IsExpanded);
+        var card = Assert.Single(notes.Cards);
+        // A widget without a name shows its provider; one that asks to be set up says so.
+        Assert.Equal("com.example.notes/.NoteWidget", card.Label);
+        Assert.Equal("250x250", card.Size);
+        Assert.Equal("250x250 · Widgets_Setup", card.Detail);
+        Assert.Equal("com.example.notes", card.App);
+        // The preview Android drew for it.
+        Assert.True(card.HasDrawnPreview);
+        Assert.Equal(new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D }, card.Preview);
+        // The other app stays closed, each app on its own.
+        Assert.False(vm.Apps[0].IsExpanded);
+        Assert.Empty(vm.Apps[0].Cards);
+        // Closing the app hides its cards and lets go of their images.
+        await vm.SetExpandedAsync("com.example.notes", false);
+        Assert.False(notes.IsExpanded);
+        Assert.Empty(notes.Cards);
+        Assert.False(card.HasDrawnPreview);
+        // Opened again, it shows the kept preview without asking Android again.
+        await vm.SetExpandedAsync("com.example.notes", true);
+        Assert.True(Assert.Single(notes.Cards).HasDrawnPreview);
+        Assert.Single(cli.Calls, c => c.StartsWith("widgets previews", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Fr12_a_card_shows_the_apps_icon_until_and_unless_android_draws_a_preview()
+    {
+        var cli = new FakeCli()
+            .Answer(ListByApp, "{\"apps\":[" + ClockApp + "],\"widgets\":[]}")
+            .Answer("widgets previews com.example.clock/.ClockWidget --json", "{\"previews\":[]}");
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        await vm.SetExpandedAsync("com.example.clock", true);
+        var card = Assert.Single(vm.Apps[0].Cards);
+        Assert.False(card.HasDrawnPreview);
+        Assert.Equal(Png, card.Preview);
+        Assert.False(card.NoPreview);
+        // Asked once: a widget with no preview is not asked for again each time it is opened.
+        await vm.SetExpandedAsync("com.example.clock", false);
+        await vm.SetExpandedAsync("com.example.clock", true);
+        Assert.Single(cli.Calls, c => c.StartsWith("widgets previews", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Fr12_an_app_with_hundreds_of_widgets_shows_and_draws_them_a_page_at_a_time()
+    {
+        var all = Enumerable.Range(0, 452).Select(i => "com.appslab.widgets/.W" + i).ToList();
+        var cli = new FakeCli().Answer(ListByApp, "{\"apps\":[" + ManyWidgetsApp(452) + "],\"widgets\":[]}");
+        // Each page the page may ask for answers with drawn previews.
+        for (var from = 0; from < all.Count; from += WidgetsViewModel.PageSize)
+        {
+            var batch = all.Skip(from).Take(WidgetsViewModel.PageSize).ToList();
+            cli.Answer("widgets previews " + string.Join(" ", batch) + " --json", Previews(batch));
+        }
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        var app = Assert.Single(vm.Apps);
+        Assert.Equal("452 widgets", app.CountText);
+        await vm.SetExpandedAsync("com.appslab.widgets", true);
+        Assert.Equal(WidgetsViewModel.PageSize, app.Cards.Count);
+        Assert.True(app.Cards.All(c => c.HasDrawnPreview));
+        Assert.True(app.HasMore);
+        Assert.Equal("show 24 more", app.MoreText);
+        var asked = cli.Calls.Where(c => c.StartsWith("widgets previews", StringComparison.Ordinal))
+            .SelectMany(c => c.Split(' ').Where(a => a.Contains('/')))
+            .ToList();
+        // Only the widgets shown are drawn, each once, at most 64 to a request.
+        Assert.Equal(all.Take(WidgetsViewModel.PageSize), asked);
+        await vm.ShowMoreAsync("com.appslab.widgets");
+        Assert.Equal(2 * WidgetsViewModel.PageSize, app.Cards.Count);
+        Assert.True(app.Cards.All(c => c.HasDrawnPreview));
+        // Every widget is reachable, page by page.
+        while (app.HasMore)
+        {
+            await vm.ShowMoreAsync("com.appslab.widgets");
+        }
+        Assert.Equal(all, app.Cards.Select(c => c.Provider));
+        Assert.True(cli.Calls.Where(c => c.StartsWith("widgets previews", StringComparison.Ordinal))
+            .All(c => c.Split(' ').Count(a => a.Contains('/')) <= DsaService.MaxPreviewsAsked));
+        // The images kept stay bounded, whatever was looked at.
+        Assert.True(vm.PreviewCache.Count <= 160);
+        vm.ReleasePreviews();
+        Assert.Equal(0, vm.PreviewCache.Count);
+        Assert.True(app.Cards.All(c => !c.HasDrawnPreview));
+    }
+
+    [Fact]
+    public void Fr12_the_preview_cache_drops_the_least_recently_used_beyond_its_bounds()
+    {
+        var cache = new WidgetPreviewCache(maxEntries: 2, maxBytes: 10);
+        cache.Put("a", new byte[4]);
+        cache.Put("b", new byte[4]);
+        Assert.NotNull(cache.Get("a"));
+        cache.Put("c", new byte[4]);
+        // b was used least recently.
+        Assert.Null(cache.Get("b"));
+        Assert.NotNull(cache.Get("a"));
+        Assert.NotNull(cache.Get("c"));
+        cache.Put("d", new byte[8]);
+        Assert.True(cache.Bytes <= 10);
+        Assert.Equal(1, cache.Count);
+        cache.Put("huge", new byte[11]);
+        Assert.Null(cache.Get("huge"));
     }
 
     [Fact]
@@ -761,7 +903,7 @@ public class ViewModelTests
         var cli = new FakeCli()
             .Answer("widgets add com.example.clock/.ClockWidget --json", PlacedClock)
             .Answer("widgets remove 3 --json", "{\"removed\":3}")
-            .Answer("widgets list --json", "{\"providers\":[" + ClockOffer + "],\"widgets\":[" + PlacedClock + "]}");
+            .Answer(ListByApp, "{\"apps\":[" + ClockApp + "],\"widgets\":[" + PlacedClock + "]}");
         var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
         await vm.AddAsync("com.example.clock/.ClockWidget");
         Assert.Equal("placed Clock", vm.Message);
@@ -771,8 +913,8 @@ public class ViewModelTests
         Assert.Equal(
             new[]
             {
-                "widgets add com.example.clock/.ClockWidget --json", "widgets list --json",
-                "widgets remove 3 --json", "widgets list --json",
+                "widgets add com.example.clock/.ClockWidget --json", ListByApp,
+                "widgets remove 3 --json", ListByApp,
             },
             cli.Calls);
         Assert.False(vm.IsBusy);
@@ -784,7 +926,7 @@ public class ViewModelTests
         var cli = new FakeCli()
             .Fail("widgets add com.example.clock/.ClockWidget --json",
                 "dsa: the widget was not placed: the user canceled the widget's setup")
-            .Answer("widgets list --json", "{\"providers\":[],\"widgets\":[]}");
+            .Answer(ListByApp, "{\"apps\":[],\"widgets\":[]}");
         var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
         await vm.AddAsync("com.example.clock/.ClockWidget");
         Assert.True(vm.HasError);
@@ -799,8 +941,7 @@ public class ViewModelTests
     [Fact]
     public async Task Fr12_widgets_page_shows_a_widget_placed_or_removed_elsewhere_without_a_restart()
     {
-        var cli = new FakeCli().Answer("widgets list --json",
-            "{\"providers\":[" + ClockOffer + "],\"widgets\":[]}");
+        var cli = new FakeCli().Answer(ListByApp, "{\"apps\":[" + ClockApp + "],\"widgets\":[]}");
         var stream = new FakeLogStream();
         stream.Output.Add("{\"event\":\"widgets\",\"widgets\":[]}");
         stream.Output.Add("{\"event\":\"placed\",\"widget\":" + PlacedClock + "}");
@@ -817,7 +958,7 @@ public class ViewModelTests
         // The widget placed from its window's menu or by dsa is listed, the one removed is
         // gone, and the widgets on offer are still there.
         Assert.Equal(5, Assert.Single(vm.Placed).Id);
-        Assert.Single(vm.Offers);
+        Assert.Single(vm.Apps);
         Assert.True(changes >= 4);
     }
 

@@ -5,6 +5,15 @@
     uv run dsa/apps/apps.py build <app> --out DIR [--src DIR]
     uv run dsa/apps/apps.py patch-tree documentsui --top TREE --android android17 --release cp2a [--lock LOCK]
     uv run dsa/apps/apps.py record documentsui --apk APK --android android17 --out DIR
+    uv run dsa/apps/apps.py tree-order [--part services|screens]
+    uv run dsa/apps/apps.py tree-apps [--part services|screens]
+    uv run dsa/apps/apps.py apk-target permissioncontroller < targets.txt
+
+The system screens (Settings, PermissionController, PackageInstaller, the share sheet) are
+AOSP apps built in the same tree as DocumentsUI, at the image's own pins, and stand in place of
+the published ones. SettingsLib, which Settings and PermissionController both build from, is a
+library of apps.json: patch-tree lays its patches over the tree once, before the apps
+(tree-order).
 
 Nothing upstream is kept in this repository. `fetch` clones the pinned commit into
 .scratch/apps/<app> (or --src), checks that it is the pinned one, copies DSA's design files
@@ -31,6 +40,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,11 +62,22 @@ def load(path=APPS):
 
 
 def app_entry(name, apps=None):
+    """The app (or, for a name in `libraries`, the library of the tree) apps.json names `name`."""
     apps = apps or load()
-    for app in apps["apps"]:
+    for app in apps["apps"] + apps.get("libraries", []):
         if app["name"] == name:
             return app
     raise AppsError(f"apps.json has no app named {name}")
+
+
+def is_library(app):
+    """Whether `app` is a folder of the Android tree that apps build from, not an app."""
+    return "kind" not in app["build"]
+
+
+def libraries(app, apps=None):
+    """The libraries of the tree `app` is built from with DSA's patches (SettingsLib)."""
+    return [app_entry(name, apps) for name in app.get("libraries", [])]
 
 
 def pinned_commit(app, android=None):
@@ -79,6 +100,13 @@ def design_files(app):
     """The design files an app gets, as (source, path inside the app) pairs: the resources, the
     Java helpers, and the preference helper for an app whose settings are a preference list."""
     build = app["build"]
+    if "design_files" in app:
+        # Only the files named, so that two parts of one APK never carry the same class.
+        files = []
+        for name in app["design_files"]:
+            kind, rest = name.split("/", 1)
+            files.append((DESIGN / name, Path(build["res" if kind == "res" else "java"]) / rest))
+        return files
     files = [(f, Path(build["res"]) / f.relative_to(DESIGN / "res")) for f in sorted((DESIGN / "res").rglob("*"))
              if f.is_file()]
     files += [(f, Path(build["java"]) / f.relative_to(DESIGN / "java")) for f in sorted((DESIGN / "java").rglob("*"))
@@ -97,14 +125,17 @@ def provenance(app, android=None):
     """What an app is built from: its pin and the SHA-256 of each patch and design file. The
     image check compares this with the repository, so an APK built without DSA's patches, or
     with other ones, is refused."""
-    return {
+    record = {
         "name": app["name"],
-        "package": app["package"],
+        "package": app.get("package"),
         "url": app["url"],
         "commit": pinned_commit(app, android),
         "patches": {p.name: digest(p) for p in patches(app["name"])},
         "design": {str(target.as_posix()): digest(source) for source, target in design_files(app)},
     }
+    if app.get("libraries"):
+        record["libraries"] = {lib["name"]: provenance(lib, android) for lib in libraries(app)}
+    return record
 
 
 def run(*cmd, cwd=None):
@@ -217,19 +248,60 @@ def patch_tree(name, top, android, release, lock=None):
     `top`, after checking that the tree has the pinned commit (when `lock`, the services lock
     the tree was fetched from, is given), and turns its flags on."""
     app = app_entry(name)
-    if app["build"]["kind"] != "aosp":
+    if not is_library(app) and app["build"]["kind"] != "aosp":
         raise AppsError(f"{name} builds with Gradle; use fetch and build")
     commit = pinned_commit(app, android)
     if lock is not None:
+        # The manifest project the folder is in: the folder itself, or for a folder inside a
+        # larger project (SettingsLib and PackageInstaller are in frameworks/base) that one.
+        project = app["build"].get("project", app["build"]["tree_path"])
         tree = json.loads(Path(lock).read_text())
-        projects = [p for v in tree["versions"] for p in v["projects"] if p["path"] == app["build"]["tree_path"]]
+        projects = [p for v in tree["versions"] for p in v["projects"] if p["path"] == project]
         if not projects:
-            raise AppsError(f"the tree has no {app['build']['tree_path']}")
+            raise AppsError(f"the tree has no {project}")
         if projects[0]["commit"] != commit:
-            raise AppsError(f"the tree has {app['build']['tree_path']} at {projects[0]['commit']}, "
+            raise AppsError(f"the tree has {project} at {projects[0]['commit']}, "
                             f"but apps.json pins {commit} for {android}")
     apply_patches(app, Path(top) / app["build"]["tree_path"])
-    set_flags(app, top, release)
+    if not is_library(app):
+        set_flags(app, top, release)
+
+
+def tree_apps(part=None, apps=None):
+    """The apps built in the Android tree, for one part of the Framework build: "services" (the
+    default apps built there, DocumentsUI, which go with services.jar), "screens" (the system
+    screens, which a runner of their own builds), or every one when `part` is None."""
+    apps = apps or load()
+    roles = {"services": {"default"}, "screens": {"system"}, None: {"default", "system"}}[part]
+    return [a["name"] for a in apps["apps"]
+            if a["build"]["kind"] == "aosp" and a.get("role", "default") in roles]
+
+
+def tree_order(part=None, apps=None):
+    """What patch-tree lays over the Android tree for `part` (see tree_apps), in order: the
+    libraries those apps build from first, each once, then the apps."""
+    apps = apps or load()
+    names = tree_apps(part, apps)
+    needed = {lib for name in names for lib in app_entry(name, apps).get("libraries", [])}
+    return [lib["name"] for lib in apps.get("libraries", []) if lib["name"] in needed] + names
+
+
+def apk_target(name, targets, apps=None):
+    """The ninja target that is the APK of `name`, an app built in the tree inside an APEX
+    (PermissionController), whose APK has no install path of its own: the one target of
+    `targets` (lines of `ninja -t targets all`) that the first of the app's apk_patterns with any
+    match names. The patterns go from the APEX's own variant (named apex<min_sdk>, or after the
+    APEX in some Soong versions) to the platform variant, which the module also has
+    (apex_available names the platform) and which is built from the same sources."""
+    paths = {t.split(": ")[0].strip() for t in targets}
+    patterns = app_entry(name, apps)["build"]["apk_patterns"]
+    for pattern in patterns:
+        found = sorted(p for p in paths if re.search(pattern, p))
+        if len(found) > 1:
+            raise AppsError(f"expected one APK target of {name} for {pattern}, found {', '.join(found)}")
+        if found:
+            return found[0]
+    raise AppsError(f"the build has no APK target of {name}; looked for {', '.join(patterns)}")
 
 
 def main(argv=None):
@@ -237,6 +309,12 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("list", help="print the apps' names as a JSON list")
     listing.add_argument("--kind", choices=["gradle", "aosp"])
+    ordering = commands.add_parser("tree-order", help="print what patch-tree lays over the tree, in order, as a JSON list")
+    ordering.add_argument("--part", choices=["services", "screens"])
+    in_tree = commands.add_parser("tree-apps", help="print the apps one part of the tree build makes, as a JSON list")
+    in_tree.add_argument("--part", choices=["services", "screens"])
+    target = commands.add_parser("apk-target", help="pick an APEX app's APK from `ninja -t targets all` on stdin")
+    target.add_argument("app")
     fetching = commands.add_parser("fetch", help="clone, check and patch an app")
     fetching.add_argument("app")
     fetching.add_argument("--src", type=Path)
@@ -260,6 +338,12 @@ def main(argv=None):
         if args.command == "list":
             print(json.dumps([a["name"] for a in load()["apps"]
                               if args.kind is None or a["build"]["kind"] == args.kind]))
+        elif args.command == "tree-order":
+            print(json.dumps(tree_order(args.part)))
+        elif args.command == "tree-apps":
+            print(json.dumps(tree_apps(args.part)))
+        elif args.command == "apk-target":
+            print(apk_target(args.app, sys.stdin.read().splitlines()))
         elif args.command == "fetch":
             print(fetch(args.app, args.src))
         elif args.command == "build":

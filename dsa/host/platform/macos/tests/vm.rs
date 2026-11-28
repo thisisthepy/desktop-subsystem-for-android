@@ -48,7 +48,11 @@ fn nfr2_freed_memory_is_reported_a_page_at_a_time() {
 fn nfr1_the_guest_kernel_sets_aside_as_little_at_boot_as_on_every_host() {
     let cmdline = for_virtualization_framework(HYPER_V_CMDLINE, "", false);
     let words: Vec<&str> = cmdline.split_whitespace().collect();
-    for word in dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE.split_whitespace() {
+    // The framework runs guests of the Mac's own architecture.
+    let boot = dsa_host_core::memory::guest_boot_memory_cmdline(
+        dsa_host_core::image_files::GuestArch::HOST,
+    );
+    for word in boot.split_whitespace() {
         assert_eq!(
             words.iter().filter(|w| **w == word).count(),
             1,

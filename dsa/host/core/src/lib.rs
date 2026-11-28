@@ -58,6 +58,7 @@
 //! - [`system_settings`]: the host's time zone, languages, regional format, theme and accent
 //!   color, which each user's Android follows.
 //! - [`gamepads`]: the host's game controllers, shown to the guest as gamepads.
+//! - [`games`]: the Games page's list of apps, games first, and its Select all.
 //! - [`app_windows`]: a user's window settings for each app.
 //! - [`gapps`]: Google Play for a user who asks for it, downloaded and laid over the guest's
 //!   system as an erofs image.
@@ -68,6 +69,8 @@
 //!   which window each task and each frame goes to.
 //! - [`renderer`]: the graphics renderer in a process of its own (`dsa-gfx`), which the
 //!   window manager starts, supervises and starts again when it ends.
+//! - [`loaded_modules`]: which libraries a process loaded at each stage of its start, for its
+//!   log.
 //! - [`host_keys`]: the secrets the host's credential store keeps for each user, and
 //!   [`backup`], [`passkeys`] and [`keymint_root`], the system services that use them: app data
 //!   backups in an encrypted folder of the user's, passkeys through the host's authenticator,
@@ -118,6 +121,7 @@ pub mod files;
 pub mod files_door;
 pub mod follower;
 pub mod gamepads;
+pub mod games;
 pub mod gapps;
 pub mod geocode;
 pub mod graphics_memory;
@@ -147,6 +151,7 @@ pub mod keymint_root;
 pub mod keys;
 pub mod language;
 pub mod links;
+pub mod loaded_modules;
 pub mod location;
 pub mod memory;
 pub mod native_abi;
@@ -183,6 +188,7 @@ pub mod vhdx;
 pub mod video;
 pub mod video_keyframe;
 pub mod video_layout;
+pub mod video_restore;
 pub mod video_slots;
 pub mod widevine;
 pub mod widget_windows;

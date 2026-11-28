@@ -16,16 +16,16 @@ diff --git a/guest/OpenglSystemCommon/HvSocketStream.cpp b/guest/OpenglSystemCom
 +++ b/guest/OpenglSystemCommon/HvSocketStream.cpp
 @@ -12,6 +12,8 @@
  #include <unistd.h>
-
+ 
  #include <cutils/log.h>
 +
 +#include "dsa_spare_pages.h"
-
+ 
  HvSocketStream::HvSocketStream(size_t buffer_size, uint32_t port)
      : IOStream(buffer_size), fd_(-1), port_(port), buffer_size_(buffer_size), buffer_(nullptr) {}
 @@ -66,7 +68,15 @@
  }
-
+ 
  int HvSocketStream::commitBuffer(size_t size) {
 -    return size == 0 ? 0 : writeFully(buffer_, size);
 +    if (size == 0) {
@@ -38,5 +38,5 @@ diff --git a/guest/OpenglSystemCommon/HvSocketStream.cpp b/guest/OpenglSystemCom
 +    dsa::releaseSparePages(buffer_, size);
 +    return result;
  }
-
+ 
  int HvSocketStream::writeFully(const void* buffer, size_t size) {

@@ -21,9 +21,11 @@
 //!   the new monitor by the ratio of the two scales, its rectangle would fall back on the
 //!   monitor it came from, and the desktop would change its scale back and suggest the size
 //!   scaled the other way: the window and its task would flap between two sizes for as long
-//!   as the window stayed near the edge. Until the app has drawn the new size, the window shows
-//!   its last frame 1:1, and frames the app still draws at the old size are neither shown nor
-//!   followed.
+//!   as the window stayed near the edge. Until the app has drawn for the new scale, the window
+//!   shows its last frame over its whole client area, whatever its size in pixels and whatever
+//!   scale the frame is measured at ([`FrameFollow::stretched`]): the window and the app in it
+//!   keep their size to the eye, before the window takes its new rectangle and after. Frames
+//!   the app still draws at the old size are neither shown nor followed.
 //!
 //! - A window that holds the size the desktop gives it (maximised, snapped, full screen; see
 //!   [`size_is_held`](super::window_sizing::size_is_held)) takes every size proposed at once
@@ -35,6 +37,8 @@
 //! The window therefore follows the mouse as fast as the app draws, and the last size of a
 //! drag, which the guest is asked for when the drag ends, arrives as a frame like any other.
 //! It names no window system.
+
+use super::window_sizing::FramePlacement;
 
 /// What to do with a frame that arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,10 +73,21 @@ pub struct FrameFollow {
     /// The size of the frame shown when the window's monitor changed scale, until a frame of
     /// another size is shown: frames of it were drawn for the old scale.
     stale: Option<(u32, u32)>,
+    /// Whether the frame on the screen was drawn before the window's monitor changed scale,
+    /// until a frame drawn for the window is shown ([`FrameFollow::stretched`]).
+    scale_hold: bool,
     /// Whether the window holds the size the desktop gave it ([`FrameFollow::set_held`]).
     held: bool,
     /// The sizes proposed for the window, oldest first, each once at its latest place.
     proposals: Vec<(u32, u32)>,
+    /// While a window that holds its size waits for the guest's answer to a new size: the size
+    /// of the frame it showed when the size changed. Frames of that size are the app's old
+    /// drawing; the first frame of another size is the guest's answer
+    /// ([`FrameFollow::strips_filled`]).
+    waiting_from: Option<Option<(u32, u32)>>,
+    /// The largest client area the guest can draw for the task, in window pixels, when known
+    /// ([`FrameFollow::set_limit`]).
+    limit: Option<(u32, u32)>,
 }
 
 impl FrameFollow {
@@ -109,6 +124,92 @@ impl FrameFollow {
         self.held
     }
 
+    /// Whether what the frame leaves of the window is filled with the app's colour, decided
+    /// by geometry: the frame where the window shows it (`placement`) does not cover the
+    /// window, and it cannot, or no longer will. Only a window that holds its size has such
+    /// strips; any other takes its frame's size.
+    ///
+    /// - A held window larger than the largest client area the guest can draw
+    ///   ([`FrameFollow::set_limit`]) can never be covered, whatever frame comes (including
+    ///   one of the size already shown, a window already at the limit maximised again), so
+    ///   its strips are filled at once.
+    /// - Within the limit, the strips beside a settled frame that does not cover the window
+    ///   are filled. While the window's new size is pending (the moment of a maximise, a snap
+    ///   or a restore), the app is still catching up and its last frame is shown
+    ///   with nothing drawn around it.
+    pub fn strips_filled(&self, placement: FramePlacement) -> bool {
+        if !self.held {
+            return false;
+        }
+        let view = self.view;
+        let covers =
+            placement.origin == (0, 0) && placement.size.0 >= view.0 && placement.size.1 >= view.1;
+        if covers {
+            return false;
+        }
+        let beyond_limit = self
+            .limit
+            .is_some_and(|limit| view.0 > limit.0 || view.1 > limit.1);
+        beyond_limit || !self.pending()
+    }
+
+    /// The largest client area the guest can draw for the task at the window's scale: its
+    /// display's size, or the largest task size, in window pixels. `None` while not known.
+    pub fn set_limit(&mut self, limit: Option<(u32, u32)>) {
+        self.limit = limit;
+    }
+
+    /// Whether a window that holds its size still waits for the guest's answer to it: the
+    /// frame on the screen is the app's drawing of the size before, shown unstretched where
+    /// [`frame_placement`](super::window_sizing::frame_placement) puts it until the answer
+    /// comes.
+    pub fn pending(&self) -> bool {
+        self.held && self.waiting_from.is_some()
+    }
+
+    /// Whether the last frame is shown stretched over the whole window
+    /// ([`shown_frame_placement`](super::window_sizing::shown_frame_placement)'s `pending`).
+    /// Only a window moved onto a monitor of another scale does, until a frame drawn for the
+    /// window is shown: the frame covers the window's client area and nothing else, so it keeps
+    /// the window's size to the eye. Placed at the scale it is measured at, it would shrink or
+    /// grow inside the window by the ratio of the two scales whenever the scale and the window's
+    /// rectangle change at different moments (the scale before the rectangle, which the desktop
+    /// applies later, and back to 1:1 when the task takes the new density at the end of the
+    /// move). The window keeps its shape through such a move, so the app's does not change.
+    ///
+    /// A window that holds a new size (a maximise, a snap, a restore) never stretches its last
+    /// frame: that would change the app's shape on the screen. It shows the frame where
+    /// [`frame_placement`](super::window_sizing::frame_placement) puts it until the frame of
+    /// the new size comes.
+    pub fn stretched(&self) -> bool {
+        self.scale_hold && !self.held
+    }
+
+    /// Whether a change of the window's client size waits, inside the call that changed it,
+    /// until the desktop has composed the frame placed for it. It does for every size the
+    /// window takes with a frame of it (a step of an edge drag, a maximise or a restore), so
+    /// the next size is not queued before this one is on the screen. It does not while the
+    /// window moves onto a monitor of another scale: the frame on the screen only follows the
+    /// window's rectangle, and waiting there held the desktop's move of the window (the
+    /// rectangle it suggests for the new monitor) for hundreds of milliseconds, with the window
+    /// at its old size in pixels on the new monitor all that time.
+    pub fn waits_for_commit(&self) -> bool {
+        !(self.scale_hold && !self.held)
+    }
+
+    /// The limit [`FrameFollow::set_limit`] gave.
+    pub fn limit(&self) -> Option<(u32, u32)> {
+        self.limit
+    }
+
+    /// A frame of `size` is on the screen of a window that holds its size.
+    fn held_frame_shown(&mut self, size: (u32, u32)) {
+        if self.waiting_from.is_some_and(|from| from != Some(size)) {
+            self.waiting_from = None;
+        }
+        self.shown = Some(size);
+    }
+
     /// The window holds the size the desktop gives it (`true`: it is maximised, snapped or
     /// full screen) or takes the size of its frames again. While it holds its size, every size
     /// proposed is taken at once and every frame is shown as it comes, whatever its size: the
@@ -123,7 +224,9 @@ impl FrameFollow {
         self.kept = None;
         self.claimed = false;
         self.stale = None;
+        self.scale_hold = false;
         self.proposals.clear();
+        self.waiting_from = held.then_some(self.shown);
         if !held {
             self.shown = Some(self.view);
         }
@@ -135,7 +238,7 @@ impl FrameFollow {
             return Arrival::Wait;
         }
         if self.held {
-            self.shown = Some(size);
+            self.held_frame_shown(size);
             self.kept = None;
             return Arrival::Show;
         }
@@ -143,6 +246,7 @@ impl FrameFollow {
             self.shown = Some(size);
             self.kept = None;
             self.stale = None;
+            self.scale_hold = false;
             Arrival::Show
         } else if self.stale == Some(size) {
             Arrival::Stale
@@ -224,6 +328,9 @@ impl FrameFollow {
         self.proposals.clear();
         // A window that holds its size shows every frame anyway.
         self.stale = self.shown.filter(|shown| !self.held && *shown != proposed);
+        // The frame on the screen keeps the window's size to the eye until one drawn for the
+        // window comes.
+        self.scale_hold = !self.held && self.shown.is_some();
         proposed
     }
 
@@ -242,7 +349,11 @@ impl FrameFollow {
             return Arrival::Wait;
         }
         if self.held || size == self.view {
-            self.shown = Some(size);
+            if self.held {
+                self.held_frame_shown(size);
+            } else {
+                self.shown = Some(size);
+            }
             self.kept = None;
             if !self.held {
                 self.stale = None;
@@ -252,17 +363,23 @@ impl FrameFollow {
         // A frame kept at the old scale's measure is let go: its size means another now.
         self.kept = None;
         self.stale = Some(size);
+        // The same old drawing stays on the screen, over the window, as before.
+        self.scale_hold = self.shown.is_some();
         Arrival::Stale
     }
 
     /// The window's client area is now `view`. Returns whether the kept frame is of that size
     /// and is to be shown with it. Ends any claim.
     pub fn view_taken(&mut self, view: (u32, u32)) -> bool {
+        if self.held && view != self.view {
+            self.waiting_from = Some(self.shown);
+        }
         self.view = view;
         self.claimed = false;
         if self.kept == Some(view) {
             self.shown = self.kept.take();
             self.stale = None;
+            self.scale_hold = false;
             true
         } else {
             false
@@ -279,7 +396,20 @@ impl FrameFollow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compositor::window_sizing::{clamp_size, rescale};
+    use crate::compositor::window_sizing::{clamp_size, rescale, shown_frame_placement};
+
+    /// Whether the strips beside the frame `follow` shows (1:1, as core places it) are filled.
+    fn filled(follow: &FrameFollow) -> bool {
+        let frame = follow.shown().unwrap_or(follow.view());
+        let placement = shown_frame_placement(
+            frame,
+            follow.view(),
+            (1, 1),
+            follow.held(),
+            follow.stretched(),
+        );
+        follow.strips_filled(placement)
+    }
 
     /// A window and its app, stepped by hand: what is on the screen after each step.
     struct Screen {
@@ -439,6 +569,87 @@ mod tests {
         assert_eq!(follow.frame_arrived((1401, 1649)), Arrival::Keep);
         assert_eq!(follow.size_for((1401, 1649)), Some((1401, 1649)));
         assert!(follow.view_taken((1401, 1649)));
+    }
+
+    #[test]
+    fn fr4_a_maximise_on_the_main_monitor_shows_the_last_frame_as_before_with_nothing_filled() {
+        // Settings at 1041x1495 is maximised on the 2880x1800 main monitor (work area
+        // 2880x1704). Until the app draws the new size, the last frame is shown as it was before
+        // the strips beside it were ever filled: no solid colour is drawn around it.
+        let mut follow = FrameFollow::new((1041, 1495));
+        follow.frame_arrived((1041, 1495));
+        follow.set_held(true);
+        assert!(!filled(&follow));
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        follow.view_taken((2880, 1704));
+        assert!(!filled(&follow));
+        // The app draws its old size once more: still the old drawing, still nothing filled.
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        assert!(!filled(&follow));
+        // The frame of the maximised size covers the window; nothing is left to fill.
+        assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
+        // Restored, the window follows its frames and never fills anything.
+        follow.set_held(false);
+        assert!(!filled(&follow));
+        // A window that never holds its size never fills anything either.
+        let mut follow = FrameFollow::new((800, 600));
+        follow.frame_arrived((800, 600));
+        follow.size_for((900, 600));
+        follow.frame_arrived((900, 600));
+        assert!(!filled(&follow));
+    }
+
+    #[test]
+    fn fr4_a_size_limited_maximise_on_a_secondary_monitor_leaves_no_transparent_strip() {
+        // A task kept at the 200% main monitor's density is maximised on a 2560x1440 monitor
+        // at 125%: the window is 2560x1380, the guest's display holds 3840 task pixels across,
+        // and the task comes back 3840x2205, shown 2400x1380 in the window. The strips beside
+        // it would stay for as long as the window is maximised, so they are filled.
+        let mut follow = FrameFollow::new((1140, 836));
+        follow.frame_arrived((1140, 836));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        assert!(!filled(&follow));
+        assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
+        assert!(filled(&follow));
+        // Snapped to another size, the window waits for the answer to it again.
+        follow.view_taken((1280, 1380));
+        assert!(!filled(&follow));
+        assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
+        assert!(!filled(&follow));
+        assert_eq!(follow.frame_arrived((1200, 1380)), Arrival::Show);
+        assert!(filled(&follow));
+    }
+
+    #[test]
+    fn fr4_a_window_already_at_the_limit_maximised_again_leaves_no_transparent_strip() {
+        // A task at the 200% main monitor's density on a 2560x1440 monitor at 125%: the guest
+        // can draw at most 2400x1380 window pixels for it. Snapped to that limit, then
+        // maximised to 2560x1380, the guest answers with the same 2400x1380 frame.
+        let mut follow = FrameFollow::new((2400, 1380));
+        follow.set_limit(Some((2400, 1380)));
+        follow.frame_arrived((2400, 1380));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        // Beyond the limit, the strips are filled at once and stay filled.
+        assert!(filled(&follow));
+        assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
+        assert!(filled(&follow));
+        // Restored and maximised again: the same.
+        follow.set_held(false);
+        assert!(!filled(&follow));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        assert!(filled(&follow));
+
+        // On the main monitor the limit is above the maximised size, and a maximise the app
+        // catches up with fills nothing meanwhile, as before.
+        let mut follow = FrameFollow::new((1041, 1495));
+        follow.set_limit(Some((2880, 2880)));
+        follow.frame_arrived((1041, 1495));
+        follow.set_held(true);
+        follow.view_taken((2880, 1704));
+        assert!(!filled(&follow));
     }
 
     #[test]
@@ -751,5 +962,86 @@ mod tests {
         // A size the drag comes back to is newer again.
         follow.size_for((660, 960));
         assert_eq!(follow.frame_arrived((660, 960)), Arrival::Keep);
+    }
+
+    #[test]
+    fn fr4_a_move_onto_a_monitor_of_another_scale_keeps_the_app_its_size_to_the_eye() {
+        // FLO (task 147) dragged from the 192 dpi monitor onto a 120 dpi one: the window, of
+        // 735x1211 client pixels with a frame of that size, is suggested 458x756 there. The
+        // scale reached the frame before the desktop applied the new rectangle (329 ms later),
+        // and the frame was shown at 459x757 in the window still 735x1211 pixels wide: the app
+        // shrank inside its window, and grew again when the task took the new density.
+        use crate::compositor::window_sizing::{to_window_size, Scale};
+        const OLD_DPI: u32 = 192;
+        const NEW_DPI: u32 = 120;
+        let interim: Scale = (5, 8);
+        let old_frame = (735, 1211);
+        let suggested = (458, 756);
+        let eye = |px: (u32, u32), dpi: u32| {
+            (
+                f64::from(px.0) * 96.0 / f64::from(dpi),
+                f64::from(px.1) * 96.0 / f64::from(dpi),
+            )
+        };
+        let mut follow = FrameFollow::new(old_frame);
+        assert_eq!(follow.frame_arrived(old_frame), Arrival::Show);
+        let mut views = vec![follow.view()];
+        let mut seen = Vec::new();
+        // Where the frame on the screen is, given the scale it is measured at: it must cover
+        // the window's client area exactly, so the app is the window's size to the eye.
+        let mut check = |follow: &FrameFollow, frame: (u32, u32), scale: Scale, dpi: u32| {
+            let placed =
+                shown_frame_placement(frame, follow.view(), scale, false, follow.stretched());
+            assert_eq!(placed.origin, (0, 0), "the frame moved inside the window");
+            assert_eq!(
+                placed.size,
+                follow.view(),
+                "the frame is shown at another size than the window"
+            );
+            seen.push(eye(placed.size, dpi));
+        };
+        check(&follow, old_frame, (1, 1), OLD_DPI);
+
+        // WM_DPICHANGED: the window takes the desktop's suggestion, once.
+        assert_eq!(follow.scale_changed(suggested), suggested);
+        // The scale may reach the frame before the window has its new rectangle.
+        let measured = to_window_size(old_frame, interim);
+        assert_eq!(measured, (459, 757));
+        assert_eq!(follow.rescaled(measured), Arrival::Stale);
+        // The window still has its old rectangle, of the old monitor's size to the eye.
+        check(&follow, old_frame, interim, OLD_DPI);
+        assert!(!follow.waits_for_commit(), "the move is not held");
+        // The desktop applies the rectangle.
+        assert!(!follow.view_taken(suggested));
+        views.push(follow.view());
+        check(&follow, old_frame, interim, NEW_DPI);
+        // The app goes on drawing at the old density while the user drags.
+        for _ in 0..3 {
+            assert_eq!(follow.frame_arrived(measured), Arrival::Stale);
+            check(&follow, old_frame, interim, NEW_DPI);
+        }
+        // The move ends: the task takes the new density, and the old frame is measured 1:1.
+        assert_eq!(follow.rescaled(old_frame), Arrival::Stale);
+        check(&follow, old_frame, (1, 1), NEW_DPI);
+        // The frame drawn for the new density replaces it, at the same size.
+        assert_eq!(follow.frame_arrived(suggested), Arrival::Show);
+        assert!(!follow.stretched());
+        assert!(follow.waits_for_commit());
+        check(&follow, suggested, (1, 1), NEW_DPI);
+        views.push(follow.view());
+        views.dedup();
+        assert_eq!(
+            views,
+            vec![old_frame, suggested],
+            "the window took the desktop's suggestion once and nothing after"
+        );
+        // To the eye nothing changed: within a pixel at 96 dpi of what it was on the old monitor.
+        let first = seen[0];
+        for size in &seen {
+            assert!(
+                (size.0 - first.0).abs() <= 1.5 && (size.1 - first.1).abs() <= 1.5,
+                "the app changed size to the eye: {size:?} after {first:?}"
+            );
+        }
     }
 }

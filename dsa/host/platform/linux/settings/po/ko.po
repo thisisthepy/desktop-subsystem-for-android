@@ -1849,8 +1849,8 @@ msgstr "Android를 멈췄다가 다시 시작합니다.\n\n앱 창이 닫힙니�
 msgid "Alternative stores"
 msgstr "대체 스토어"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 스토어는 앱 목록에서 제거합니다."
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 설치한 스토어는 다른 앱처럼 앱 목록에 보이며, 지울 때도 앱 목록에서 지웁니다."
 
 msgid "Installed, version {0}"
 msgstr "설치됨, 버전 {0}"

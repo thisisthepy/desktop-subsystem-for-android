@@ -78,6 +78,12 @@ pub struct Task {
     /// Whether the task's top activity says it handles a change of density itself, so
     /// Android redraws it at a new density instead of relaunching it.
     pub handles_density_change: bool,
+    /// Whether the guest can give the task a new density without relaunching its activity
+    /// although the activity does not say it handles one: the guest's framework can mark the
+    /// task for it. Only then does an app set to
+    /// [`DpiScaling::SystemForced`](crate::app_windows::DpiScaling::SystemForced) follow its
+    /// monitor's density.
+    pub forced_density_available: bool,
     /// Set when this is not an app task but an app overlay window, which the guest reports the
     /// same way ([`OverlayWindow`]).
     pub overlay: Option<OverlayWindow>,
@@ -104,6 +110,10 @@ pub struct OverlayWindow {
     pub focusable: bool,
     /// Whether the window takes pointer input.
     pub touchable: bool,
+    /// The density the app draws the window at once it took the one the window manager asked
+    /// for it ([`TaskRequest::SetOverlayDensity`]), in dots per inch; 0 while the app draws it
+    /// as the rest of its process.
+    pub density_dpi: u32,
 }
 
 /// The first ID the guest gives an app overlay window. Android's task IDs stay far below it.
@@ -240,6 +250,10 @@ pub struct AppInfo {
     /// elevation treats them as one group and the settings apps show them together. Empty for
     /// an app with a user ID of its own, and for an app that only has a task.
     pub shared_user_id: String,
+    /// Whether the app says it is a game (Android's `ApplicationInfo.category` is
+    /// `CATEGORY_GAME`), in the list of installed apps. The Games page lists games first.
+    /// False for an app that only has a task.
+    pub game: bool,
 }
 
 /// One of an app's launcher shortcuts in Android (`ShortcutManager`): a static one from its
@@ -416,7 +430,14 @@ pub enum TaskRequest {
     /// The apps whose tasks start below the title bar, as the user chose for each: the guest
     /// gives a task of one of them no status bar inset and a caption inset the framework
     /// consumes for the app. The list replaces the one before, and counts when a task starts.
-    CaptionCompat { below_title_bar: Vec<String> },
+    /// With it, the apps that keep their focus while another app's window has it
+    /// (`keep_focus`, "keep game focus"): while a task of one of them stays visible, Android
+    /// does not tell its app that it lost the focus. That list replaces the one before too,
+    /// and counts at once.
+    CaptionCompat {
+        below_title_bar: Vec<String>,
+        keep_focus: Vec<String>,
+    },
     /// The user closed the task's window; the agent ends the task.
     Close { task_id: i32 },
     /// Start the app's launcher activity as a new task in its own window.
@@ -442,7 +463,17 @@ pub enum TaskRequest {
         live: bool,
     },
     /// The task's window is on a monitor of another scale: the task draws at this density.
-    SetDensity { task_id: i32, density_dpi: u32 },
+    /// `forced` when the task's app is set to System (forced) scaling: the guest gives the task
+    /// the density without relaunching its activity, or gives it none.
+    SetDensity {
+        task_id: i32,
+        density_dpi: u32,
+        forced: bool,
+    },
+    /// The window of an app overlay window is on a monitor whose density differs from the one
+    /// its app (set to System (forced) scaling) draws at: the app draws that window alone at
+    /// this density, or at its own again with 0.
+    SetOverlayDensity { overlay_id: i32, density_dpi: u32 },
     /// The task's window draws its title bar over the top `height` pixels of the task: the
     /// task gets a top system bar inset of that height. 0 removes it. `start_width` and
     /// `end_width` are how far the window's icon and its caption buttons reach into the band
@@ -475,6 +506,10 @@ pub enum TaskRequest {
     },
     /// The user's answer to an app's request to put a shortcut on the desktop.
     AnswerPinShortcut { request_id: u32, accepted: bool },
+    /// The task's window has no frame yet, as a window reopened after the agent restarted:
+    /// the guest presents once and sends the task's current frame even when nothing in it
+    /// changed, so a still app's window shows it at once.
+    RequestFrame { task_id: i32 },
 }
 
 impl TaskRequest {
@@ -482,9 +517,13 @@ impl TaskRequest {
     pub fn describe(&self) -> String {
         match self {
             TaskRequest::Close { task_id } => format!("end task {task_id}"),
-            TaskRequest::CaptionCompat { below_title_bar } => format!(
-                "start the tasks of {} apps below the title bar",
-                below_title_bar.len()
+            TaskRequest::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            } => format!(
+                "start the tasks of {} apps below the title bar, and keep the focus of {} apps",
+                below_title_bar.len(),
+                keep_focus.len()
             ),
             TaskRequest::Launch { package_name } => format!("launch {package_name}"),
             TaskRequest::NewWindow { package_name } => {
@@ -513,7 +552,21 @@ impl TaskRequest {
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
+                forced: false,
             } => format!("draw task {task_id} at {density_dpi} dpi"),
+            TaskRequest::SetDensity {
+                task_id,
+                density_dpi,
+                forced: true,
+            } => format!("draw task {task_id} at {density_dpi} dpi without a relaunch"),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi: 0,
+            } => format!("draw overlay {overlay_id} at its app's density again"),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            } => format!("draw overlay {overlay_id} at {density_dpi} dpi"),
             TaskRequest::SetCaption {
                 task_id, height, ..
             } => format!("give task {task_id} a title bar inset of {height} pixels"),
@@ -547,6 +600,9 @@ impl TaskRequest {
                 request_id,
                 accepted: false,
             } => format!("decline the shortcut of request {request_id}"),
+            TaskRequest::RequestFrame { task_id } => {
+                format!("send the current frame of task {task_id}")
+            }
         }
     }
 }
@@ -584,6 +640,10 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                     TaskRequest::SetDensity { task_id: b, .. },
                 ) => a == b,
                 (
+                    TaskRequest::SetOverlayDensity { overlay_id: a, .. },
+                    TaskRequest::SetOverlayDensity { overlay_id: b, .. },
+                ) => a == b,
+                (
                     TaskRequest::SetCaption { task_id: a, .. },
                     TaskRequest::SetCaption { task_id: b, .. },
                 ) => a == b,
@@ -594,6 +654,10 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                 (TaskRequest::WindowsShown { .. }, TaskRequest::WindowsShown { .. }) => true,
                 (TaskRequest::TasksShown { .. }, TaskRequest::TasksShown { .. }) => true,
                 (TaskRequest::CaptionCompat { .. }, TaskRequest::CaptionCompat { .. }) => true,
+                (
+                    TaskRequest::RequestFrame { task_id: a },
+                    TaskRequest::RequestFrame { task_id: b },
+                ) => a == b,
                 _ => false,
             })
     };
@@ -948,6 +1012,11 @@ impl TaskTable {
         self.tasks.contains_key(&task_id) || self.frames.contains_key(&task_id)
     }
 
+    /// Whether the guest has reported the task (or overlay) `task_id` and not ended it.
+    pub fn has_task(&self, task_id: i32) -> bool {
+        self.tasks.contains_key(&task_id)
+    }
+
     /// How many tasks the table has heard of.
     pub fn len(&self) -> usize {
         self.tasks.len()
@@ -1148,12 +1217,14 @@ mod tests {
         let density = TaskRequest::SetDensity {
             task_id: 1,
             density_dpi: 320,
+            forced: false,
         };
         let requests = vec![
             resize(1, 500),
             TaskRequest::SetDensity {
                 task_id: 1,
                 density_dpi: 240,
+                forced: false,
             },
             density.clone(),
             resize(1, 1000),

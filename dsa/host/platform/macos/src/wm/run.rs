@@ -440,7 +440,12 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         Arc::clone(&stop),
     )?;
     let (requests, to_send) = channel();
-    serve_requests(places.host_api.clone(), to_send, events.clone(), drawn);
+    serve_requests(
+        places.host_api.clone(),
+        to_send,
+        events.clone(),
+        drawn.clone(),
+    );
     watch_tasks(places.host_api.clone(), events.clone());
     watch_app_windows(places.host_api.clone(), events.clone(), Arc::clone(&stop));
     drop(events);
@@ -495,6 +500,8 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         news,
     };
     let mut manager = Manager::new(platform);
+    // A window that opens with no frame asks the guest for its task's frame until one arrives.
+    manager.watch_frames(drawn);
     let mut last_tick = Instant::now();
     // The renderer's word on its device: any change is a GPU reset, followed at once.
     let mut device_changes = client.device_changes();

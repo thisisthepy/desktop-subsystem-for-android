@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 static int failures = 0;
@@ -465,6 +466,70 @@ static void pr7_a_region_that_cannot_be_committed_is_not_taken_over() {
     EXPECT(why == dsa::GrantRefusal::NoRegion);
 }
 
+// A scrub that, the first time it is armed, lets another render thread ask for a grant while
+// it runs (the scrub runs with no lock held), and has that grant's owner write it at once, as
+// the hwcomposer packs a video picture into its new staging grant.
+struct RacingScrub {
+    dsa::GraphicsMemory* memory = nullptr;
+    uint8_t* base = nullptr;
+    bool armed = false;
+    uint64_t scrubbedOffset = 0;
+    uint64_t scrubbedLength = 0;
+    std::optional<dsa::GraphicsGrant> during;
+};
+
+static void scrubWhileAnotherThreadAllocates(void* context, uint8_t* at, uint64_t length) {
+    auto* race = static_cast<RacingScrub*>(context);
+    if (race->armed) {
+        race->armed = false;
+        race->scrubbedOffset = static_cast<uint64_t>(at - race->base);
+        race->scrubbedLength = length;
+        race->during = race->memory->allocate(length, 2);
+        if (race->during) {
+            std::memset(race->base + race->during->offset, 0xCD, race->during->length);
+        }
+    }
+    std::memset(at, 0, length);
+}
+
+// pr7 (seen as fr26 green video): a granule the trim takes back is not granted to anyone until
+// its scrub has finished. Marked free before the scrub, which runs with no lock held, it went
+// to the next allocation on another thread, and the late scrub zeroed what that owner had just
+// written: the hwcomposer's packed picture reached the host as zeros, solid green.
+static void pr7_a_granule_being_scrubbed_is_not_granted_until_the_scrub_ends() {
+    FakeRegion region(16 * kMiB);
+    dsa::GraphicsMemory memory;
+    RacingScrub race;
+    race.memory = &memory;
+    race.base = region.data.data();
+    EXPECT(memory.attach(region.data.data(), region.length, region.grants.data(),
+                         region.grants.size(), scrubWhileAnotherThreadAllocates, &race));
+    memory.seedKeys(5);
+    auto first = memory.allocate(3 * kGranule, 1);
+    EXPECT(first);
+    memory.release(first->offset);
+    race.armed = true;
+    EXPECT(memory.reclaim() == 3 * kGranule);
+    EXPECT(race.scrubbedOffset == first->offset && race.scrubbedLength == 3 * kGranule);
+    EXPECT(race.during.has_value());
+    if (race.during) {
+        // Not over the granules still being scrubbed...
+        const uint64_t start = race.during->offset;
+        const uint64_t end = start + race.during->length;
+        EXPECT(end <= first->offset || start >= first->offset + first->length);
+        // ...so what its owner wrote is still there after the scrub.
+        bool kept = true;
+        for (uint64_t i = start; i < end; ++i) {
+            kept = kept && region.data[i] == 0xCD;
+        }
+        EXPECT(kept);
+    }
+    // Once scrubbed, the granules are granted again, first fit.
+    auto again = memory.allocate(3 * kGranule, 3);
+    EXPECT(again && again->offset == first->offset);
+    EXPECT(region.data[first->offset] == 0);
+}
+
 // pr7: the layout constants the guest kernel uses.
 static void pr7_the_layout_is_the_kernels() {
     EXPECT(dsa::kGraphicsGranule == 65536);
@@ -492,6 +557,7 @@ int main() {
     pr7_a_grant_that_cannot_be_committed_takes_the_copy_path();
     pr7_granules_are_committed_once_up_to_the_high_water_mark();
     pr7_a_region_that_cannot_be_committed_is_not_taken_over();
+    pr7_a_granule_being_scrubbed_is_not_granted_until_the_scrub_ends();
     pr7_the_layout_is_the_kernels();
     if (failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", failures);

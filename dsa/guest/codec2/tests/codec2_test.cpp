@@ -348,6 +348,42 @@ TEST(fr26_a_written_picture_fills_every_sample_of_a_larger_buffer) {
     }
 }
 
+TEST(fr26_a_picture_its_decoder_never_wrote_never_goes_out) {
+    // Zeros from the host (a surface its decoder handed back unwritten, or shared memory that
+    // lost its picture) went into a buffer of the app's surface like any picture: solid green.
+    const std::vector<uint8_t> zeros = flatNv12(6, 4, 0, 0, 0);
+    FakeBuffer buffer(6, 4);
+    EXPECT_TRUE(writePicture(zeros.data(), zeros.size(), 6, 4, 6, BufferSize{6, 4}, buffer.lock(), buffer.unlock()) ==
+                WriteResult::NotDecoded);
+    // Never locked: the buffer goes back untouched, and the surface keeps the last picture.
+    EXPECT_EQ(buffer.locks, 0);
+    EXPECT_EQ(buffer.planes.y, std::vector<uint8_t>(buffer.planes.y.size(), 0xee));
+
+    // A green band: the last rows and their chroma were never written.
+    std::vector<uint8_t> band = flatNv12(6, 4, 81, 90, 240);
+    std::fill(band.begin() + 6 * 3, band.begin() + 6 * 4, 0);
+    std::fill(band.begin() + 6 * 4 + 6, band.end(), 0);
+    FakeBuffer banded(6, 4);
+    EXPECT_TRUE(writePicture(band.data(), band.size(), 6, 4, 6, BufferSize{6, 4}, banded.lock(), banded.unlock()) ==
+                WriteResult::NotDecoded);
+}
+
+TEST(fr26_black_and_dark_pictures_are_pictures) {
+    // Black in limited and in full range, and luma 0 under real chroma, are written.
+    const std::vector<uint8_t> limited = flatNv12(6, 4, 16, 128, 128);
+    const std::vector<uint8_t> full = flatNv12(6, 4, 0, 128, 128);
+    const std::vector<uint8_t> green = flatNv12(6, 4, 1, 0, 0);
+    EXPECT_TRUE(!holdsNoPicture(limited.data(), limited.size(), 6, 4, 6));
+    EXPECT_TRUE(!holdsNoPicture(full.data(), full.size(), 6, 4, 6));
+    EXPECT_TRUE(!holdsNoPicture(green.data(), green.size(), 6, 4, 6));
+    FakeBuffer buffer(6, 4);
+    EXPECT_TRUE(writePicture(full.data(), full.size(), 6, 4, 6, BufferSize{6, 4}, buffer.lock(), buffer.unlock()) ==
+                WriteResult::Written);
+    // Too short for its size: left to the copy, which refuses it.
+    const std::vector<uint8_t> zeros = flatNv12(6, 4, 0, 0, 0);
+    EXPECT_TRUE(!holdsNoPicture(zeros.data(), zeros.size() - 1, 6, 4, 6));
+}
+
 TEST(fr26_a_buffer_that_cannot_be_locked_never_goes_out) {
     // Before, the buffer went to the surface anyway: zeros (green) or an older picture.
     const std::vector<uint8_t> nv12 = flatNv12(4, 2, 81, 90, 240);
@@ -615,6 +651,18 @@ TEST(fr26_a_picture_in_a_taller_buffer_keeps_its_rows_and_chroma_planes) {
     const std::vector<uint8_t> nv12 = rowNumberedNv12(640, 360);
     EXPECT_TRUE(writeInto(buffer, nv12, 640, 360) == WriteResult::Written);
     EXPECT_ALL_SAMPLES(buffer, 640, 360);
+}
+
+TEST(fr26_a_short_with_its_last_rows_never_decoded_is_not_written) {
+    // A 720x1280 Short as the host sends it: every row written is a picture.
+    std::vector<uint8_t> nv12 = rowNumberedNv12(720, 1280);
+    GrallocYv12 whole(720, 1280);
+    EXPECT_TRUE(writeInto(whole, nv12, 720, 1280) == WriteResult::Written);
+    // Its last eight rows and their chroma left as the decoder's surface held them: zeros.
+    std::fill(nv12.begin() + 720 * 1272, nv12.begin() + 720 * 1280, 0);
+    std::fill(nv12.begin() + 720 * 1280 + 720 * 636, nv12.end(), 0);
+    GrallocYv12 banded(720, 1280);
+    EXPECT_TRUE(writeInto(banded, nv12, 720, 1280) == WriteResult::NotDecoded);
 }
 
 TEST(fr26_pictures_wait_in_order_while_the_one_before_waits_for_its_buffer) {

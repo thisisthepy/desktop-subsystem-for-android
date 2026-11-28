@@ -16,10 +16,14 @@
 //! - at most [`WritebackPolicy::run_pages`] a run, so init, which does nothing else during the
 //!   write, is busy for a fraction of a second, and at most one run every
 //!   [`WritebackPolicy::gap`];
-//! - at most [`WritebackPolicy::daily_pages`] a day, counted across restarts of Android in a
-//!   persistent property ([`Day`]). zram itself stops at the budget the run is given
-//!   (`writeback_limit`), so a run never writes more than it was allowed, whatever the daemon
-//!   believes it wrote.
+//! - at most [`WritebackPolicy::boot_pages`] a boot, counted by zram itself (its backing
+//!   device's writes, `bd_stat`), so a daemon started again within the boot keeps the count.
+//!   The backing file is made new each boot and deleted with it, so what an earlier boot wrote
+//!   is gone and does not count;
+//! - at most [`WritebackPolicy::daily_pages`] a day across boots, counted across restarts of
+//!   Android in a persistent property ([`Day`]), a bound on the disk's wear however often
+//!   Android starts. zram itself stops at the budget the run is given (`writeback_limit`), so a
+//!   run never writes more than it was allowed, whatever the daemon believes it wrote.
 //!
 //! zstd's second compression (the idle reclaim) still comes first: a page that stays in memory
 //! is better small, and the writeback takes only what has stayed cold far longer than that.
@@ -79,10 +83,17 @@ pub struct WritebackPolicy {
     /// The most one run writes, in 4 KiB pages: 32 MiB by default. zram writes one page at a
     /// time and waits for each, and init does nothing else meanwhile.
     pub run_pages: u64,
-    /// The most written in a day, in 4 KiB pages: 512 MiB by default. A day's budget is
-    /// what one first long doze needs to write out the cold part of a full zram (about 480 MiB
-    /// before compression on the owner's PC); a page once written stays on the disk until it is
-    /// read back, so later days write only what has newly gone cold.
+    /// The most written in one boot, in 4 KiB pages: 512 MiB by default, the size of the boot's
+    /// backing file (fstab.dsa). It is what one first long doze needs to write out the cold
+    /// part of a full zram (about 480 MiB before compression on the owner's PC); a page once
+    /// written stays on the disk until it is read back, so the rest of the boot writes only
+    /// what has newly gone cold.
+    pub boot_pages: u64,
+    /// The most written in a day across boots, in 4 KiB pages: 2 GiB by default, four boots'
+    /// worth. A day's budget alone (512 MiB, as it was) was spent by the day's first boots: on
+    /// the owner's PC (1.0.1-dev.37) a later boot wrote nothing, though the earlier boots' files
+    /// had been deleted with what they held. 2 GiB a day is some 730 GiB a year at the most, a
+    /// small share of what a consumer SSD is rated to write.
     pub daily_pages: u64,
     /// The least zram must keep in memory for a run to be worth it, in KiB: below it, the
     /// scan of zram's pages and the disk's wake-up cost more than they save.
@@ -96,7 +107,8 @@ impl Default for WritebackPolicy {
             age: Duration::from_secs(30 * 60),
             gap: Duration::from_secs(10 * 60),
             run_pages: 32 * MIB_PAGES,
-            daily_pages: 512 * MIB_PAGES,
+            boot_pages: 512 * MIB_PAGES,
+            daily_pages: 2048 * MIB_PAGES,
             min_store_kb: 8 * 1024,
         }
     }
@@ -219,6 +231,9 @@ pub struct Run {
     pub backing_before: BackingStat,
     pub backing_after: BackingStat,
     pub took: Duration,
+    /// What is left of the boot's budget after the run, and the budget, in 4 KiB pages.
+    pub boot_left_pages: u64,
+    pub boot_pages: u64,
     /// What is left of the day's budget after the run, and the budget, in 4 KiB pages.
     pub left_pages: u64,
     pub daily_pages: u64,
@@ -238,7 +253,7 @@ impl Run {
         format!(
             "zram writeback: wrote {} KiB of cold pages to the backing file in {} ms; zram store \
              {} -> {} KiB (holding {} -> {} KiB, {} -> {} incompressible pages), {} KiB on the \
-             disk; {} of today's {} MiB left",
+             disk; {} of this boot's {} MiB and {} of today's {} MiB left",
             self.written_pages() * PAGE_KB,
             self.took.as_millis(),
             self.before.mem_used_kb,
@@ -248,6 +263,8 @@ impl Run {
             self.before.huge_pages,
             self.after.huge_pages,
             self.backing_after.stored_kb,
+            self.boot_left_pages / MIB_PAGES,
+            self.boot_pages / MIB_PAGES,
             self.left_pages / MIB_PAGES,
             self.daily_pages / MIB_PAGES,
         )
@@ -262,11 +279,14 @@ pub struct Writeback {
     idle_since: Option<Duration>,
     last_run: Option<Duration>,
     today: Day,
+    /// What this boot has written, in 4 KiB pages.
+    boot_written: u64,
 }
 
 impl Writeback {
     /// Starts on `today`, with what `stored` (the persistent property) says was written: kept
-    /// when it is today's, forgotten when it is another day's.
+    /// when it is today's, forgotten when it is another day's. The boot has written nothing yet
+    /// unless [`Writeback::with_boot_written`] says otherwise.
     pub fn new(policy: WritebackPolicy, today: u64, stored: Option<Day>) -> Writeback {
         let today = match stored {
             Some(day) if day.day == today => day,
@@ -280,15 +300,34 @@ impl Writeback {
             idle_since: None,
             last_run: None,
             today,
+            boot_written: 0,
         }
+    }
+
+    /// The same, with `pages` (4 KiB) already written this boot: what zram's backing device has
+    /// taken since the boot (`bd_stat`'s writes), which outlives a restart of the daemon.
+    pub fn with_boot_written(mut self, pages: u64) -> Writeback {
+        self.boot_written = pages;
+        self
     }
 
     pub fn policy(&self) -> WritebackPolicy {
         self.policy
     }
 
-    /// What is left of today's budget, in 4 KiB pages.
+    /// What the next runs may still write, in 4 KiB pages: the less of what is left of the
+    /// boot's budget and of the day's.
     pub fn left_pages(&self) -> u64 {
+        self.boot_left_pages().min(self.day_left_pages())
+    }
+
+    /// What is left of this boot's budget, in 4 KiB pages.
+    pub fn boot_left_pages(&self) -> u64 {
+        self.policy.boot_pages.saturating_sub(self.boot_written)
+    }
+
+    /// What is left of today's budget, in 4 KiB pages.
+    pub fn day_left_pages(&self) -> u64 {
         self.policy.daily_pages.saturating_sub(self.today.pages)
     }
 
@@ -323,9 +362,10 @@ impl Writeback {
         Some(budget)
     }
 
-    /// Counts `pages` written by the run, and returns the day to keep in
-    /// [`WRITEBACK_DAY_PROPERTY`].
+    /// Counts `pages` written by the run against the boot and the day, and returns the day to
+    /// keep in [`WRITEBACK_DAY_PROPERTY`].
     pub fn wrote(&mut self, pages: u64) -> Day {
+        self.boot_written = self.boot_written.saturating_add(pages);
         self.today.pages = self.today.pages.saturating_add(pages);
         self.today
     }

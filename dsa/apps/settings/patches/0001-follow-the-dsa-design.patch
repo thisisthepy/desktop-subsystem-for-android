@@ -1,0 +1,27 @@
+Follow DSA's design: the home page opens again with the layout for its height when its
+window is resized across 600 dp, so the large title comes and goes with the height.
+
+diff --git a/src/com/android/settings/homepage/SettingsHomepageActivity.java b/src/com/android/settings/homepage/SettingsHomepageActivity.java
+--- a/src/com/android/settings/homepage/SettingsHomepageActivity.java
++++ b/src/com/android/settings/homepage/SettingsHomepageActivity.java
+@@ -188,2 +188,3 @@
+         super.onCreate(savedInstanceState);
++        mLargeTitle = io.github.thisisthepy.dsa.design.DsaDesign.largeTitleStartsExpanded(this);
+ 
+@@ -351,2 +352,5 @@
+ 
++    /** Whether this window had the large title when the activity was made. */
++    private boolean mLargeTitle;
++
+     @Override
+@@ -354,2 +358,10 @@
+         super.onConfigurationChanged(newConfig);
++        // The home page has its large title only in a window 600 dp or more high
++        // (layout-h600dp). The activity handles size changes itself, so a window resized
++        // across that height is opened again with the layout for its new height.
++        if (mLargeTitle != io.github.thisisthepy.dsa.design.DsaDesign
++                .largeTitleStartsExpanded(newConfig.screenHeightDp)) {
++            recreate();
++            return;
++        }
+         updateHomepageUI();

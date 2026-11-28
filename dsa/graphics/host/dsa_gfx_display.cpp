@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "FrameBuffer.h"
+#include "dsa_compose_guard.h"
 #include "dsa_copy_bands.h"
 #include "dsa_copy_wait.h"
 #include "dsa_device_remake.h"
@@ -143,6 +144,23 @@ struct PendingFrame {
     uint32_t height = 0;
 };
 
+/* A ColorBuffer posted as a display's frame, and when it last was (steady clock). */
+struct PostedBuffer {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    std::chrono::steady_clock::time_point last;
+};
+
+/* The ColorBuffers a display's frames came in lately, and what the log last said of them. */
+struct DisplayBuffers {
+    std::map<uint32_t, PostedBuffer> posted;
+    std::string said;
+};
+
+/* How long a ColorBuffer counts as one of a display's frame buffers after its last frame. The
+ * hwcomposer lets go of a second one after 2 s without use. */
+constexpr auto kPostedBufferAge = std::chrono::seconds(5);
+
 struct Presenter {
     std::mutex mutex;
     std::condition_variable wake;
@@ -159,6 +177,7 @@ struct Presenter {
 
     /* Only the presentation thread touches these. */
     std::map<uint32_t, Target> targets;
+    std::map<uint32_t, DisplayBuffers> buffers;
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer commands = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
@@ -171,6 +190,80 @@ Presenter* s_presenter = nullptr;
 int (*s_original_set_display_color_buffer)(uint32_t, uint32_t) = nullptr;
 int (*s_get_display_pose)(uint32_t, int32_t*, int32_t*, uint32_t*, uint32_t*) = nullptr;
 bool s_hook_installed = false;
+
+/* The frames of each ColorBuffer that wait for, or are in, their copy into a task window. A
+ * composition into one of them waits until there are none (dsa_compose_guard.h), so the
+ * hwcomposer can compose every frame of a task into one ColorBuffer. */
+struct CopiesInFlight {
+    std::mutex mutex;
+    std::condition_variable done;
+    std::map<uint32_t, uint32_t> frames;
+};
+
+CopiesInFlight& copies_in_flight() {
+    /* Never destroyed: a render thread may still wait on it while the library unloads. */
+    static CopiesInFlight* copies = new CopiesInFlight();
+    return *copies;
+}
+
+void copy_queued(uint32_t color_buffer) {
+    CopiesInFlight& copies = copies_in_flight();
+    std::lock_guard<std::mutex> lock(copies.mutex);
+    copies.frames[color_buffer]++;
+}
+
+void copy_finished(uint32_t color_buffer) {
+    CopiesInFlight& copies = copies_in_flight();
+    {
+        std::lock_guard<std::mutex> lock(copies.mutex);
+        auto it = copies.frames.find(color_buffer);
+        if (it == copies.frames.end()) {
+            return;
+        }
+        if (--it->second == 0) {
+            copies.frames.erase(it);
+        }
+    }
+    copies.done.notify_all();
+}
+
+/* dsa_compose_guard_fn: waits up to `timeout_ms` until no frame of `color_buffer` waits for or
+ * is in its copy. Called on a guest's render thread, which holds no lock of the renderer's. */
+int compose_guard(uint32_t color_buffer, uint32_t timeout_ms) {
+    CopiesInFlight& copies = copies_in_flight();
+    std::unique_lock<std::mutex> lock(copies.mutex);
+    const bool free = copies.done.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&] {
+        return copies.frames.find(color_buffer) == copies.frames.end();
+    });
+    return free ? 1 : 0;
+}
+
+/* Set when the library loads, so every guest connection finds it: with no presentation
+ * running nothing is copied, and no composition waits. */
+struct ComposeGuardInstall {
+    ComposeGuardInstall() { dsa_compose_target_guard = compose_guard; }
+};
+ComposeGuardInstall s_compose_guard_install;
+
+/* Counts a frame's ColorBuffer as being copied until the copy has read it, or the frame was
+ * dropped. */
+class CopyHold {
+   public:
+    explicit CopyHold(uint32_t color_buffer) : color_buffer_(color_buffer) {}
+    ~CopyHold() { release(); }
+    CopyHold(const CopyHold&) = delete;
+    CopyHold& operator=(const CopyHold&) = delete;
+
+    void release() {
+        if (color_buffer_ != 0) {
+            copy_finished(color_buffer_);
+            color_buffer_ = 0;
+        }
+    }
+
+   private:
+    uint32_t color_buffer_;
+};
 
 void log_once(const char* what) {
     static std::mutex log_mutex;
@@ -217,7 +310,17 @@ int hooked_set_display_color_buffer(uint32_t display_id, uint32_t color_buffer) 
     std::lock_guard<std::mutex> lock(s_presenter_mutex);
     if (s_presenter) {
         std::lock_guard<std::mutex> pending_lock(s_presenter->mutex);
+        auto replaced = s_presenter->pending.find(display_id);
+        uint32_t dropped = 0;
+        if (replaced != s_presenter->pending.end()) {
+            /* The newer frame goes instead; the older is never copied. */
+            dropped = replaced->second.color_buffer;
+        }
+        copy_queued(color_buffer);
         s_presenter->pending[display_id] = frame;
+        if (dropped != 0) {
+            copy_finished(dropped);
+        }
         s_presenter->wake.notify_one();
     }
     return result;
@@ -352,6 +455,7 @@ void follow_device(VkEmulation& emu, Presenter& presenter) {
     }
     presenter.generation = generation;
     presenter.targets.clear();
+    presenter.buffers.clear();
     presenter.pool = VK_NULL_HANDLE;
     presenter.commands = VK_NULL_HANDLE;
     presenter.fence = VK_NULL_HANDLE;
@@ -413,9 +517,60 @@ void cmd_barriers(VulkanDispatch* vk, VkCommandBuffer commands, VkPipelineStageF
                              static_cast<uint32_t>(barriers.size()), barriers.data());
 }
 
+/* Says in the log, when it changed, which ColorBuffers `display_id`'s frames came in lately (the
+ * hwcomposer's task frames, or an overlay's own buffers) and the window texture they are copied
+ * into, so the memory each task window costs the renderer can be read beside the window
+ * manager's own line for it. */
+void report_buffers(Presenter& presenter, uint32_t display_id, uint32_t color_buffer,
+                    uint32_t width, uint32_t height, const Target& target) {
+    DisplayBuffers& buffers = presenter.buffers[display_id];
+    const auto now = std::chrono::steady_clock::now();
+    PostedBuffer& posted = buffers.posted[color_buffer];
+    posted.width = width;
+    posted.height = height;
+    posted.last = now;
+    for (auto it = buffers.posted.begin(); it != buffers.posted.end();) {
+        if (now - it->second.last > kPostedBufferAge) {
+            it = buffers.posted.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    uint64_t bytes = 0;
+    std::string sizes;
+    for (const auto& entry : buffers.posted) {
+        const PostedBuffer& each = entry.second;
+        bytes += uint64_t{each.width} * each.height * 4u;
+        if (!sizes.empty()) {
+            sizes += ", ";
+        }
+        sizes += std::to_string(each.width) + "x" + std::to_string(each.height);
+    }
+    const uint64_t texture_bytes = uint64_t{target.width} * target.height * 4u;
+    char line[512];
+    std::snprintf(line, sizeof(line),
+                  "Display %u's frames came in %zu ColorBuffer(s) in the last %lld s (%s: %.1f "
+                  "MiB), copied into the window manager's %ux%u window texture (%.1f MiB, "
+                  "imported, not held twice).",
+                  display_id, buffers.posted.size(),
+                  static_cast<long long>(kPostedBufferAge.count()), sizes.c_str(),
+                  static_cast<double>(bytes) / (1024.0 * 1024.0), target.width, target.height,
+                  static_cast<double>(texture_bytes) / (1024.0 * 1024.0));
+    /* Compared without the counts that change with every frame: only the buffers' number and
+     * sizes and the texture's size. */
+    const std::string key = std::to_string(buffers.posted.size()) + "|" + sizes + "|" +
+                            std::to_string(target.width) + "x" + std::to_string(target.height);
+    if (key != buffers.said) {
+        buffers.said = key;
+        WARN("%s", line);
+    }
+}
+
 /* Copies the part of `frame`'s color buffer the frame fills into the display's texture and
- * tells the embedder. */
-void present(Presenter& presenter, uint32_t display_id, const PendingFrame& frame) {
+ * tells the embedder. `hold` counts the color buffer as being copied, and is let go once the
+ * copy has read it. */
+void present(Presenter& presenter, uint32_t display_id, const PendingFrame& frame,
+             CopyHold& hold) {
     const uint32_t color_buffer = frame.color_buffer;
     VkEmulation* emu = emulation();
     FrameBuffer* fb = FrameBuffer::getFB();
@@ -615,6 +770,10 @@ void present(Presenter& presenter, uint32_t display_id, const PendingFrame& fram
              display_id, color_buffer, width, height, content_width, content_height,
              target.width, target.height, static_cast<unsigned long long>(took_ns / 1000000ull));
     }
+    /* The copy has read the color buffer: the guest may compose into it again while the
+     * embedder shows the frame. */
+    hold.release();
+    report_buffers(presenter, display_id, color_buffer, width, height, target);
     presenter.frame_cb(presenter.context, display_id, content_width, content_height);
 }
 
@@ -644,11 +803,13 @@ void run(Presenter* presenter) {
                         destroy_target(*emu, it->second);
                         presenter->targets.erase(it);
                     }
+                    presenter->buffers.erase(display_id);
                 }
             }
         }
         for (const auto& [display_id, frame] : frames) {
-            present(*presenter, display_id, frame);
+            CopyHold hold(frame.color_buffer);
+            present(*presenter, display_id, frame, hold);
         }
     }
     VkEmulation* emu = emulation();
@@ -688,6 +849,11 @@ void stop_presenter() {
     if (presenter->thread.joinable()) {
         presenter->thread.join();
     }
+    /* Frames never taken for a copy: a composition waits for none of them. */
+    for (const auto& entry : presenter->pending) {
+        copy_finished(entry.second.color_buffer);
+    }
+    presenter->pending.clear();
     delete presenter;
 }
 
@@ -723,7 +889,11 @@ extern "C" DSA_GFX_EXPORT void dsa_gfx_forget_display(uint32_t display_id) {
         return;
     }
     std::lock_guard<std::mutex> frames(presenter->mutex);
-    presenter->pending.erase(display_id);
+    auto pending = presenter->pending.find(display_id);
+    if (pending != presenter->pending.end()) {
+        copy_finished(pending->second.color_buffer);
+        presenter->pending.erase(pending);
+    }
     presenter->forget.push_back(display_id);
     presenter->wake.notify_one();
 }

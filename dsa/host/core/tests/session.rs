@@ -1428,16 +1428,44 @@ fn nfr2_the_guest_memory_grows_when_its_daemon_says_it_is_short() {
     session.start();
     let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
+    // Short, with its tasks waiting on memory 12% of the time.
     send_body(
         &mut agent,
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: 2900 * 1024,
             mem_available_kb: 200 * 1024,
-            stall_centipercent: 0,
+            stall_centipercent: 1200,
         }),
     );
     wait_until("the memory is grown", || {
         launcher.0.lock().unwrap().memory_sizes == vec![3712]
+    });
+}
+
+#[test]
+fn nfr2_a_guest_short_without_stalls_keeps_the_vm_at_its_size() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().memory_range = Some((1536, 29042));
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    // dev.39's first growth at boot: 435 MiB available of 1474 MiB, nothing stalled.
+    let short = |stall_centipercent| {
+        Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
+            mem_total_kb: 1474 * 1024,
+            mem_available_kb: 435 * 1024,
+            stall_centipercent,
+        })
+    };
+    send_body(&mut agent, short(0));
+    send_body(&mut agent, short(340));
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, Vec::<u64>::new());
+    // Once its tasks wait on memory, it grows.
+    send_body(&mut agent, short(1200));
+    wait_until("the memory is grown", || {
+        launcher.0.lock().unwrap().memory_sizes == vec![2048]
     });
 }
 
@@ -1449,21 +1477,22 @@ fn nfr2_memory_ballooned_back_to_the_host_is_not_counted_as_reserved_by_the_kern
     session.start();
     let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
-    let pressure = |total_mb: u64, available_mb: u64| {
+    let pressure = |total_mb: u64, available_mb: u64, stall_centipercent: u32| {
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: total_mb * 1024,
             mem_available_kb: available_mb * 1024,
-            stall_centipercent: 0,
+            stall_centipercent,
         })
     };
-    // Short: the VM grows by hot-add, to what the guest uses plus 768 MiB of headroom.
-    send_body(&mut agent, pressure(1950, 300));
+    // Short and stalling: the VM grows by hot-add, to what the guest uses plus 768 MiB of
+    // headroom.
+    send_body(&mut agent, pressure(1950, 300, 1200));
     wait_until("the memory is grown", || {
         launcher.0.lock().unwrap().memory_sizes == vec![2560]
     });
     // Calm again after the cooldown: it is ballooned back to the base.
     thread::sleep(Duration::from_millis(5100));
-    send_body(&mut agent, pressure(2600, 2200));
+    send_body(&mut agent, pressure(2600, 2200, 0));
     wait_until("the memory is given back", || {
         launcher.0.lock().unwrap().memory_sizes == vec![2560, 2048]
     });
@@ -1501,7 +1530,7 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: 2900 * 1024,
             mem_available_kb: 200 * 1024,
-            stall_centipercent: 0,
+            stall_centipercent: 1200,
         })
     };
     send_body(&mut agent, short());
@@ -1540,7 +1569,7 @@ fn nfr2_a_slow_resize_runs_beside_the_session_which_keeps_serving_and_asks_for_n
         Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
             mem_total_kb: 2900 * 1024,
             mem_available_kb: 200 * 1024,
-            stall_centipercent: 0,
+            stall_centipercent: 1200,
         })
     };
     send_body(&mut agent, short());
@@ -1705,6 +1734,7 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
         .request(TaskRequest::SetDensity {
             task_id: 7,
             density_dpi: 320,
+            forced: false,
         })
         .expect("the density is sent");
     session
@@ -1723,7 +1753,8 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
             dsa_protocol::control::SetTaskDensity {
                 task_id: 7,
                 density_dpi: 320,
-                recreate: false
+                recreate: false,
+                forced: false
             }
         ))
     );
@@ -1736,6 +1767,31 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
             height: 1948,
             live: false
         }))
+    );
+}
+
+#[test]
+fn fr4_a_forced_density_reaches_the_guest_forced() {
+    let (session, mut agent, _launcher) = active_session();
+    session
+        .request(TaskRequest::SetDensity {
+            task_id: 7,
+            density_dpi: 262,
+            forced: true,
+        })
+        .expect("the density is sent");
+
+    let sent = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+    assert_eq!(
+        sent.body,
+        Some(Body::SetTaskDensity(
+            dsa_protocol::control::SetTaskDensity {
+                task_id: 7,
+                density_dpi: 262,
+                recreate: false,
+                forced: true
+            }
+        ))
     );
 }
 
@@ -2392,6 +2448,64 @@ fn fr10_battery_saver_caps_the_guest_refresh_rate_at_once_and_lifts_it_when_off(
     assert_eq!(next_body(&mut agent), display_refresh(120));
 }
 
+/// A task the agent reports on a display of `side` by `side` guest pixels.
+fn task_on_display(task_id: i32, side: u32) -> Body {
+    match task_updated(task_id, "Clock") {
+        Body::TaskUpdated(update) => Body::TaskUpdated(dsa_protocol::control::TaskUpdated {
+            max_width: side,
+            max_height: side,
+            ..update
+        }),
+        _ => unreachable!(),
+    }
+}
+
+/// The display sizes the guest is asked for until the session has said nothing for a while.
+fn display_sizes_asked(agent: &mut Box<dyn Connection>) -> Vec<(u32, u32)> {
+    let mut sizes = Vec::new();
+    while let Ok(frame) = agent.recv(Some(Duration::from_millis(400))) {
+        if let Some(Body::DisplaySize(size)) = dsa_protocol::decode(&frame).unwrap().body {
+            sizes.push((size.width, size.height));
+        }
+    }
+    sizes
+}
+
+#[test]
+fn fr4_a_window_that_opens_grows_the_guest_display_for_the_monitors_connected_then() {
+    use dsa_host_core::guest_display::Monitor;
+    let (session, mut agent, _launcher) = active_session();
+    let monitors = Arc::new(Mutex::new(vec![Monitor::at_dpi(2880, 1800, 192).as_main()]));
+    let read = Arc::clone(&monitors);
+    session.set_monitor_source(Arc::new(move || Some(read.lock().unwrap().clone())));
+    // Android started with the main monitor alone: its 2880 display holds a window there.
+    send_body(&mut agent, task_on_display(7, 2880));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+    // Two monitors at 125% are plugged in. The next window to open measures them: a task kept
+    // at the main monitor's density needs 4096 guest pixels across one of them.
+    monitors.lock().unwrap().extend([
+        Monitor::at_dpi(2560, 1440, 120),
+        Monitor::at_dpi(2560, 1440, 120),
+    ]);
+    send_body(&mut agent, task_on_display(8, 2880));
+    assert_eq!(display_sizes_asked(&mut agent), vec![(4096, 4096)]);
+    // Another report of a window that is open already opens nothing.
+    send_body(&mut agent, task_on_display(8, 2880));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+    // Once the guest has grown its display, the next window asks for nothing, and unplugging
+    // the monitors never shrinks it.
+    monitors.lock().unwrap().truncate(1);
+    send_body(&mut agent, task_on_display(9, 4096));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+}
+
+#[test]
+fn fr4_without_a_monitor_source_the_display_keeps_its_size() {
+    let (_session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, task_on_display(7, 1920));
+    assert!(display_sizes_asked(&mut agent).is_empty());
+}
+
 #[test]
 fn fr10_battery_saver_leaves_a_60_hz_monitor_alone() {
     let launcher = FakeLauncher::default();
@@ -2831,6 +2945,7 @@ fn fr22_the_guest_is_told_which_apps_start_below_the_title_bar_when_it_connects_
     let compat = |packages: &[&str]| {
         Body::CaptionCompat(dsa_protocol::control::CaptionCompat {
             below_title_bar: packages.iter().map(|package| package.to_string()).collect(),
+            keep_focus: Vec::new(),
         })
     };
     let launcher = FakeLauncher::default();
@@ -2841,6 +2956,7 @@ fn fr22_the_guest_is_told_which_apps_start_below_the_title_bar_when_it_connects_
     session
         .request(TaskRequest::CaptionCompat {
             below_title_bar: vec!["com.example.player".into()],
+            keep_focus: Vec::new(),
         })
         .unwrap();
     session.start();
@@ -2851,9 +2967,44 @@ fn fr22_the_guest_is_told_which_apps_start_below_the_title_bar_when_it_connects_
     );
     // The same list again is not news; an emptied one is.
     session
-        .caption_compat(vec!["com.example.player".into()])
+        .caption_compat(vec!["com.example.player".into()], Vec::new())
         .unwrap();
-    session.caption_compat(Vec::new()).unwrap();
+    session.caption_compat(Vec::new(), Vec::new()).unwrap();
+    assert_eq!(next_caption_compat(&mut daemon), compat(&[]));
+}
+
+#[test]
+fn fr44_the_guest_is_told_which_apps_keep_their_focus_when_it_connects_and_on_each_change() {
+    let compat = |keep_focus: &[&str]| {
+        Body::CaptionCompat(dsa_protocol::control::CaptionCompat {
+            below_title_bar: Vec::new(),
+            keep_focus: keep_focus
+                .iter()
+                .map(|package| package.to_string())
+                .collect(),
+        })
+    };
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    // Said before the guest runs: told as soon as it connects.
+    session
+        .request(TaskRequest::CaptionCompat {
+            below_title_bar: Vec::new(),
+            keep_focus: vec!["com.ustwo.monumentvalley".into()],
+        })
+        .unwrap();
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    assert_eq!(
+        next_caption_compat(&mut daemon),
+        compat(&["com.ustwo.monumentvalley"])
+    );
+    // The same lists again are not news; turning the app off is.
+    session
+        .caption_compat(Vec::new(), vec!["com.ustwo.monumentvalley".into()])
+        .unwrap();
+    session.caption_compat(Vec::new(), Vec::new()).unwrap();
     assert_eq!(next_caption_compat(&mut daemon), compat(&[]));
 }
 
@@ -5747,6 +5898,7 @@ fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
             request_id,
             providers: vec![notes, broken],
             complete: false,
+            app_icons: Vec::new(),
         }),
     );
     send_body(
@@ -5755,6 +5907,7 @@ fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
             request_id,
             providers: vec![clock_widget()],
             complete: true,
+            app_icons: Vec::new(),
         }),
     );
     let providers = asking.join().unwrap().expect("the gallery");
@@ -5767,6 +5920,113 @@ fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
         vec![
             "com.example.notes/.NoteWidget",
             "com.example.clock/.ClockWidget"
+        ]
+    );
+}
+
+#[test]
+fn fr12_a_gallery_by_app_gets_each_apps_icon_and_then_the_previews_it_shows() {
+    use dsa_host_core::widgets::PreviewSource;
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.widget_gallery(true, WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::ListWidgetProviders(list) => {
+            assert!(list.lazy_previews, "the gallery asks for no previews");
+            list.request_id
+        }
+        other => panic!("expected the gallery request, got {other:?}"),
+    };
+    let battery = dsa_protocol::control::WidgetProvider {
+        provider: "com.appslab.widgets/.Battery".into(),
+        package_name: "com.appslab.widgets".into(),
+        label: "Battery".into(),
+        preview_png: Vec::new(),
+        ..clock_widget()
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetProviders(dsa_protocol::control::WidgetProviders {
+            request_id,
+            providers: vec![battery],
+            complete: true,
+            app_icons: vec![
+                dsa_protocol::control::WidgetAppIcon {
+                    package_name: "com.appslab.widgets".into(),
+                    icon_png: b"\x89PNGicon".to_vec(),
+                },
+                dsa_protocol::control::WidgetAppIcon {
+                    package_name: "../not a package".into(),
+                    icon_png: b"\x89PNG".to_vec(),
+                },
+            ],
+        }),
+    );
+    let gallery = asking.join().unwrap().expect("the gallery");
+    assert_eq!(gallery.providers.len(), 1);
+    assert_eq!(gallery.app_icons.len(), 1, "the bad icon is dropped");
+    assert_eq!(gallery.app_icons[0].png, b"\x89PNGicon");
+
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || {
+            session.widget_previews(
+                &[
+                    "com.appslab.widgets/.Battery".to_string(),
+                    "com.example.clock/.ClockWidget".to_string(),
+                ],
+                WAIT,
+            )
+        })
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::GetWidgetPreviews(get) => {
+            assert_eq!(
+                get.providers,
+                [
+                    "com.appslab.widgets/.Battery",
+                    "com.example.clock/.ClockWidget"
+                ]
+            );
+            get.request_id
+        }
+        other => panic!("expected the preview request, got {other:?}"),
+    };
+    let preview = |provider: &str, source: i32| dsa_protocol::control::WidgetPreview {
+        provider: provider.into(),
+        preview_png: b"\x89PNG".to_vec(),
+        source,
+    };
+    // In two parts, the clock's first: the answer still follows the order asked.
+    send_body(
+        &mut agent,
+        Body::WidgetPreviews(dsa_protocol::control::WidgetPreviews {
+            request_id,
+            previews: vec![preview("com.example.clock/.ClockWidget", 2)],
+            complete: false,
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::WidgetPreviews(dsa_protocol::control::WidgetPreviews {
+            request_id,
+            previews: vec![preview("com.appslab.widgets/.Battery", 1)],
+            complete: true,
+        }),
+    );
+    let previews = asking.join().unwrap().expect("the previews");
+    let got: Vec<(&str, PreviewSource)> = previews
+        .iter()
+        .map(|p| (p.provider.as_str(), p.source))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("com.appslab.widgets/.Battery", PreviewSource::Layout),
+            ("com.example.clock/.ClockWidget", PreviewSource::Image),
         ]
     );
 }

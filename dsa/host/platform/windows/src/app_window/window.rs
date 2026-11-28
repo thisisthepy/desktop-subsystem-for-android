@@ -58,10 +58,14 @@ use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use dsa_host_core::compositor::window_mode::{
     caption_revealed, picture_in_picture_place, ModeState, WindowMode,
 };
+use dsa_host_core::compositor::window_monitor::{
+    placed_on, remember_monitor, remembered_monitor, Area, DesktopMonitor,
+};
 use dsa_host_core::compositor::window_sizing::{
-    frame_rect, is_edge_drag, kept_frame_action, maximized_outer, maximized_position,
-    min_client_size, rescaled_rect, size_is_held, to_task_position, to_task_size,
-    to_window_position, FrameRectRequest, KeptFrame, LoopKind, MoveLoop, SizeProposal,
+    edge_drag_proposal, frame_rect, is_edge_drag, kept_frame_action, maximized_outer,
+    maximized_position, min_client_size, rescaled_rect, size_is_held, to_task_position,
+    to_task_size, to_window_position, FrameRectRequest, KeptFrame, LoopKind, MoveLoop,
+    SizeProposal,
 };
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::ime::ImeCursor;
@@ -284,8 +288,8 @@ pub struct UiSetup {
     pub drags: Option<DragStarter>,
     /// The app's package, which the place of its overlay windows is remembered under.
     pub package: String,
-    /// The folder the places of apps' overlay windows are remembered in. `None` remembers
-    /// none.
+    /// The folder the places of apps' overlay windows are remembered in, and the monitor each
+    /// app's last window closed on. `None` remembers none.
     pub overlay_places: Option<std::path::PathBuf>,
 }
 
@@ -343,6 +347,8 @@ struct WindowData {
     /// Which edges the user drags (left, top), so a window that takes the size of a frame
     /// keeps the other edges where they are.
     drag_edges: Cell<(bool, bool)>,
+    /// The rectangle the pointer last asked for in an edge drag (WM_SIZING); `None` outside one.
+    drag_pointer: Cell<Option<(i32, i32, i32, i32)>>,
     /// Whether the move loop has moved the window or dragged an edge yet: only then is the
     /// user dragging it.
     move_loop: Cell<MoveLoop>,
@@ -804,8 +810,11 @@ unsafe extern "system" fn task_window_proc(
                         place_ime_cursor(hwnd, data);
                     }
                     // The buttons stay at the right end, and a maximized window's middle
-                    // button restores it.
-                    if titled(data) {
+                    // button restores it. A window taking the rectangle of a new monitor scale
+                    // has its title bar drawn once its SetWindowPos returns (WM_DPICHANGED):
+                    // drawn here as well, the title at the new scale and the call to the window
+                    // manager held up the desktop's move of the window.
+                    if titled(data) && !data.rescaling.get() {
                         data.caption.paint(hwnd, data.presenter.borrow().as_deref());
                     }
                     // The buttons move with the right edge, the middle one is Restore while
@@ -820,6 +829,7 @@ unsafe extern "system" fn task_window_proc(
                 if message == WM_ENTERSIZEMOVE {
                     data.drag_edges.set((false, false));
                 }
+                data.drag_pointer.set(None);
                 // WM_SIZING says when the drag is of an edge.
                 data.sizing.set(false);
                 if message == WM_EXITSIZEMOVE {
@@ -887,7 +897,15 @@ unsafe extern "system" fn task_window_proc(
                     ));
                 }
             }
-            DefWindowProcW(hwnd, message, wparam, lparam)
+            let result = DefWindowProcW(hwnd, message, wparam, lparam);
+            // Where the pointer has the window now: the size loop's last proposal may come from
+            // an older rectangle (edge_drag_proposal).
+            if let Some(data) = window_data(hwnd).filter(|data| data.sizing.get()) {
+                let (pos, size) = rect_parts(&*(lparam as *const RECT));
+                data.drag_pointer
+                    .set(Some((pos.0, pos.1, size.0 as i32, size.1 as i32)));
+            }
+            result
         }
         WM_APP_FRAME_READY => {
             if let Some(data) = window_data(hwnd) {
@@ -998,6 +1016,24 @@ unsafe extern "system" fn task_window_proc(
                     // A maximised, snapped or full screen window keeps the size proposed,
                     // whatever size the guest gives its task. A new monitor scale changes
                     // nothing about that.
+                    // In the user's edge drag the window goes where the pointer has it, the
+                    // size loop's closing proposal included, which Windows may build from a
+                    // rectangle the window was held to earlier in the drag.
+                    let user_drag = data.sizing.get()
+                        && !data.self_sizing.get()
+                        && !data.following.get()
+                        && !data.rescaling.get();
+                    let (x, y, cx, cy) = edge_drag_proposal(
+                        data.drag_pointer.get(),
+                        (pos.x, pos.y, pos.cx, pos.cy),
+                        user_drag,
+                    );
+                    if pos.flags & SWP_NOMOVE == 0 {
+                        pos.x = x;
+                        pos.y = y;
+                    }
+                    pos.cx = cx;
+                    pos.cy = cy;
                     if !data.rescaling.get() {
                         set_held(hwnd, data, holds_proposed_size(hwnd, data, pos));
                     }
@@ -2360,6 +2396,9 @@ impl Ui {
                                     presenter.set_scale(scale);
                                 }
                             }
+                            if let Some(presenter) = data.presenter.borrow().as_deref() {
+                                presenter.set_limit(max);
+                            }
                             // A window that holds its size shows a frame of the new size
                             // elsewhere in it.
                             if data.held.get() {
@@ -2523,6 +2562,17 @@ impl Ui {
     }
 
     fn close(&mut self, task_id: i32) {
+        // The app's next window opens on the monitor this one closes on.
+        if let (Some(hwnd), Some(dir)) = (
+            self.open.get(&task_id).copied(),
+            self.setup.overlay_places.as_deref(),
+        ) {
+            if let Some(monitor) = crate::window_monitors::monitor_of_window(hwnd as isize) {
+                if let Err(why) = remember_monitor(dir, &self.setup.package, &monitor.id) {
+                    self.log(&format!("the monitor of task {task_id}'s window: {why}"));
+                }
+            }
+        }
         let presenter = self
             .setup
             .presenters
@@ -2570,6 +2620,7 @@ impl Ui {
                 self.setup.input.clone(),
             ),
             drag_edges: Cell::new((false, false)),
+            drag_pointer: Cell::new(None),
             move_loop: Cell::new(MoveLoop::default()),
             in_move_loop: Cell::new(false),
             loop_kind: Cell::new(LoopKind::None),
@@ -2638,7 +2689,22 @@ impl Ui {
                 self.log(&why);
             }
         }
+        // The window goes onto the monitor the window manager sized it for, before it takes
+        // its size there and before anything is shown.
+        // That is the monitor the app's last window closed on, while it is connected.
+        let last = self
+            .setup
+            .overlay_places
+            .as_deref()
+            .and_then(|dir| remembered_monitor(dir, &self.setup.package));
+        let target = crate::window_monitors::opening_monitor_now(last.as_deref());
+        if let Some(target) = &target {
+            put_on_monitor(hwnd, target);
+        }
         let client = apply_size(hwnd, size);
+        if let Some(target) = &target {
+            keep_inside(hwnd, target.work);
+        }
         let presenter = match WindowPresenter::new(
             task_id,
             Arc::clone(&self.setup.surfaces),
@@ -2658,6 +2724,7 @@ impl Ui {
             *data.presenter.borrow_mut() = presenter.clone();
             if let Some(presenter) = presenter.as_deref() {
                 presenter.set_held(data.held.get());
+                presenter.set_limit(data.max_client.get());
             }
         }
         if let Some(presenter) = presenter {
@@ -2722,6 +2789,48 @@ impl Ui {
             );
         }
         self.open.insert(task_id, hwnd);
+    }
+}
+
+/// Moves the window `hwnd`, which the desktop has just placed and not shown, onto `target`
+/// when the desktop put it on another monitor: as far in from `target`'s work area as the
+/// desktop put it in its own. A window the desktop put on `target` stays where it is, as in 1.0.
+/// Crossing to a monitor of another scale, the window hears the new DPI before it is sized.
+unsafe fn put_on_monitor(hwnd: HWND, target: &DesktopMonitor) {
+    let Some(current) = crate::window_monitors::monitor_of_window(hwnd as isize) else {
+        return;
+    };
+    if current.id == target.id {
+        return;
+    }
+    let ((x, y), (width, height)) = window_rect(hwnd);
+    let (x, y) = placed_on(
+        (x, y),
+        (width as i32, height as i32),
+        current.work,
+        target.work,
+    );
+    place_self(
+        hwnd,
+        std::ptr::null_mut(),
+        (x, y, 0, 0),
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        "opening_monitor",
+    );
+}
+
+/// Moves the window `hwnd` back inside the work area `work` where its size took it past an edge.
+unsafe fn keep_inside(hwnd: HWND, work: Area) {
+    let ((x, y), (width, height)) = window_rect(hwnd);
+    let inside = placed_on((x, y), (width as i32, height as i32), work, work);
+    if inside != (x, y) {
+        place_self(
+            hwnd,
+            std::ptr::null_mut(),
+            (inside.0, inside.1, 0, 0),
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            "opening_monitor",
+        );
     }
 }
 

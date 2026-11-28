@@ -11,7 +11,10 @@
 //! - The host's `CollectDiagnostics` gets the guest's diagnostics: the whole log, pstore, and
 //!   what the agent gathers (which the router diverts here), then `DiagnosticsDone`. Nothing
 //!   is written to the guest's disk. Once the host has them, pstore's records are cleared, so
-//!   the next crash has room and the next collection does not carry them again.
+//!   the next crash has room and the next collection does not carry them again. A source of
+//!   files may start work as the collection starts that writes to the kernel's log (the
+//!   kernel memory report, which root writes there); the kernel's log is then read again at
+//!   the end and the source makes files of it.
 //!
 //! The bridge reads logd, other files and the log port through [`LogSource`],
 //! [`DiagnosticFiles`] and a [`PortConnector`], so it runs and is tested on any platform.
@@ -74,7 +77,34 @@ pub trait DiagnosticFiles: Send + Sync {
     ///
     /// [`files`]: DiagnosticFiles::files
     fn delivered(&self, _names: &[String]) {}
+
+    /// Called as a collection starts, before the log is read: a source can start work that
+    /// another process does and writes to the kernel's log, such as the kernel memory report.
+    /// True when it did, so the kernel's log is read again once [`files`] has been sent, and
+    /// [`kernel_log_files`] makes files of it.
+    ///
+    /// [`files`]: DiagnosticFiles::files
+    /// [`kernel_log_files`]: DiagnosticFiles::kernel_log_files
+    fn prepare(&self) -> bool {
+        false
+    }
+
+    /// The files made from the kernel's log buffer as it is once [`files`] has been sent, its
+    /// records as text (`threadtime`), oldest first. Read only when [`prepare`] said so.
+    ///
+    /// [`files`]: DiagnosticFiles::files
+    /// [`prepare`]: DiagnosticFiles::prepare
+    fn kernel_log_files(&self, _log: &[String]) -> Vec<(String, Result<Vec<u8>, String>)> {
+        Vec::new()
+    }
 }
+
+/// The kernel's log buffer, as the control protocol numbers the buffers.
+const KERNEL_BUFFER: u32 = 1 << 8;
+
+/// How far before a collection's start a kernel record may be dated and still count as the
+/// collection's.
+const KERNEL_LOG_MARGIN: Duration = Duration::from_secs(5);
 
 /// Opens a connection on the log port, past the handshake.
 pub type PortConnector = dyn Fn() -> Result<Box<dyn Connection>, String> + Send + Sync;
@@ -575,6 +605,13 @@ fn run_collect(
         }
     };
     let mut problems = Vec::new();
+    // Kernel records from before the collection started (less a margin for logd's conversion
+    // of the kernel's clock) are left out, so work asked for earlier is never taken for this.
+    let started_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos() as u64)
+        .saturating_sub(KERNEL_LOG_MARGIN.as_nanos() as u64);
+    let kernel_log_wanted = files.prepare();
     // The whole log, every buffer, as text, sent in pieces as it is read.
     let mut text = Vec::new();
     let name = "android/logcat.txt";
@@ -604,7 +641,22 @@ fn run_collect(
         return;
     }
     let mut sent = Vec::new();
-    for (name, content) in files.files() {
+    let mut made = files.files();
+    if kernel_log_wanted {
+        let mut kernel_log = Vec::new();
+        let mut each = |record: LogRecord| -> Result<(), String> {
+            if record.time_ns >= started_ns {
+                kernel_log.push(logd::threadtime(&record));
+            }
+            Ok(())
+        };
+        let problem = read_all(source, KERNEL_BUFFER, 0, &mut each);
+        if let Some(problem) = problem {
+            problems.push(format!("the kernel's log: {problem}"));
+        }
+        made.extend(files.kernel_log_files(&kernel_log));
+    }
+    for (name, content) in made {
         match content {
             Ok(data) => {
                 if send_file(&mut *connection, request_id, &name, &data).is_err() {

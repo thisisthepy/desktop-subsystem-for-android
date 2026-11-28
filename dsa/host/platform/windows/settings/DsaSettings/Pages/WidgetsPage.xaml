@@ -53,31 +53,92 @@
                 <TextBlock Text="{l:Text WidgetsGalleryHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <TextBlock Text="{l:Text WidgetsGalleryNone.Text}" Style="{StaticResource Note}"
                            Visibility="{Binding HasNoOffers, Converter={StaticResource Visible}}" />
-                <l:RowList ItemsSource="{Binding Offers, Mode=OneWay}">
+                <!-- One entry per app that offers widgets, closed until the user opens it, so an
+                     app with hundreds of widgets takes one line. An open app shows its widgets as
+                     a grid of cards, a page at a time; choosing a card places the widget. The
+                     expander is a toggle a screen reader reads as the app's name and how many
+                     widgets it has, and Space or Enter opens and closes it. -->
+                <l:RowList ItemsSource="{Binding Apps, Mode=OneWay}">
                     <l:RowList.ItemTemplate>
                         <DataTemplate>
-                            <ui:CardControl>
-                                <ui:CardControl.Header>
-                                    <StackPanel Orientation="Horizontal">
-                                        <Border Width="64" Height="64" Margin="0,0,12,0" CornerRadius="4">
-                                            <Grid>
-                                                <ui:SymbolIcon Symbol="Apps24" FontSize="32"
+                            <Grid>
+                                <ui:CardExpander Tag="{Binding Package}" ContentPadding="12"
+                                                 IsExpanded="{Binding IsExpanded, Mode=OneWay}"
+                                                 Expanded="OnAppExpanded" Collapsed="OnAppCollapsed"
+                                                 AutomationProperties.Name="{Binding Name}"
+                                                 AutomationProperties.HelpText="{Binding CountText}">
+                                    <ui:CardExpander.Header>
+                                        <Grid Margin="0,0,12,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Width="32" Height="32" Margin="0,0,16,0" VerticalAlignment="Center">
+                                                <ui:SymbolIcon Symbol="Apps24" FontSize="24"
                                                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                                               Visibility="{Binding NoPreview, Converter={StaticResource Visible}}" />
-                                                <Image Source="{Binding Preview, TargetNullValue={x:Null}}" Stretch="Uniform" />
+                                                               Visibility="{Binding NoIcon, Converter={StaticResource Visible}}" />
+                                                <Image Source="{Binding Icon, Converter={StaticResource IconImage}, ConverterParameter=32}"
+                                                       Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                                             </Grid>
-                                        </Border>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
-                                            <TextBlock Text="{Binding App}" Style="{StaticResource CardDescription}" />
-                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
-                                        </StackPanel>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}" Style="{StaticResource CardTitle}"
+                                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding CountText}" Style="{StaticResource CardDescription}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </ui:CardExpander.Header>
+                                    <StackPanel>
+                                        <!-- The app's widgets as a grid: cards wrap to the page's width.
+                                             Tab and the arrow keys move between them, and each card is
+                                             a button whose name is the widget's and whose help text is
+                                             its size, so a screen reader says what choosing it places. -->
+                                        <l:RowList ItemsSource="{Binding Cards, Mode=OneWay}"
+                                                   KeyboardNavigation.DirectionalNavigation="Contained"
+                                                   AutomationProperties.Name="{Binding Name}">
+                                            <l:RowList.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </l:RowList.ItemsPanel>
+                                            <l:RowList.ItemTemplate>
+                                                <DataTemplate>
+                                                    <ui:Button Width="176" Margin="0,0,8,8" Padding="8"
+                                                               HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
+                                                               Tag="{Binding Provider}" Click="OnAdd"
+                                                               IsEnabled="{Binding DataContext.IsIdle, RelativeSource={RelativeSource AncestorType=Page}}"
+                                                               ToolTip="{l:Text WidgetsAddButton.Content}"
+                                                               AutomationProperties.Name="{Binding Label}"
+                                                               AutomationProperties.HelpText="{Binding Detail}">
+                                                        <StackPanel>
+                                                            <Border Height="104" CornerRadius="4" Margin="0,0,0,8"
+                                                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                                <Grid>
+                                                                    <ui:SymbolIcon Symbol="Apps24" FontSize="32"
+                                                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                                                   Visibility="{Binding NoPreview, Converter={StaticResource Visible}}" />
+                                                                    <Image Source="{Binding Preview, Converter={StaticResource IconImage}, ConverterParameter=160}"
+                                                                           Stretch="Uniform" Margin="4"
+                                                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                                                </Grid>
+                                                            </Border>
+                                                            <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}"
+                                                                       TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}"
+                                                                       TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </ui:Button>
+                                                </DataTemplate>
+                                            </l:RowList.ItemTemplate>
+                                        </l:RowList>
+                                        <ui:Button Content="{Binding MoreText}" Tag="{Binding Package}" Click="OnShowMore"
+                                                   Icon="{ui:SymbolIcon ChevronDown24}" Margin="0,4,0,0"
+                                                   Visibility="{Binding HasMore, Converter={StaticResource Visible}}"
+                                                   AutomationProperties.Name="{Binding MoreText}"
+                                                   AutomationProperties.HelpText="{Binding Name}" />
                                     </StackPanel>
-                                </ui:CardControl.Header>
-                                <ui:Button Content="{l:Text WidgetsAddButton.Content}" Tag="{Binding Provider}" Click="OnAdd"
-                                           Appearance="Primary" Icon="{ui:SymbolIcon Add24}"
-                                           AutomationProperties.Name="{l:ItemName WidgetsAddButton.Content}" />
-                            </ui:CardControl>
+                                </ui:CardExpander>
+                            </Grid>
                         </DataTemplate>
                     </l:RowList.ItemTemplate>
                 </l:RowList>

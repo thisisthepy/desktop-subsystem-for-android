@@ -47,8 +47,9 @@ int32_t intProperty(const char* name, int32_t fallback, int32_t low, int32_t hig
 
 DisplayConfig DisplayConfig::fromProperties() {
     DisplayConfig config;
-    config.width = intProperty("ro.boot.dsa.display_width", config.width, 320, 16384);
-    config.height = intProperty("ro.boot.dsa.display_height", config.height, 320, 16384);
+    constexpr int32_t kMaxSide = static_cast<int32_t>(kMaxDisplaySide);
+    config.width = intProperty("ro.boot.dsa.display_width", config.width, 320, kMaxSide);
+    config.height = intProperty("ro.boot.dsa.display_height", config.height, 320, kMaxSide);
     config.dpi = intProperty("ro.boot.dsa.display_dpi", config.dpi, 72, 960);
     config.refreshRateHz = intProperty("ro.boot.dsa.display_refresh_rate", 60, 1, 240);
     return config;
@@ -117,6 +118,17 @@ void BufferSlots::collect(std::set<uint32_t>* ids) const {
             ids->insert(ref.id);
         }
     }
+}
+
+bool Display::grow(int64_t width, int64_t height) {
+    const BufferSize grown = grownDisplaySize(BufferSize{mConfig.width, mConfig.height}, width, height);
+    if (grown.width == mConfig.width && grown.height == mConfig.height) {
+        return false;
+    }
+    mConfig.width = static_cast<int32_t>(grown.width);
+    mConfig.height = static_cast<int32_t>(grown.height);
+    mValidated = false;
+    return true;
 }
 
 int64_t Display::createLayer() {

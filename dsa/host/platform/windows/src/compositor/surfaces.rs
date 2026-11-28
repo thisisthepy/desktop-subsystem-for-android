@@ -41,6 +41,7 @@ use dsa_host_core::compositor::surface_calls::{
     SURFACE_OP_TICK,
 };
 use dsa_host_core::compositor::visible_change::{self, area_around, Area, PressWatch, Verdict};
+use dsa_host_core::compositor::window_buffers::{BufferReport, WindowBuffers};
 use dsa_host_core::resize_trace::millis;
 use dsa_protocol::window_host::types::{SurfaceAnswer, SurfaceCall};
 use windows::core::{Interface, BOOL};
@@ -290,6 +291,10 @@ pub struct WindowSurfaces {
     readback: Option<ID3D11Texture2D>,
     watch: Option<(PressWatch, Duration)>,
     no_statistics: bool,
+    /// The size of the task's frame texture at the last call, and what the log last said this
+    /// window holds in buffers of its size.
+    texture_size: Option<(u32, u32)>,
+    buffers: BufferReport,
     logger: Option<Arc<CompositorLogger>>,
 }
 
@@ -328,6 +333,8 @@ impl WindowSurfaces {
             readback: None,
             watch: None,
             no_statistics: false,
+            texture_size: None,
+            buffers: BufferReport::new(),
             logger,
         })
     }
@@ -391,6 +398,7 @@ impl WindowSurfaces {
         place: Place<'_>,
     ) -> Vec<SurfaceAnswer> {
         self.follow_gpu();
+        self.texture_size = texture.as_ref().map(|(texture, _)| texture.size());
         let mut answer = SurfaceAnswer {
             task_id: call.task_id,
             call_id: call.call_id,
@@ -418,6 +426,7 @@ impl WindowSurfaces {
             answer.buffer_height = frame.size.1;
         }
         answer.band_pending = self.band_pending;
+        self.report_buffers();
         if parts.is_empty() {
             return vec![answer];
         }
@@ -445,6 +454,20 @@ impl WindowSurfaces {
                 each
             })
             .collect()
+    }
+
+    /// Logs what this window holds in buffers of its size when that changed, so the memory a
+    /// window costs can be read from the log.
+    fn report_buffers(&mut self) {
+        let held = WindowBuffers {
+            texture: self.texture_size,
+            swapchain: self.frame.as_ref().map(|chain| (chain.size, chain.count)),
+            splash: self.splash.as_ref().map(|chain| chain.size),
+            last_frame: self.last_frame.as_ref().map(|(_, size)| *size),
+        };
+        if let Some(line) = self.buffers.changed(self.task_id, held) {
+            note(self.logger.as_deref(), &line);
+        }
     }
 
     unsafe fn carry_out(

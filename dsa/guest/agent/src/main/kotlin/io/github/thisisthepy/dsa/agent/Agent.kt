@@ -102,6 +102,8 @@ import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
 import io.github.thisisthepy.dsa.agent.widgets.WidgetManager
 import io.github.thisisthepy.dsa.agent.widgets.WidgetPlatform
 import io.github.thisisthepy.dsa.agent.widgets.WidgetStore
+import io.github.thisisthepy.dsa.agent.windowing.ForcedDensity
+import io.github.thisisthepy.dsa.agent.windowing.KeepFocus
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.GestureExclusion
 import io.github.thisisthepy.dsa.agent.windowing.BelowTitleBar
@@ -174,7 +176,7 @@ class Agent(
     private val tasks: TaskSource,
     private val actions: TaskActions,
     locator: ChannelLocator,
-    windowing: WindowingControl,
+    private val windowing: WindowingControl,
     injector: InputInjector,
     private val scheduler: Scheduler,
     private val log: Log,
@@ -221,6 +223,8 @@ class Agent(
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
     /** Where the accessibility trees of watched tasks are read, past the scheduler's thread. */
     accessibilityReader: Scheduler = scheduler,
+    /** Where the node an accessibility focus event names is asked for, past the reader's queue. */
+    accessibilityFocusReader: Scheduler = accessibilityReader,
     /** The desktop widgets' views as accessibility nodes: the widget platform's, when it has them. */
     widgetNodes: io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes =
         (widgets as? io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes)
@@ -260,13 +264,25 @@ class Agent(
         intercept = ::interceptFrame,
     )
     private val reporter = TaskReporter(ownPackage, apps) { frame -> channel.send(frame) }
-    private val requests = HostRequests(ownPackage, actions, reporter::isReported)
+    private val requests = HostRequests(
+        ownPackage,
+        actions,
+        overlayReported = { id -> overlays.isReported(id) },
+        reported = reporter::isReported,
+    )
+
+    /** The densities the host gives single overlay windows of apps set to System (forced) scaling. */
+    private val overlayDensity = io.github.thisisthepy.dsa.agent.windowing.OverlayDensity(actions, log)
 
     /**
      * The apps' overlay windows (floating lyrics, a chat head), which are in no task: the host
      * shows each in a window of its own, and its input comes with the overlay's ID.
      */
-    private val overlays = io.github.thisisthepy.dsa.agent.overlays.OverlayReporter(ownPackage, apps) { frame ->
+    private val overlays = io.github.thisisthepy.dsa.agent.overlays.OverlayReporter(
+        ownPackage,
+        apps,
+        givenDensity = { window -> overlayDensity.given(window) },
+    ) { frame ->
         channel.send(frame)
     }
 
@@ -350,7 +366,13 @@ class Agent(
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
     private val settingsSync = SystemSettingsSync(systemSettings, log)
     private val deviceNameSync = DeviceNameSync(deviceName, log)
-    private val diagnosticsCollector = DiagnosticsCollector(diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner)
+    private val focusTrace = io.github.thisisthepy.dsa.agent.accessibility.FocusTraceLog()
+    private val diagnosticsCollector = DiagnosticsCollector(
+        diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner, focusTrace::text,
+        // The apps whose windows the host shows: their memory and graphics caches go in the
+        // memory snapshot. Read on the scheduler's thread, which hands the request in.
+        shownPackages = { reporter.reported.mapNotNull(reporter::reportedPackage) },
+    )
     private val backgroundApps = BackgroundApps(
         ownPackage,
         notifications,
@@ -437,12 +459,26 @@ class Agent(
         arm64Supported,
         clock,
     )
+    /**
+     * Draws the widgets' previews a gallery asks for. Its one thread ends after a short idle
+     * time, so no thread is kept for a gallery that is seldom opened.
+     */
+    private val previewThread by lazy {
+        java.util.concurrent.ThreadPoolExecutor(
+            0,
+            1,
+            PREVIEW_THREAD_IDLE_SECONDS,
+            java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.LinkedBlockingQueue(),
+        ) { work -> Thread(work, "dsa-widget-previews") }
+    }
     private val widgetManager = WidgetManager(
         widgets,
         widgetStore,
         { frame -> channel.send(frame) },
         log,
         isConnected = { channel.connected },
+        background = { work -> previewThread.execute(work) },
     )
     private val closedApps = ClosedApps(
         appProcesses,
@@ -472,6 +508,8 @@ class Agent(
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val captions = CaptionInsets(actions, log)
     private val belowTitleBar = BelowTitleBar()
+    private val forcedDensity = ForcedDensity(actions, log)
+    private val keepFocus = KeepFocus(actions, log)
     private val fullScreenHolds = FullScreenHolds()
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
     private val shortcutReporter = ShortcutReporter(ownPackage) { frame -> channel.send(frame) }
@@ -544,6 +582,8 @@ class Agent(
         accessibilityReader,
         widgetNodes,
         reporter::reportedPackage,
+        accessibilityFocusReader,
+        focusTrace,
     )
     /** Where the apps on the display keep system gestures out, as last heard. */
     private var exclusion: List<TaskBounds> = emptyList()
@@ -609,8 +649,28 @@ class Agent(
             listenToExclusion()
             listenToUnhandledKeys()
             listenToOverlays()
+            listenToDisplay()
             channel.start()
             requestRefresh()
+        }
+    }
+
+    /**
+     * Follows the default display, which the host grows while Android runs when a window opens
+     * on monitors that need more of it. Every task and overlay is then reported again with
+     * the display's new size as its largest, which is the host windows' new limit.
+     */
+    private fun listenToDisplay() {
+        try {
+            windowing.listenToDisplay {
+                scheduler.post {
+                    requestRefresh()
+                    // After the refresh, which reads the display's new size.
+                    scheduler.post(::reportOverlays)
+                }
+            }
+        } catch (e: Exception) {
+            log.warn("could not follow the display; a display the host grows reaches the windows with the next change to a task", e)
         }
     }
 
@@ -911,9 +971,33 @@ class Agent(
                 accessibilityExport.resizing(result.taskId)
             }
             is RequestResult.Density -> {
-                log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
-                arranger.setDensity(result.taskId, result.densityDpi)
-                accessibilityExport.resizing(result.taskId)
+                // A task whose app is set to forced system scaling is marked first, or is not
+                // given the density at all: unmarked, Android would restart the app for it.
+                if (forcedDensity.beforeDensity(result.taskId, result.forced)) {
+                    log.info("task ${result.taskId} draws at ${result.densityDpi} dpi" + if (result.forced) ", without a relaunch" else "")
+                    arranger.setDensity(result.taskId, result.densityDpi)
+                    accessibilityExport.resizing(result.taskId)
+                }
+            }
+            is RequestResult.OverlayDensity -> {
+                // The overlay's window alone takes the density; the host is told it has it once
+                // its app has laid it out again.
+                val window = overlays.windowName(result.overlayId)
+                when {
+                    window == null ->
+                        log.warn("did not give app overlay window ${result.overlayId} a density: it is not on the screen")
+                    overlayDensity.give(window, result.densityDpi) -> {
+                        overlays.densityGiven(result.overlayId, result.densityDpi)
+                        log.info(
+                            if (result.densityDpi == 0) {
+                                "app overlay window ${result.overlayId} draws at its app's density again"
+                            } else {
+                                "app overlay window ${result.overlayId} draws at ${result.densityDpi} dpi"
+                            },
+                        )
+                    }
+                    else -> Unit
+                }
             }
             is RequestResult.Caption -> {
                 log.info("task ${result.taskId} is under a title bar ${result.height} pixels high")
@@ -939,6 +1023,7 @@ class Agent(
             is RequestResult.CaptionCompat -> {
                 log.info("${result.belowTitleBar.size} apps start below the title bar")
                 belowTitleBar.hostSays(result.belowTitleBar)
+                keepFocus.hostSays(result.keepFocus)
             }
             is RequestResult.SizeRefused -> log.warn("did not resize task ${result.taskId}: ${result.reason}")
             is RequestResult.Malformed -> log.warn("dropped a frame: ${result.reason}")
@@ -1298,9 +1383,12 @@ class Agent(
         if (!channel.connected) return
         // Whether a task starts below the title bar is settled when it is first seen here.
         val below = belowTitleBar.tasks(running.associate { it.taskId to it.packageName })
+        forcedDensity.running(running.map { it.taskId }.toSet())
+        val forcedDensityAvailable = forcedDensity.available
         val placedTasks = running.map { task ->
             val placed = bounds[task.taskId]
-            val moved = if (placed == null || placed == task.bounds) task else task.copy(bounds = placed)
+            val bounded = if (placed == null || placed == task.bounds) task else task.copy(bounds = placed)
+            val moved = if (forcedDensityAvailable) bounded.copy(forcedDensityAvailable = true) else bounded
             if (moved.taskId in below) {
                 // The user's switch wins over an app that asks to draw its own title bar: the
                 // whole band is the host's, and the app has no controls in it.
@@ -1359,6 +1447,9 @@ class Agent(
 
     private companion object {
         const val RETRY_MILLIS = 1000L
+
+        /** How long the thread that draws widget previews waits for more before it ends. */
+        const val PREVIEW_THREAD_IDLE_SECONDS = 30L
 
         /** How long a frame from another thread waits for the agent's thread to send it. */
         const val SEND_WAIT_MILLIS = 10_000L

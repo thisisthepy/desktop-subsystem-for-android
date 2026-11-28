@@ -7,10 +7,23 @@
 //! domain of its own that may only read, when developer mode is on and the shell asks for it
 //! (`setprop debug.dsa.memory_report 1`, `dsa-channeld.rc`). It writes the report to the kernel
 //! log, one record per line, each starting with [`MARK`], between a `begin` and an `end` line,
-//! where `logcat -b kernel` shows it.
+//! where `logcat -b kernel` shows it. Every slab cache gets a line, with its slab size and
+//! whether the kernel counts it as reclaimable (`/sys/kernel/slab/<cache>/reclaim_account`), so
+//! SUnreclaim can be read cache by cache.
 //!
 //! The report names caches, functions and process names, never an address: a vmalloc area's
 //! address would tell where the kernel lies in memory.
+//!
+//! The host's diagnostics (`dsa memory snapshot`, `dsa logs collect`) carry a report too,
+//! without developer mode: the control daemon sets [`SNAPSHOT_PROPERTY`] as the collection
+//! starts, init runs the report, and once the rest has been gathered the daemon takes the last
+//! whole report out of the kernel's log buffer ([`last_report`]) as
+//! `android/kernel-memory-report.txt`. The collection also carries `/proc/vmstat` twice,
+//! [`VMSTAT_INTERVAL`] apart ([`vmstat_files`]), so the page cache's churn between the two can
+//! be read, and the report lists what the processes that read and write the most did
+//! (`/proc/<pid>/io`, which only root may read for another user's process).
+
+use std::time::Duration;
 
 /// What starts every line of the report in the kernel log, after the daemon's own prefix.
 pub const MARK: &str = "memory report: ";
@@ -18,11 +31,28 @@ pub const MARK: &str = "memory report: ";
 /// The property the shell sets to ask for a report.
 pub const PROPERTY: &str = "debug.dsa.memory_report";
 
+/// The property the control daemon sets to ask for a report for the host's diagnostics, in
+/// developer mode or not (`dsa-channeld.rc`). Its value is the time it was set, in seconds
+/// since 1970, so each request changes it.
+pub const SNAPSHOT_PROPERTY: &str = "vendor.dsa.memory.report";
+
+/// How far apart the two copies of `/proc/vmstat` in the diagnostics are taken.
+pub const VMSTAT_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The archive names of the two copies of `/proc/vmstat`.
+pub const VMSTAT_FILES: [&str; 2] = ["android/proc-vmstat-0s.txt", "android/proc-vmstat-10s.txt"];
+
+/// The archive name of the kernel memory report the diagnostics carry.
+pub const REPORT_FILE: &str = "android/kernel-memory-report.txt";
+
+/// How many processes the report lists by what they read and wrote.
+pub const IO_LINES: usize = 25;
+
 /// The size of each thread's kernel stack, in KiB, on both architectures the guest runs on.
 pub const KERNEL_STACK_KIB: u64 = 16;
 
-/// How many of the largest of each kind the report lists.
-pub const SLAB_LINES: usize = 40;
+/// How many of the largest of each kind the report lists. Every slab cache is listed (a guest
+/// has about 200), so the unreclaimable slab can be summed cache by cache.
 pub const VMALLOC_LINES: usize = 30;
 pub const THREAD_LINES: usize = 40;
 pub const PAGE_TABLE_LINES: usize = 15;
@@ -50,6 +80,11 @@ pub struct SlabCache {
     pub active_objects: u64,
     pub objects: u64,
     pub object_size: u64,
+    /// How many objects one slab holds, and how many 4 KiB pages it takes (the slab's order
+    /// as a page count). A slab is freed only once all its objects are, so the more objects a
+    /// slab holds, the more partly used slabs a cache keeps.
+    pub objects_per_slab: u64,
+    pub pages_per_slab: u64,
     /// The memory its slabs take, in KiB.
     pub kib: u64,
 }
@@ -76,7 +111,8 @@ pub fn slab_caches(slabinfo: &str) -> Vec<SlabCache> {
             let mut fields = head.split_whitespace();
             let name = fields.next()?.to_string();
             let numbers: Vec<u64> = fields.map(|f| f.parse().ok()).collect::<Option<_>>()?;
-            let [active_objects, objects, object_size, _per_slab, pages_per_slab] = numbers[..]
+            let [active_objects, objects, object_size, objects_per_slab, pages_per_slab] =
+                numbers[..]
             else {
                 return None;
             };
@@ -87,6 +123,8 @@ pub fn slab_caches(slabinfo: &str) -> Vec<SlabCache> {
                 active_objects,
                 objects,
                 object_size,
+                objects_per_slab,
+                pages_per_slab,
                 kib: num_slabs * pages_per_slab * 4,
             })
         })
@@ -189,12 +227,94 @@ pub fn allocation_sites(allocinfo: &str) -> Vec<AllocationSite> {
 /// One process as its `/proc/<pid>/status` and command line describe it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Process {
+    pub pid: u32,
     pub name: String,
     pub threads: u64,
     /// A kernel thread: a child of `kthreadd`, or `kthreadd` itself.
     pub kernel: bool,
     /// Its page tables, in KiB (`VmPTE`); 0 for a kernel thread.
     pub page_tables_kib: u64,
+    /// What it read and wrote since it started (`/proc/<pid>/io`); `None` when that could not
+    /// be read.
+    pub io: Option<ProcessIo>,
+}
+
+/// What a process read and wrote since it started, in bytes, as `/proc/<pid>/io` counts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProcessIo {
+    /// Read through any system call, from the page cache or not (`rchar`).
+    pub read_chars: u64,
+    /// Written through any system call (`wchar`).
+    pub written_chars: u64,
+    /// Read from a block device: what the page cache did not hold (`read_bytes`).
+    pub read_bytes: u64,
+    /// Sent to a block device, or to be (`write_bytes`).
+    pub write_bytes: u64,
+    /// Written to the page cache and dropped before it reached the device
+    /// (`cancelled_write_bytes`).
+    pub cancelled_write_bytes: u64,
+}
+
+/// The counts of one `/proc/<pid>/io`. `None` when it has none of them.
+pub fn process_io(io: &str) -> Option<ProcessIo> {
+    let field = |key: &str| {
+        io.lines().find_map(|line| {
+            line.strip_prefix(key)?
+                .strip_prefix(':')?
+                .trim()
+                .parse::<u64>()
+                .ok()
+        })
+    };
+    let read_chars = field("rchar");
+    let read_bytes = field("read_bytes");
+    if read_chars.is_none() && read_bytes.is_none() {
+        return None;
+    }
+    Some(ProcessIo {
+        read_chars: read_chars.unwrap_or(0),
+        written_chars: field("wchar").unwrap_or(0),
+        read_bytes: read_bytes.unwrap_or(0),
+        write_bytes: field("write_bytes").unwrap_or(0),
+        cancelled_write_bytes: field("cancelled_write_bytes").unwrap_or(0),
+    })
+}
+
+/// The two copies of `/proc/vmstat` the diagnostics carry: one now, one [`VMSTAT_INTERVAL`]
+/// later (`wait` waits that long), each named as [`VMSTAT_FILES`] says, with its content or why
+/// it could not be read.
+pub fn vmstat_files(
+    read: &dyn Fn() -> Result<Vec<u8>, String>,
+    wait: &dyn Fn(Duration),
+) -> Vec<(String, Result<Vec<u8>, String>)> {
+    let first = read();
+    wait(VMSTAT_INTERVAL);
+    let second = read();
+    vec![
+        (VMSTAT_FILES[0].to_string(), first),
+        (VMSTAT_FILES[1].to_string(), second),
+    ]
+}
+
+/// The last whole report in `log`, the kernel log's records as text, oldest first: the lines
+/// from its `begin` to its `end`, each without what comes before [`MARK`], one to a line.
+/// `None` when no report has both.
+pub fn last_report(log: &[String]) -> Option<String> {
+    let lines: Vec<&str> = log
+        .iter()
+        .filter_map(|record| {
+            let at = record.find(MARK)?;
+            Some(record[at + MARK.len()..].trim_end())
+        })
+        .collect();
+    let end = lines.iter().rposition(|line| *line == "end")?;
+    let begin = lines[..end].iter().rposition(|line| *line == "begin")?;
+    let mut text = String::new();
+    for line in &lines[begin..=end] {
+        text.push_str(line);
+        text.push('\n');
+    }
+    Some(text)
 }
 
 /// The process of one `/proc/<pid>/status`, named by the first word of its command line when
@@ -227,10 +347,12 @@ pub fn process(pid: u32, status: &str, cmdline: &[u8]) -> Option<Process> {
         long
     };
     Some(Process {
+        pid,
         name: name.split_whitespace().collect::<Vec<_>>().join("_"),
         threads,
         kernel,
         page_tables_kib,
+        io: None,
     })
 }
 
@@ -285,6 +407,41 @@ pub fn thread_groups(processes: &[Process]) -> Vec<ThreadGroup> {
     groups
 }
 
+/// The report's lines about what `processes` read and wrote: the total, then the
+/// [`IO_LINES`] that read the most from devices, ties broken by what they read through any
+/// call. One line saying it is missing when no process's counts could be read.
+pub fn io_lines(processes: &[Process]) -> Vec<String> {
+    let mut with_io: Vec<(&Process, ProcessIo)> = processes
+        .iter()
+        .filter_map(|p| p.io.map(|io| (p, io)))
+        .collect();
+    if with_io.is_empty() {
+        return vec!["missing io /proc/<pid>/io could not be read for any process".into()];
+    }
+    let read: u64 = with_io.iter().map(|(_, io)| io.read_bytes).sum();
+    let written: u64 = with_io.iter().map(|(_, io)| io.write_bytes).sum();
+    let mut lines = vec![format!("io-total {} {read} {written}", with_io.len())];
+    with_io.sort_by(|(a, x), (b, y)| {
+        y.read_bytes
+            .cmp(&x.read_bytes)
+            .then(y.read_chars.cmp(&x.read_chars))
+            .then(a.pid.cmp(&b.pid))
+    });
+    for (p, io) in with_io.iter().take(IO_LINES) {
+        lines.push(format!(
+            "io {} {} {} {} {} {} {}",
+            p.name,
+            p.pid,
+            io.read_chars,
+            io.written_chars,
+            io.read_bytes,
+            io.write_bytes,
+            io.cancelled_write_bytes
+        ));
+    }
+    lines
+}
+
 /// The value of `key` in a `/proc/meminfo`, in KiB.
 pub fn meminfo_kib(meminfo: &str, key: &str) -> Option<u64> {
     meminfo.lines().find_map(|line| {
@@ -315,17 +472,39 @@ pub struct Sources {
     pub bufio_bytes: Option<String>,
     /// `/proc/allocinfo`, which only a kernel built with memory allocation profiling has.
     pub allocinfo: Option<String>,
+    /// Whether each slab cache's memory is counted as reclaimable (SReclaimable) or not
+    /// (SUnreclaim), by name, from `/sys/kernel/slab/<cache>/reclaim_account`. A cache missing
+    /// here is reported as unknown.
+    pub slab_reclaim: Vec<(String, bool)>,
+}
+
+/// Where the kernel lists its slab caches, one directory (or, for a merged cache, a link to
+/// its group's directory) for each.
+pub const SLAB_SYSFS: &str = "/sys/kernel/slab";
+
+/// The path of a slab cache's reclaim flag, or `None` for a name that is not one directory
+/// entry (it could not name a cache's own entry in [`SLAB_SYSFS`]).
+pub fn slab_reclaim_path(cache: &str) -> Option<String> {
+    (!cache.is_empty() && !cache.contains('/') && cache != "." && cache != "..")
+        .then(|| format!("{SLAB_SYSFS}/{cache}/reclaim_account"))
 }
 
 /// The report's lines, without [`MARK`]: `begin`, then each part, then `end`. Each line is
 /// words separated by spaces, its kind first:
 ///
 /// - `meminfo <key> <KiB>`
-/// - `slab-total <caches> <KiB> <unused KiB>`, then `slab <name> <KiB> <active> <objects> <size>`
+/// - `slab-total <caches> <KiB> <unused KiB>`, then `slab-unreclaimable <caches> <KiB> <unused
+///   KiB>` for the caches counted in SUnreclaim, then for every cache
+///   `slab <name> <KiB> <active> <objects> <size> <objects per slab> <pages per slab>
+///   reclaimable|unreclaimable|unknown`
 /// - `vmalloc-total <areas> <KiB>`, then `vmalloc <caller> <KiB> <areas>`
 /// - `threads-total <threads> <kernel threads> <user threads> <stack KiB each>`, then
 ///   `threads kernel|user <name> <threads> <processes>`
 /// - `page-tables <process> <KiB>`
+/// - `io-total <processes> <bytes read from devices> <bytes written to devices>`, then
+///   `io <process> <pid> <rchar> <wchar> <read_bytes> <write_bytes> <cancelled_write_bytes>`
+///   for the processes that read the most from devices (what the page cache did not hold),
+///   then the most through any call
 /// - `cgroups <descendants> <dying>`
 /// - `bufio <bytes>`
 /// - `allocinfo-total <sites> <KiB>`, then `allocinfo <file:line> <function> <KiB> <calls>`
@@ -348,10 +527,46 @@ pub fn report(sources: &Sources) -> Vec<String> {
             let total: u64 = caches.iter().map(|c| c.kib).sum();
             let unused: u64 = caches.iter().map(SlabCache::unused_kib).sum();
             lines.push(format!("slab-total {} {total} {unused}", caches.len()));
-            for c in caches.iter().take(SLAB_LINES) {
+            let reclaim = |name: &str| {
+                sources
+                    .slab_reclaim
+                    .iter()
+                    .find(|(cache, _)| cache == name)
+                    .map(|(_, reclaimable)| *reclaimable)
+            };
+            let unreclaimable: Vec<&SlabCache> = caches
+                .iter()
+                .filter(|c| reclaim(&c.name) == Some(false))
+                .collect();
+            if caches.iter().any(|c| reclaim(&c.name).is_some()) {
                 lines.push(format!(
-                    "slab {} {} {} {} {}",
-                    c.name, c.kib, c.active_objects, c.objects, c.object_size
+                    "slab-unreclaimable {} {} {}",
+                    unreclaimable.len(),
+                    unreclaimable.iter().map(|c| c.kib).sum::<u64>(),
+                    unreclaimable.iter().map(|c| c.unused_kib()).sum::<u64>()
+                ));
+            } else {
+                lines.push(
+                    "missing slab-reclaim /sys/kernel/slab/<cache>/reclaim_account could not be \
+                     read"
+                        .into(),
+                );
+            }
+            for c in &caches {
+                let class = match reclaim(&c.name) {
+                    Some(true) => "reclaimable",
+                    Some(false) => "unreclaimable",
+                    None => "unknown",
+                };
+                lines.push(format!(
+                    "slab {} {} {} {} {} {} {} {class}",
+                    c.name,
+                    c.kib,
+                    c.active_objects,
+                    c.objects,
+                    c.object_size,
+                    c.objects_per_slab,
+                    c.pages_per_slab
                 ));
             }
         }
@@ -416,6 +631,7 @@ pub fn report(sources: &Sources) -> Vec<String> {
         for p in by_tables.iter().take(PAGE_TABLE_LINES) {
             lines.push(format!("page-tables {} {}", p.name, p.page_tables_kib));
         }
+        lines.extend(io_lines(&sources.processes));
     }
     match sources.cgroup_stat.as_deref().map(|stat| {
         (
@@ -477,19 +693,39 @@ pub fn read_sources() -> Sources {
                 continue;
             };
             let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
-            if let Some(p) = process(pid, &status, &cmdline) {
+            if let Some(mut p) = process(pid, &status, &cmdline) {
+                // Root reads another user's counts with dac_read_search and sys_ptrace
+                // (channeld.cil); a kernel thread has them too.
+                p.io = std::fs::read_to_string(dir.join("io"))
+                    .ok()
+                    .as_deref()
+                    .and_then(process_io);
                 processes.push(p);
             }
         }
     }
+    let slabinfo = read("/proc/slabinfo");
+    // Each cache's reclaim flag. A merged cache's name is a link to the directory its group
+    // shares, and the group shares the flag too (caches merge only with the same flags).
+    let slab_reclaim = slabinfo
+        .as_deref()
+        .map(slab_caches)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|cache| {
+            let flag = read(slab_reclaim_path(&cache.name)?.as_str())?;
+            Some((cache.name, flag.trim() == "1"))
+        })
+        .collect();
     Sources {
         meminfo: read("/proc/meminfo"),
-        slabinfo: read("/proc/slabinfo"),
+        slabinfo,
         vmallocinfo: read("/proc/vmallocinfo"),
         processes,
         cgroup_stat: read("/sys/fs/cgroup/cgroup.stat"),
         bufio_bytes: read("/sys/module/dm_bufio/parameters/current_allocated_bytes"),
         allocinfo: read("/proc/allocinfo"),
+        slab_reclaim,
     }
 }
 

@@ -1385,6 +1385,8 @@ pub fn run() -> Result<(), String> {
         frames_shown: 0,
         drawn,
     };
+    // A window that opens with no frame asks the guest for its task's frame until one arrives.
+    main.windows.watch_frames(main.drawn.clone());
     // The user's window settings for apps, and the full screen choices every app follows, are
     // read when the windows start and again now and then, so a change made in the settings
     // app reaches the windows open already.

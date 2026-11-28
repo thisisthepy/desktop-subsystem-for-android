@@ -368,5 +368,21 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertNotIn("Rule::None", patch)
         self.assertNotIn("Rule::None", (HERE / "dsa_gfx_backend.cpp").read_text(encoding="utf-8"))
 
+    def test_nfr1_renderer_headers_name_no_x11_macro(self):
+        # The renderer's own headers go into files that include X11/X.h on Linux, where
+        # None is a macro: an enumerator called None stopped the Linux renderer's build.
+        for header in sorted((HERE.parent / "include").glob("*.h")):
+            text = header.read_text(encoding="utf-8")
+            code = "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+            self.assertNotRegex(code, r"\bNone\b", header.name)
+
+    def test_nfr1_windows_build_prefers_visual_studios_clang(self):
+        # Visual Studio's C++ library refuses a clang older than the one it ships with, so
+        # a standalone LLVM earlier on PATH must not be the compiler.
+        script = (HERE / "build.ps1").read_text(encoding="utf-8")
+        self.assertIn('VC\\Tools\\Llvm\\$VsLlvmArch\\bin', script)
+        self.assertLess(script.index("$VsClangBin;$env:PATH"),
+                        script.index("$HasClangCl = "))
+
 if __name__ == "__main__":
     unittest.main()

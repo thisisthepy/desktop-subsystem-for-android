@@ -1094,6 +1094,15 @@ Non è affiliato, approvato o sponsorizzato da Microsoft o Google.</value>
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} è stato rimosso dal desktop.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widget</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Mostra altri {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK Installer</value>
   </data>
@@ -2641,7 +2650,7 @@ Ottieni la build x86_64 o arm64-v8a dell'app.</value>
     <value>Store alternativi</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA scarica uno store dal suo sito ufficiale, controlla chi lo ha firmato e lo installa come qualsiasi altra app. DSA non include questi store e ogni nome è un marchio del suo proprietario. Uno store si rimuove dall'elenco delle app.</value>
+    <value>DSA scarica uno store dal suo sito ufficiale, controlla chi lo ha firmato e lo installa come qualsiasi altra app. DSA non include questi store e ogni nome è un marchio del suo proprietario. Gli store installati compaiono nell'elenco delle app come qualsiasi altra app, e si disinstallano da lì.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Non installato</value>
@@ -2663,5 +2672,39 @@ Ottieni la build x86_64 o arm64-v8a dell'app.</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Apri</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Giochi</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Giochi</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Aggiorna</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Impostazioni per giocare meglio in DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Impossibile leggere o modificare le impostazioni dei giochi</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Comodità di gioco</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Mantieni lo stato attivo del gioco</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Le app attivate qui sotto restano in esecuzione quando fai clic su un'altra finestra, anche i giochi che vanno in pausa.
+Tasti e testo vanno sempre solo alla finestra che stai usando.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Seleziona tutto</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>In Android non è ancora installata alcuna app.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Gioco · {0}</value>
   </data>
 </root>

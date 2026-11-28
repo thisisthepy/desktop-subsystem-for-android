@@ -3,6 +3,7 @@
 
 #include "picture_copy.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace dsa::codec2 {
@@ -101,10 +102,39 @@ bool rowsFit(const Plane& plane, uint32_t samples) {
 
 }  // namespace
 
+bool holdsNoPicture(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride) {
+    const size_t chromaBytes = static_cast<size_t>((width + 1) / 2) * 2;
+    const size_t chromaRows = (static_cast<size_t>(height) + 1) / 2;
+    if (nv12 == nullptr || width == 0 || height == 0 || stride < chromaBytes) {
+        return false;
+    }
+    if (size < static_cast<size_t>(stride) * (height + chromaRows)) {
+        return false;
+    }
+    const auto zero = [nv12](size_t start, size_t bytes) {
+        const uint8_t* at = nv12 + start;
+        return std::all_of(at, at + bytes, [](uint8_t b) { return b == 0; });
+    };
+    for (uint32_t row = 0; row < height; ++row) {
+        if (row % kBlankRowStep != 0 && row + 1 != height) {
+            continue;
+        }
+        const size_t luma = static_cast<size_t>(row) * stride;
+        const size_t chroma = (static_cast<size_t>(height) + row / 2) * stride;
+        if (zero(luma, width) && zero(chroma, chromaBytes)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 WriteResult writePicture(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride,
                          const BufferSize& buffer, const LockPlanes& lock, const UnlockPlanes& unlock) {
     if (width == 0 || height == 0 || buffer.width < width || buffer.height < height) {
         return WriteResult::WrongBuffer;
+    }
+    if (holdsNoPicture(nv12, size, width, height, stride)) {
+        return WriteResult::NotDecoded;
     }
     YuvPlanes planes;
     uint32_t planeCount = 0;

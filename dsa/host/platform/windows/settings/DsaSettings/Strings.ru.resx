@@ -1094,6 +1094,15 @@ ID это десятичное число, формат, который прин
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} удалён с рабочего стола.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>Виджетов: {0}</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 виджет</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Показать ещё {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Установщик APK</value>
   </data>
@@ -2641,7 +2650,7 @@ Android его отклонит.</value>
     <value>Альтернативные магазины</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Удалить магазин можно в списке приложений.</value>
+    <value>DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Установленные магазины видны в списке приложений, как любые другие приложения, и удаляются там же.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Не установлен</value>
@@ -2663,5 +2672,39 @@ Android его отклонит.</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Открыть</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Игры</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Игры</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Обновить</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Настройки для удобной игры в DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Не удалось прочитать или изменить настройки игр</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Удобство в играх</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Сохранять фокус игры</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Включённые ниже приложения продолжают работать, когда вы щёлкаете другое окно, даже игры, которые без фокуса встают на паузу.
+Нажатия клавиш и ввод текста по-прежнему идут только в окно, с которым вы работаете.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Выбрать все</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>В Android ещё не установлено ни одного приложения.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Игра · {0}</value>
   </data>
 </root>

@@ -112,6 +112,17 @@ git -C $GfxstreamDir clean -fdx
 # refuses to bind the guest's image to memory dedicated to the ColorBuffer's own image.
 # Without 0044 a buffer the last Android left behind is opened under a new buffer's number, at
 # the old size, and a window stays black.
+# Without 0045 a video layer whose ColorBuffer holds no finished upload is composed, and its
+# zeros show as a solid green frame.
+# Without 0046 a composition may write a ColorBuffer the presentation is still copying into a
+# task window, so the hwcomposer keeps two ColorBuffers of the task's size for every task.
+# Without 0047 every window buffer a guest app draws into keeps a mapped staging buffer of its
+# own size that nothing reads, since a Vulkan-only renderer never copies a window image back.
+# Without 0048 the renderer's list of the guests' allocations cannot say why host-visible memory
+# was not taken from the graphics memory shared with the guest, and two of those reasons are
+# never logged.
+# Without 0049 the renderer cannot hand back what its command pool grew to, so after an app
+# closes while other windows stay open, that memory stays.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -154,7 +165,12 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0041-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0042-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0043-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0044-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0044-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0045-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0046-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0047-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0048-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0049-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName

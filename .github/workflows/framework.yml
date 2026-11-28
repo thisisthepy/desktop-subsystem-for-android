@@ -1,6 +1,7 @@
 # Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery,
 # libandroid_runtime, which gives Google Play the computer's memory, and DSA's KeyMint, whose root key of key blobs comes from the DSA host, and
-# services.jar, whose window manager gives a dialog no caption bar inset (the patches in
+# services.jar, whose window manager gives a dialog no caption bar inset, with framework.jar,
+# whose views a task set to forced system scaling rebuilds at a new density (the patches in
 # dsa/guest/framework/patches), for each Android version in dsa/guest/framework/framework-lock.json
 # and each guest architecture, and keeps them as the artifacts the image release lays over the
 # published build (make-image.py --framework).
@@ -25,7 +26,7 @@
 #   2. native (per Android version and architecture) and services (per Android version) start
 #      together as soon as it passes. The native build keeps its files as the intermediate
 #      artifact framework-native-<android>-<arch>-<version>; the services build keeps
-#      services.jar as framework-services-<android>-<version>.
+#      services.jar and framework.jar as framework-services-<android>-<version>.
 #   3. framework (per Android version and architecture) waits for both, adds services.jar to
 #      the native files when the services build made it, and keeps the result as
 #      framework-<android>-<arch>-<version>, the artifact the image release takes. It is the
@@ -61,10 +62,18 @@ on:
   #     - dsa/guest/framework/framework-lock.json
   #     - dsa/guest/framework/patches/**
   #     - dsa/apps/documentsui/**
+  #     - dsa/apps/settingslib/**
+  #     - dsa/apps/settings/**
+  #     - dsa/apps/permissioncontroller/**
+  #     - dsa/apps/packageinstaller/**
+  #     - dsa/apps/intentresolver/**
   #     - dsa/apps/design/**
 
+# One group per branch and per choice of version and architecture. GitHub keeps one waiting
+# run per group and cancels the older one, so with one group for every choice a run started
+# for one version cancelled one started a moment earlier for the other while a third ran.
 concurrency:
-  group: framework-${{ github.ref }}
+  group: framework-${{ github.ref }}-${{ inputs.android || 'all' }}-${{ inputs.arch || 'all' }}
   cancel-in-progress: false
 
 permissions:
@@ -323,8 +332,15 @@ jobs:
   # swapped harder than in the runs that passed kept the agent waiting until GitHub gave up. So
   # the build now runs in a cgroup of its own whose memory.high leaves the runner a share the
   # build's reclaim never touches.
+  #
+  # The same tree builds the apps dsa/apps builds in an Android tree. DocumentsUI is small and
+  # goes with services.jar. The system screens (Settings, PermissionController, PackageInstaller,
+  # IntentResolver) together take about as long to compile as services.jar, and Settings alone
+  # needs several GiB of disk for its intermediates, so they build on a runner of their own
+  # (part "screens"): the same fetch, the same analysis, and the four APKs, with the time and
+  # disk services.jar's runner has to itself.
   services:
-    name: Build services.jar (ubuntu-24.04, ${{ matrix.android }})
+    name: ${{ matrix.part == 'services' && 'Build services.jar' || 'Build the system screens' }} (ubuntu-24.04, ${{ matrix.android }})
     needs: versions
     runs-on: ubuntu-24.04
     timeout-minutes: 355
@@ -332,8 +348,11 @@ jobs:
       fail-fast: false
       matrix:
         android: ${{ fromJSON(needs.versions.outputs.android) }}
+        part: [services, screens]
     env:
       ANDROID_BRANCH: ${{ matrix.android }}
+      # Which part of the tree's builds this runner makes (build-services.sh).
+      DSA_TREE_PART: ${{ matrix.part }}
     steps:
       - uses: actions/checkout@v4
 
@@ -458,7 +477,7 @@ jobs:
       # with the build in its own cgroup the runner answers however long the analysis takes, so
       # the bound now only keeps a slower analysis (it has less memory than before) and the
       # Java build after it (up to 92 minutes so far) within DSA_BUILD_MINUTES.
-      - name: Build services.jar
+      - name: Build ${{ matrix.part == 'services' && 'services.jar and DocumentsUI' || 'the system screens' }}
         timeout-minutes: 300
         env:
           DSA_BUILD_MINUTES: 285
@@ -466,7 +485,7 @@ jobs:
           DSA_SERVICES_JOBS: 2
         run: |
           start=$SECONDS
-          # The same tree builds the image's patched DocumentsUI (dsa/apps/documentsui), which
+          # The same tree builds the image's patched DocumentsUI and system screens (dsa/apps), which
           # builds only in an Android tree, into the last folder.
           DSA_SERVICES_LOCK="$RUNNER_TEMP/services-lock.json" \
             .github/scripts/framework/build-services.sh "$DSA_TRANSLATOR_WORK/aosp" "$ANDROID_BRANCH" \
@@ -477,7 +496,7 @@ jobs:
       # Kept even when the DocumentsUI build after it failed: services.jar was in its folder by
       # then.
       - name: Keep services.jar
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.part == 'services' }}
         uses: actions/upload-artifact@v4
         with:
           name: framework-services-${{ matrix.android }}-${{ steps.pins.outputs.version }}
@@ -488,9 +507,20 @@ jobs:
       # The patched DocumentsUI and its record, which the image workflows take for every image
       # of this Android version (.github/scripts/apps/download-documentsui.sh).
       - name: Keep DocumentsUI
+        if: ${{ matrix.part == 'services' }}
         uses: actions/upload-artifact@v4
         with:
           name: default-app-documentsui-${{ matrix.android }}-${{ steps.pins.outputs.version }}
+          path: ${{ env.DSA_TRANSLATOR_WORK }}/default-apps/
+          if-no-files-found: error
+          retention-days: 90
+
+      # The system screens and their records, which the image workflows take the same way.
+      - name: Keep the system screens
+        if: ${{ matrix.part == 'screens' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: default-app-system-screens-${{ matrix.android }}-${{ steps.pins.outputs.version }}
           path: ${{ env.DSA_TRANSLATOR_WORK }}/default-apps/
           if-no-files-found: error
           retention-days: 90
@@ -499,7 +529,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: framework-services-logs-${{ matrix.android }}
+          name: framework-${{ matrix.part }}-logs-${{ matrix.android }}
           path: |
             ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/error.log
             ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong.log

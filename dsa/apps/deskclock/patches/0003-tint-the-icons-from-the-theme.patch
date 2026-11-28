@@ -1,0 +1,179 @@
+Tint the icons from the theme: upstream is dark only, and its icons are vector drawables
+filled white with no tint, which the places that show them do not tint either (the toolbar's
+settings action, the alarm's ringtone, vibrate and delete icons, the alarm volume setting,
+the alarm screen's alarm button and the analog clock). In the light theme they showed white
+on a light background. They take the theme's control colour (the analog clock and the alarm
+button its on-surface colour) as their default tint, which a place that tints them still
+replaces. The expand caret and the timer's close button stay white: they sit on a grey disc.
+On the alarm screen the dismiss button's circle takes the on-surface colour, so that its
+icon, which takes the window's colour, shows on it, and the snooze icon takes the colour that
+reads on the snooze circle. The screensaver draws on black in both themes, so it takes the
+dark theme's colours.
+
+diff --git a/res/drawable/clock_analog_dial.xml b/res/drawable/clock_analog_dial.xml
+index 2a5f148..008801f 100644
+--- a/res/drawable/clock_analog_dial.xml
++++ b/res/drawable/clock_analog_dial.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorOnSurface" xmlns:android="http://schemas.android.com/apk/res/android"
+         android:width="@dimen/analog_clock_size"
+         android:height="@dimen/analog_clock_size"
+         android:viewportHeight="1176.0"
+diff --git a/res/drawable/clock_analog_hour.xml b/res/drawable/clock_analog_hour.xml
+index 525dae9..80f1973 100644
+--- a/res/drawable/clock_analog_hour.xml
++++ b/res/drawable/clock_analog_hour.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorOnSurface" xmlns:android="http://schemas.android.com/apk/res/android"
+         android:width="@dimen/analog_clock_size"
+         android:height="@dimen/analog_clock_size"
+         android:viewportHeight="1176.0"
+diff --git a/res/drawable/clock_analog_minute.xml b/res/drawable/clock_analog_minute.xml
+index 8f63be3..8f5c711 100644
+--- a/res/drawable/clock_analog_minute.xml
++++ b/res/drawable/clock_analog_minute.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorOnSurface" xmlns:android="http://schemas.android.com/apk/res/android"
+         android:width="@dimen/analog_clock_size"
+         android:height="@dimen/analog_clock_size"
+         android:viewportHeight="1176.0"
+diff --git a/res/drawable/ic_alarm_small.xml b/res/drawable/ic_alarm_small.xml
+index 6b7f705..55a4067 100644
+--- a/res/drawable/ic_alarm_small.xml
++++ b/res/drawable/ic_alarm_small.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorControlNormal" xmlns:android="http://schemas.android.com/apk/res/android"
+         android:width="24dp"
+         android:height="24dp"
+         android:viewportHeight="24.0"
+diff --git a/res/drawable/ic_delete_small.xml b/res/drawable/ic_delete_small.xml
+index 27d3fc5..2274a69 100644
+--- a/res/drawable/ic_delete_small.xml
++++ b/res/drawable/ic_delete_small.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorControlNormal" xmlns:android="http://schemas.android.com/apk/res/android"
+         android:width="24dp"
+         android:height="24dp"
+         android:viewportHeight="24.0"
+diff --git a/res/drawable/ic_fab_alarm.xml b/res/drawable/ic_fab_alarm.xml
+index dc04b6e..4676933 100644
+--- a/res/drawable/ic_fab_alarm.xml
++++ b/res/drawable/ic_fab_alarm.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorOnSurface" xmlns:android="http://schemas.android.com/apk/res/android"
+     android:width="@dimen/fab_alarm_size"
+     android:height="@dimen/fab_alarm_size"
+     android:viewportHeight="56.0"
+diff --git a/res/drawable/ic_ringtone.xml b/res/drawable/ic_ringtone.xml
+index 1810df2..0ee90a0 100644
+--- a/res/drawable/ic_ringtone.xml
++++ b/res/drawable/ic_ringtone.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorControlNormal" xmlns:android="http://schemas.android.com/apk/res/android"
+         android:width="24dp"
+         android:height="24dp"
+         android:viewportWidth="24.0"
+diff --git a/res/drawable/ic_ringtone_silent.xml b/res/drawable/ic_ringtone_silent.xml
+index fa62afd..fc1a18e 100644
+--- a/res/drawable/ic_ringtone_silent.xml
++++ b/res/drawable/ic_ringtone_silent.xml
+@@ -14,7 +14,7 @@
+      limitations under the License.
+ -->
+ 
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorControlNormal" xmlns:android="http://schemas.android.com/apk/res/android"
+     android:width="24dp"
+     android:height="24dp"
+     android:viewportHeight="24.0"
+diff --git a/res/drawable/ic_settings.xml b/res/drawable/ic_settings.xml
+index bddd946..78ef3be 100644
+--- a/res/drawable/ic_settings.xml
++++ b/res/drawable/ic_settings.xml
+@@ -3,7 +3,7 @@
+      SPDX-FileCopyrightText: Material Design Authors / Google LLC
+      SPDX-License-Identifier: Apache-2.0
+ -->
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorControlNormal" xmlns:android="http://schemas.android.com/apk/res/android"
+     android:width="24dp"
+     android:height="24dp"
+     android:viewportWidth="960"
+diff --git a/res/drawable/ic_vibrate.xml b/res/drawable/ic_vibrate.xml
+index da69e4d..2d0783a 100644
+--- a/res/drawable/ic_vibrate.xml
++++ b/res/drawable/ic_vibrate.xml
+@@ -1,5 +1,5 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<vector xmlns:android="http://schemas.android.com/apk/res/android"
++<vector android:tint="?attr/colorControlNormal" xmlns:android="http://schemas.android.com/apk/res/android"
+     android:width="24dp"
+     android:height="24dp"
+     android:viewportWidth="24"
+diff --git a/res/layout/alarm_activity.xml b/res/layout/alarm_activity.xml
+index 033ad38..1d26a3f 100644
+--- a/res/layout/alarm_activity.xml
++++ b/res/layout/alarm_activity.xml
+@@ -91,6 +91,7 @@
+             android:layout_width="wrap_content"
+             android:layout_height="wrap_content"
+             android:background="@drawable/bg_circle_white"
++            app:backgroundTint="?attr/colorOnSurface"
+             android:contentDescription="@string/alarm_alert_dismiss_text"
+             app:layout_row="2"
+             app:layout_column="2"
+diff --git a/res/layout/desk_clock_saver.xml b/res/layout/desk_clock_saver.xml
+index c147bf7..2cd5512 100644
+--- a/res/layout/desk_clock_saver.xml
++++ b/res/layout/desk_clock_saver.xml
+@@ -20,7 +20,8 @@
+     android:id="@+id/saver_container"
+     android:layout_width="match_parent"
+     android:layout_height="match_parent"
+-    android:background="@color/black">
++    android:background="@color/black"
++    android:theme="@style/ThemeOverlay.Material3.Dark">
+ 
+     <!--  Extra layout to let the clock float in the window -->
+     <LinearLayout
+diff --git a/src/com/android/deskclock/alarms/AlarmActivity.java b/src/com/android/deskclock/alarms/AlarmActivity.java
+index 9afcf7d..96483d4 100644
+--- a/src/com/android/deskclock/alarms/AlarmActivity.java
++++ b/src/com/android/deskclock/alarms/AlarmActivity.java
+@@ -220,7 +220,7 @@ public class AlarmActivity extends BaseActivity
+ 
+         mAlarmAnimator = AnimatorUtils.getScaleAnimator(mAlarmButton, 1.0f, 0.0f);
+         mSnoozeAnimator = getButtonAnimator(mSnoozeButton,
+-                ThemeUtils.resolveColor(this, R.attr.colorOnSurface));
++                ThemeUtils.resolveColor(this, R.attr.colorOnSecondary));
+         mDismissAnimator = getButtonAnimator(mDismissButton, mCurrentHourColor);
+         mPulseAnimator = ObjectAnimator.ofPropertyValuesHolder(pulseView,
+                 PropertyValuesHolder.ofFloat(CircleView.RADIUS, 0.0f, pulseView.getRadius()),

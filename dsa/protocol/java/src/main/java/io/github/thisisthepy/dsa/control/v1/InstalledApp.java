@@ -776,6 +776,50 @@ public  final class InstalledApp extends
     
   }
 
+  public static final int GAME_FIELD_NUMBER = 15;
+  private boolean game_;
+  /**
+   * <pre>
+   * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+   * sets the older android:isGame. The host lists games first where it offers settings for
+   * games.
+   * </pre>
+   *
+   * <code>bool game = 15;</code>
+   * @return The game.
+   */
+  @java.lang.Override
+  public boolean getGame() {
+    return game_;
+  }
+  /**
+   * <pre>
+   * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+   * sets the older android:isGame. The host lists games first where it offers settings for
+   * games.
+   * </pre>
+   *
+   * <code>bool game = 15;</code>
+   * @param value The game to set.
+   */
+  private void setGame(boolean value) {
+    
+    game_ = value;
+  }
+  /**
+   * <pre>
+   * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+   * sets the older android:isGame. The host lists games first where it offers settings for
+   * games.
+   * </pre>
+   *
+   * <code>bool game = 15;</code>
+   */
+  private void clearGame() {
+    
+    game_ = false;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.InstalledApp parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -1665,6 +1709,52 @@ public  final class InstalledApp extends
       return this;
     }
 
+    /**
+     * <pre>
+     * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+     * sets the older android:isGame. The host lists games first where it offers settings for
+     * games.
+     * </pre>
+     *
+     * <code>bool game = 15;</code>
+     * @return The game.
+     */
+    @java.lang.Override
+    public boolean getGame() {
+      return instance.getGame();
+    }
+    /**
+     * <pre>
+     * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+     * sets the older android:isGame. The host lists games first where it offers settings for
+     * games.
+     * </pre>
+     *
+     * <code>bool game = 15;</code>
+     * @param value The game to set.
+     * @return This builder for chaining.
+     */
+    public Builder setGame(boolean value) {
+      copyOnWrite();
+      instance.setGame(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+     * sets the older android:isGame. The host lists games first where it offers settings for
+     * games.
+     * </pre>
+     *
+     * <code>bool game = 15;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearGame() {
+      copyOnWrite();
+      instance.clearGame();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.InstalledApp)
   }
   @java.lang.Override
@@ -1696,11 +1786,12 @@ public  final class InstalledApp extends
             "nativeLibraries_",
             io.github.thisisthepy.dsa.control.v1.NativeLibraries.class,
             "sharedUserId_",
+            "game_",
           };
           java.lang.String info =
-              "\u0000\u000e\u0000\u0000\u0001\u000e\u000e\u0000\u0001\u0000\u0001\u0208\u0002\u0208" +
+              "\u0000\u000f\u0000\u0000\u0001\u000f\u000f\u0000\u0001\u0000\u0001\u0208\u0002\u0208" +
               "\u0003\n\u0004\u0208\u0005\u0002\u0006\u0003\u0007\u0003\b\u0007\t\u0003\n\u0003" +
-              "\u000b\u0003\f\u0208\r\u001b\u000e\u0208";
+              "\u000b\u0003\f\u0208\r\u001b\u000e\u0208\u000f\u0007";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

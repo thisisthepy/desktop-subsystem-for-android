@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Debug
+import android.system.Os
+import android.system.OsConstants
 import io.github.thisisthepy.dsa.agent.memory.GooglePlayPackages
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
 import io.github.thisisthepy.dsa.agent.memory.PageReporting
@@ -78,6 +80,14 @@ class AndroidMemorySource(context: Context) : MemorySource {
             refaultedTotalKb = read("refaulted_total_kb") ?: 0,
         )
     }
+
+    /**
+     * /proc/vmstat, for the page structures the kernel made (nr_memmap_pages); null when the
+     * policy keeps the agent from reading it (memory.cil grants it).
+     */
+    override fun vmstat(): String? = runCatching { File("/proc/vmstat").readText() }.getOrNull()
+
+    override fun pageSizeKb(): Long = (Os.sysconf(OsConstants._SC_PAGESIZE) / 1024).takeIf { it > 0 } ?: 4
 
     override fun processes(): List<ProcessPss> {
         val running = activities.runningAppProcesses ?: return emptyList()

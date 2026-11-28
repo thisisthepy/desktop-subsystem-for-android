@@ -25,6 +25,11 @@
 //! memory) and its committed memory by owner (`committed`), so a log shows where the window
 //! manager's memory goes. The graphics renderer runs in its own process (`dsa-gfx`): it is asked
 //! to give back what it does not use at the same moment, and its own line says what it holds.
+//! A last line puts what Windows' GPU counters say both processes use (shared and dedicated GPU
+//! memory, [`gpu_counters`]) beside their private commit, which may leave GPU-only allocations
+//! out.
+//!
+//! [`gpu_counters`]: super::gpu_counters
 //!
 //! Once Android has stopped (not dozing: [`SharedPresence`] says when), the window manager
 //! holds nothing for it: the renderer process has ended, and the Direct3D device the task
@@ -33,7 +38,15 @@
 //! starts Android, the renderer starts with it, and the device is made again when the first
 //! window or frame needs it.
 //!
+//! While Android runs or dozes, the device goes as well once no task window has existed for a
+//! few seconds ([`IdleDevice`]): with every texture, swapchain and frame copy made on it gone,
+//! the driver's memory for it (its pools mapped write-combined, the runtime's heap
+//! allocations) goes with it, and the heap's free memory and the working set go back after.
+//! The log says what the process held before and holds after. The next window makes the
+//! device again, ahead of its first frame (`hosts`), and the log says how long that took.
+//!
 //! [`IdleTrim`]: dsa_host_core::memory::IdleTrim
+//! [`IdleDevice`]: dsa_host_core::compositor::idle_device::IdleDevice
 //! [`SharedPresence`]: dsa_host_core::android_presence::SharedPresence
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,8 +55,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::android_presence::SharedPresence;
-use dsa_host_core::memory::{committed_line, held_line, HeldMemory, IdleTrim};
-use dsa_host_core::renderer::renderer_line;
+use dsa_host_core::compositor::idle_device::{released_line, DeviceRelease, IdleDevice};
+use dsa_host_core::memory::{
+    committed_line, gpu_process_memory_line, held_line, GpuMemoryOf, HeldMemory, IdleTrim,
+};
+use dsa_host_core::renderer::{renderer_line, RendererProcessMemory};
 use dsa_host_core::video_slots::{give_back_unused_pictures, PicturesGivenBack};
 use windows_sys::Win32::System::ProcessStatus::{
     K32EmptyWorkingSet, K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
@@ -53,6 +69,7 @@ use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
 use super::adapter::DisplayPresenter;
 use super::committed;
+use super::gpu_counters;
 use super::log::{note, CompositorLogger};
 use super::present::Gpu;
 
@@ -180,9 +197,38 @@ fn give_back_because(
     note(logger, &message);
     note(logger, &by_owner(&after));
     // The renderer's process gives back what it does not use too, and says what it holds.
-    if let Some(renderer) = renderer {
-        note(logger, &renderer_line(renderer.give_back().as_ref()));
+    let renderer_held = renderer.and_then(|renderer| {
+        let held = renderer.give_back();
+        note(logger, &renderer_line(held.as_ref()));
+        held
+    });
+    note(logger, &gpu_line(&after, renderer_held.as_ref()));
+}
+
+/// The log line that puts what Windows' GPU counters say this process and the renderer use
+/// beside their private commit, so a log shows whether GPU-only allocations sit outside the
+/// private totals (on an integrated GPU they are system memory either way).
+fn gpu_line(own: &HeldMemory, renderer: Option<&RendererProcessMemory>) -> String {
+    let own_pid = std::process::id();
+    let mut pids = vec![own_pid];
+    pids.extend(renderer.map(|r| r.process_id));
+    let counters = gpu_counters::gpu_process_memory(&pids);
+    let gpu = |pid: u32| counters.as_ref().and_then(|c| c.get(&pid).copied());
+    let mut processes = vec![GpuMemoryOf {
+        name: "window manager",
+        pid: own_pid,
+        private_kb: own.private_kb,
+        gpu: gpu(own_pid),
+    }];
+    if let Some(r) = renderer {
+        processes.push(GpuMemoryOf {
+            name: "graphics renderer",
+            pid: r.process_id,
+            private_kb: r.held.private_kb,
+            gpu: gpu(r.process_id),
+        });
     }
+    gpu_process_memory_line(&processes)
 }
 
 /// Gives back the GPU driver's spare memory and the default heap's free memory while windows
@@ -210,9 +256,12 @@ fn give_back_spare(
         ),
     );
     note(logger, &by_owner(&after));
-    if let Some(renderer) = renderer {
-        note(logger, &renderer_line(renderer.memory().as_ref()));
-    }
+    let renderer_held = renderer.and_then(|renderer| {
+        let held = renderer.memory();
+        note(logger, &renderer_line(held.as_ref()));
+        held
+    });
+    note(logger, &gpu_line(&after, renderer_held.as_ref()));
 }
 
 /// Lets go of what the window manager holds only for a running Android, once `presence` says
@@ -239,12 +288,53 @@ fn release_while_stopped(
     }
 }
 
-/// What the trim gives back memory of: the task windows' devices, the renderer process, and
-/// whether Android runs (`None` where the window manager does not follow it).
+/// Lets go of the task windows' Direct3D device once `device` says no window has existed for
+/// long enough, gives back the heap's free memory and the working set after it, and logs what
+/// the process held before and holds after, and whose the rest is. The lock on `device` is held
+/// until the device has gone, so a window that appears meanwhile waits and then has the device
+/// made again, rather than having it let go of under its first frame.
+fn release_idle_device(device: &Mutex<IdleDevice>, gpu: &Gpu, logger: Option<&CompositorLogger>) {
+    let now = Instant::now();
+    let mut device = device.lock().unwrap_or_else(|e| e.into_inner());
+    if device.release_due(gpu.is_made(), now) != DeviceRelease::Release {
+        return;
+    }
+    let before = held(Some(gpu));
+    let released = gpu.release_idle();
+    if device.release_tried(released, now) {
+        note(
+            logger,
+            "no task window exists, but something made on the task windows' Direct3D device is \
+             still alive, so the device stays; trying again in a few seconds",
+        );
+    }
+    if !released {
+        return;
+    }
+    let idle_for = device.idle_for(now);
+    // The device is gone: a window that appears from here makes a new one.
+    drop(device);
+    committed::compact_heaps();
+    // SAFETY: our own process's pseudo handle.
+    unsafe {
+        K32EmptyWorkingSet(GetCurrentProcess());
+    }
+    let after = held(Some(gpu));
+    note(
+        logger,
+        &released_line(idle_for, &held_line(&before, &after)),
+    );
+    note(logger, &by_owner(&after));
+}
+
+/// What the trim gives back memory of: the task windows' devices, the renderer process,
+/// whether Android runs (`None` where the window manager does not follow it), and whether any
+/// task window exists, which says when the devices go while Android runs (`None`: they stay).
 pub struct Holdings {
     pub gpu: Option<Arc<Gpu>>,
     pub renderer: Option<Arc<dyn DisplayPresenter>>,
     pub presence: Option<Arc<SharedPresence>>,
+    pub device: Option<Arc<Mutex<IdleDevice>>>,
 }
 
 /// Checks `idle` every second until `stop` is set, and gives memory back when it says so.
@@ -265,6 +355,7 @@ pub fn run(
         gpu,
         renderer,
         presence,
+        device,
     } = held;
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(POLL);
@@ -275,6 +366,9 @@ pub fn run(
                 renderer.as_deref(),
                 logger.as_deref(),
             );
+        }
+        if let (Some(gpu), Some(device)) = (&gpu, &device) {
+            release_idle_device(device, gpu, logger.as_deref());
         }
         let (due, quiet_due, spare_due) = {
             let mut idle = idle.lock().unwrap_or_else(|e| e.into_inner());

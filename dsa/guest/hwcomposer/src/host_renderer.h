@@ -49,6 +49,16 @@ struct BufferRef {
     }
 };
 
+// What a composition into a ColorBuffer came to.
+enum class ComposeResult {
+    Composed,
+    // The host did not compose, or the connection failed.
+    Failed,
+    // The host's window was still copying the last frame out of the target, so the frame was
+    // not composed (dsa_compose_guard.h): it goes into another ColorBuffer.
+    TargetBusy,
+};
+
 class HostRenderer {
    public:
     struct Connection;
@@ -79,6 +89,10 @@ class HostRenderer {
     // Whether the host makes YUV ColorBuffers (dsa_shared_color_buffer.h). Asked once per
     // connection.
     bool hostHasYuv();
+    // Whether a composition on the host waits until its target's last frame has been copied
+    // into its window (dsa_compose_guard.h), so a task's frames may all be composed into one
+    // ColorBuffer. Asked once per connection.
+    bool hostGuardsComposeTargets();
     // Writes `packed` (layout.packedSize() bytes, dsa_cpu_upload.h) over the ColorBuffer and
     // waits until the host has. False when the host refused it. When `packed` is the staging
     // memory stagingFor() gave, the host reads it in place and nothing crosses the stream.
@@ -98,7 +112,7 @@ class HostRenderer {
     void destroyDisplay(uint32_t displayId);
 
     // Composes a ComposeDevice_v2 request and waits until the host has finished.
-    bool compose(const std::vector<uint8_t>& request);
+    ComposeResult compose(const std::vector<uint8_t>& request);
     // Makes `colorBuffer`, already composed, display `displayId`'s current frame: the host
     // shows it in the task's window then.
     void post(uint32_t displayId, uint32_t colorBuffer);
@@ -108,6 +122,7 @@ class HostRenderer {
     uint64_t mGeneration = 0;
     // -1 until asked on this connection, then 0 or 1.
     int mHostYuv = -1;
+    int mHostGuardsTargets = -1;
 };
 
 }  // namespace dsa::hwc

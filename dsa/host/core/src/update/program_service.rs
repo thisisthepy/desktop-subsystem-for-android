@@ -63,7 +63,7 @@ use crate::print::{PrintEvent, PrintOutcome};
 use crate::session::BackgroundRequest;
 use crate::session::SessionState;
 use crate::tasks::{AppSettingsPage, TaskRequest, TaskRequestError, TaskWatch};
-use crate::widgets::{WidgetError, WidgetProvider, WidgetSize};
+use crate::widgets::{WidgetError, WidgetGallery, WidgetPreview, WidgetProvider, WidgetSize};
 use std::sync::mpsc::Receiver;
 
 /// Runs a setup file, and knows what the platform's setup and service do around it.
@@ -1496,6 +1496,12 @@ impl UserAndroid for WithProgramStatus {
     }
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         UserAndroid::widget_providers(&*self.android)
+    }
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        UserAndroid::widget_gallery(&*self.android, lazy_previews)
+    }
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        UserAndroid::widget_previews(&*self.android, providers)
     }
     fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
         UserAndroid::add_widget(&*self.android, provider)

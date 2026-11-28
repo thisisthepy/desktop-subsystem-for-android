@@ -1094,6 +1094,15 @@ DSA không liên kết với Microsoft hay Google, và không được hai công
   <data name="Widgets_Removed" xml:space="preserve">
     <value>Đã gỡ {0} khỏi màn hình nền.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} widget</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 widget</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>Hiển thị thêm {0}</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>Trình cài đặt APK</value>
   </data>
@@ -2641,7 +2650,7 @@ Hãy lấy bản dựng x86_64 hoặc arm64-v8a của ứng dụng.</value>
     <value>Cửa hàng thay thế</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng.</value>
+    <value>DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Các cửa hàng đã cài xuất hiện trong danh sách ứng dụng như mọi ứng dụng khác, và bạn gỡ chúng ngay tại đó.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>Chưa cài đặt</value>
@@ -2663,5 +2672,39 @@ Hãy lấy bản dựng x86_64 hoặc arm64-v8a của ứng dụng.</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>Mở</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>Trò chơi</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>Trò chơi</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>Làm mới</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>Cài đặt giúp chơi game thoải mái hơn trong DSA.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>Không thể đọc hoặc thay đổi cài đặt trò chơi</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>Tiện ích trò chơi</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>Giữ tiêu điểm trò chơi</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>Ứng dụng được bật bên dưới vẫn chạy khi bạn nhấp vào cửa sổ khác, kể cả trò chơi tự dừng khi mất tiêu điểm.
+Phím và văn bản vẫn chỉ được gửi tới cửa sổ bạn đang dùng.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>Chọn tất cả</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Chưa có ứng dụng nào được cài trong Android.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>Trò chơi · {0}</value>
   </data>
 </root>

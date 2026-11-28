@@ -139,6 +139,12 @@ pub struct Manager<P: Platform> {
 }
 
 impl<P: Platform> Manager<P> {
+    /// Where the presenter reports the frames that reach a window: a window that opens with
+    /// no frame asks the guest for its task's frame until one arrives.
+    pub fn watch_frames(&mut self, drawn: dsa_host_core::compositor::resize_queue::DrawnFrames) {
+        self.windows.watch_frames(drawn);
+    }
+
     pub fn new(platform: P) -> Manager<P> {
         Manager {
             windows: TaskWindows::new(),

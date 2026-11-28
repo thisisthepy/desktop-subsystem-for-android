@@ -287,11 +287,27 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
 
 bool leavesLastFrame(bool layerMissing, bool hasFrame) { return layerMissing && hasFrame; }
 
-std::vector<int64_t> resendAfterReport(bool boundsChanged, bool posted) {
-    if (boundsChanged || !posted) {
-        return {};
+bool reportAsksForFrame(bool boundsChanged) { return boundsChanged; }
+
+uint32_t lastPostedTarget(bool posted, bool onHost, const uint32_t targets[2], int lastPosted) {
+    if (!posted || !onHost || lastPosted < 0 || lastPosted > 1) {
+        return 0;
     }
-    return {0, kResendLateMs};
+    return targets[lastPosted];
+}
+
+int composeTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs) {
+    if (hostGuards && nowMs >= secondUntilMs) {
+        return lastPosted == 1 ? 1 : 0;
+    }
+    return lastPosted == 0 ? 1 : 0;
+}
+
+int idleTargetSlot(bool hostGuards, int lastPosted, int64_t secondUntilMs, int64_t nowMs) {
+    if (!hostGuards || nowMs < secondUntilMs || lastPosted < 0 || lastPosted > 1) {
+        return -1;
+    }
+    return lastPosted ^ 1;
 }
 
 bool leavesLastFrameUndrawn(const std::vector<LayerFill>& layers, bool hasFrame) {
@@ -462,6 +478,13 @@ BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskW
         return current;
     }
     return fitting;
+}
+
+BufferSize grownDisplaySize(BufferSize current, int64_t width, int64_t height) {
+    const auto grown = [](int64_t now, int64_t asked) {
+        return std::max(now, std::min(asked, kMaxDisplaySide));
+    };
+    return BufferSize{grown(current.width, width), grown(current.height, height)};
 }
 
 std::optional<uint32_t> TaskDisplays::release(int32_t task) {

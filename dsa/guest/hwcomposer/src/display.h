@@ -81,6 +81,10 @@ class Display {
     const DisplayConfig& config() const { return mConfig; }
     Rect bounds() const { return Rect{0, 0, mConfig.width, mConfig.height}; }
 
+    // Grows the display towards `width` by `height` (grownDisplaySize): it never shrinks and
+    // keeps its density. Returns whether its size changed, when SurfaceFlinger has to be told.
+    bool grow(int64_t width, int64_t height);
+
     int64_t createLayer();
     bool destroyLayer(int64_t id);
     Layer* layer(int64_t id);

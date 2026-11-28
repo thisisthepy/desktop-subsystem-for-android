@@ -38,6 +38,11 @@ class ComposerClient : public composer3::BnComposerClient {
     void setOnDestroyed(std::function<void()> onDestroyed) { mOnDestroyed = std::move(onDestroyed); }
     // Asks SurfaceFlinger for a new frame of the display.
     void requestRefresh();
+    // Grows the display towards `width` by `height` while Android runs (Display::grow) and,
+    // when its size changed, tells SurfaceFlinger the display is connected again, which it
+    // takes as a reconnection of the same display with new configurations: it reads them
+    // again, and the display manager and the window manager follow the new size.
+    void growDisplay(int64_t width, int64_t height);
 
     using common_Dataspace = aidl::android::hardware::graphics::common::Dataspace;
     using common_PixelFormat = aidl::android::hardware::graphics::common::PixelFormat;
@@ -132,6 +137,8 @@ class ComposerClient : public composer3::BnComposerClient {
     std::shared_ptr<composer3::IComposerCallback> callback();
     // Makes `config` (a valid one) the display's, and its rate the vsync clock's.
     void applyConfig(int32_t config);
+    // The display's configuration now: its size can grow while SurfaceFlinger asks.
+    DisplayConfig displayConfig();
 
     std::shared_ptr<TaskComposer> mTasks;
     std::mutex mMutex;

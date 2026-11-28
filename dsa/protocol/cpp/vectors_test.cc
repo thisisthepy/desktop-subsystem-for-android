@@ -101,6 +101,29 @@ std::map<std::string, v1::Envelope> Cases() {
     density->set_density_dpi(240);
   }
   {
+    v1::SetTaskDensity* density = cases["set_task_density_forced"].mutable_set_task_density();
+    density->set_task_id(42);
+    density->set_density_dpi(240);
+    density->set_forced(true);
+  }
+  {
+    v1::SetOverlayDensity* density = cases["set_overlay_density"].mutable_set_overlay_density();
+    density->set_overlay_id(0x40000001);
+    density->set_density_dpi(262);
+  }
+  cases["set_overlay_density_back"].mutable_set_overlay_density()->set_overlay_id(0x40000001);
+  {
+    v1::TaskUpdated* task = cases["task_updated_overlay_density"].mutable_task_updated();
+    task->set_task_id(0x40000001);
+    task->mutable_overlay()->set_window_type(2038);
+    task->mutable_overlay()->set_density_dpi(262);
+  }
+  {
+    v1::TaskUpdated* task = cases["task_updated_forced_density"].mutable_task_updated();
+    task->set_task_id(42);
+    task->set_forced_density_available(true);
+  }
+  {
     v1::TaskUpdated* task = cases["task_updated_negative_origin"].mutable_task_updated();
     task->set_task_id(7);
     task->mutable_bounds()->set_left(-40);
@@ -224,6 +247,12 @@ std::map<std::string, v1::Envelope> Cases() {
     frames->set_display_id(3);
   }
   cases["close_task"].mutable_close_task()->set_task_id(42);
+  cases["request_task_frame"].mutable_request_task_frame()->set_task_id(42);
+  {
+    v1::DisplaySize* size = cases["display_size"].mutable_display_size();
+    size->set_width(4096);
+    size->set_height(4096);
+  }
   cases["launch_app"].mutable_launch_app()->set_package_name("com.example.notes");
   {
     v1::AppInfo* app = cases["app_info"].mutable_app_info();

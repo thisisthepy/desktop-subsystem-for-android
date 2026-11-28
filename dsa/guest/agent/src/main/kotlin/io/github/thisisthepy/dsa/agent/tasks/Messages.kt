@@ -67,6 +67,7 @@ object Messages {
         }
         update.setCanGoBack(task.canGoBack)
         update.setHandlesDensityChange(task.handlesDensityChange)
+        update.setForcedDensityAvailable(task.forcedDensityAvailable)
         update.setBelowTitleBar(task.belowTitleBar)
         return Envelope.newBuilder().setTaskUpdated(update).build().toByteArray()
     }
@@ -97,6 +98,7 @@ object Messages {
             .setPrimaryAbi(app.primaryAbi)
             .addAllNativeLibraries(io.github.thisisthepy.dsa.agent.install.NativeLibraries.messages(app.nativeLibraries))
             .setSharedUserId(app.sharedUserId)
+            .setGame(app.game)
         return Envelope.newBuilder().setInstalledApp(info).build().toByteArray()
     }
 

@@ -145,6 +145,13 @@ pub struct TaskUpdated {
     /// the window instead. False when the agent cannot read it.
     #[prost(bool, tag = "26")]
     pub handles_density_change: bool,
+    /// Whether the guest can give this task a new density without relaunching its activity, even
+    /// though the activity does not say it handles one: the guest's framework has the change that
+    /// lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+    /// an app the user set to System (forced) scaling another monitor's density only when this
+    /// is set, and scales its window as for System otherwise. False on an image without it.
+    #[prost(bool, tag = "29")]
+    pub forced_density_available: bool,
     /// Which kind of full screen the task's app asks for, if any. The host shows the task's
     /// window on its whole monitor or keeps it inside its window, as the user's setting for that
     /// kind of request says.
@@ -180,7 +187,8 @@ pub struct TaskUpdated {
 /// the overlay's ID as `task_id`, the positions relative to the top left corner of `bounds`.
 /// It never sends CloseTask, ResizeTask, SetTaskDensity, SetTaskCaption or SetTaskFullScreen
 /// for one, and the agent ignores them: how an overlay moves, changes size and closes is its
-/// app's.
+/// app's. The one thing it asks of an overlay is a density (SetOverlayDensity), and only for an
+/// app set to System (forced) scaling.
 ///
 /// An overlay whose `bounds` cover the whole display (a screen filter, a dimmer) is reported
 /// the same way. The host opens no window for it, because that window would cover the user's
@@ -202,6 +210,12 @@ pub struct OverlayWindow {
     /// pointer passes through the host's window of one that does not.
     #[prost(bool, tag = "3")]
     pub touchable: bool,
+    /// The density the app draws this window at, in dots per inch, when the host gave the window
+    /// one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+    /// window's size on the guest's display has changed since. 0 while the app draws it as the
+    /// rest of its process, as every overlay the host gave no density.
+    #[prost(uint32, tag = "4")]
+    pub density_dpi: u32,
 }
 /// Host to guest: the apps whose tasks start below the title bar, as the user chose for each
 /// (the per-app window setting). A task of one of these packages gets no status bar inset,
@@ -211,10 +225,21 @@ pub struct OverlayWindow {
 /// before. It counts when a task starts: a task that runs already keeps what it started
 /// with, because an app may read its insets once per screen. The host sends it when it
 /// connects and whenever the list changes.
+///
+/// keep_focus: the apps the user set to keep game focus. While a task of one of these
+/// packages stays resumed (its window is visible), its app is not told that it lost the focus
+/// to another app's window: no onTopResumedActivityChanged(false) and no
+/// onWindowFocusChanged(false), so a game that pauses on either keeps running. Keys and IME
+/// text still go only to the window that has the focus. The agent gives the list to the
+/// framework (the window manager's shell command dsa-keep-focus), where it counts at once; an
+/// image whose framework lacks that change ignores it. Empty, the default, keeps every app as
+/// before.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CaptionCompat {
     #[prost(string, repeated, tag = "1")]
     pub below_title_bar: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "2")]
+    pub keep_focus: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Guest to host, from the agent: the task ended; the host closes its window.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -230,6 +255,16 @@ pub struct TaskFrames {
     pub task_id: i32,
     #[prost(uint32, tag = "2")]
     pub display_id: u32,
+}
+/// Host to guest, to the hwcomposer: the host opened a window for the task that has no frame
+/// yet, as after the agent restarted. The hwcomposer presents once and sends the task's
+/// current frame even when nothing in it changed, since an app that is still (a dialog, a
+/// settings page) would otherwise never draw into the new window. The host asks again, a
+/// bounded number of times, while no frame arrives.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RequestTaskFrame {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
 }
 /// Host to guest: the user closed the task's window; the agent ends the task.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -289,6 +324,13 @@ pub struct ResizeTask {
 /// it handles a change of density itself. Some apps that say so lay out only part of their
 /// screen again and leave the rest at the old density. An activity that does not say so is
 /// recreated by Android anyway, so the agent asks for nothing more.
+///
+/// `forced` is set when the user set the task's app to System (forced) scaling, and the task
+/// said `forced_density_available`: the agent first marks the task so that Android gives it the
+/// density without relaunching its activity, whether or not the activity says it handles a
+/// change of density, and only then gives it the density. If the task cannot be marked, the
+/// agent gives it no density, so the app is never restarted for it. Without `forced`, the agent
+/// takes away a mark it gave the task before, so that Android handles the density as it would.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetTaskDensity {
     #[prost(int32, tag = "1")]
@@ -297,6 +339,28 @@ pub struct SetTaskDensity {
     pub density_dpi: u32,
     #[prost(bool, tag = "3")]
     pub recreate: bool,
+    #[prost(bool, tag = "4")]
+    pub forced: bool,
+}
+/// Host to guest: the window of an app overlay window (see OverlayWindow) is on a monitor whose
+/// density differs from the one its app draws at; the app is to draw that window alone at
+/// `density_dpi` (130 at a scale of 100%). 0 has the app draw it at its own density again, when
+/// the window is back on a monitor of that density.
+///
+/// The host asks it only for an app the user set to System (forced) scaling, whose process draws
+/// at the density of the monitor its task's window is on, overlays included: such an overlay on
+/// another monitor would otherwise be shown stretched. The other windows of the app's process,
+/// its tasks among them, keep their density. The agent gives the window the density through the
+/// framework (the window manager's shell command dsa-overlay-density, which converts that
+/// window's views in the app's process); an image whose framework lacks that change ignores it.
+/// Once the app has laid the window out again, the agent reports the overlay with
+/// OverlayWindow.density_dpi set, and the host shows it 1:1 on that monitor from then on.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetOverlayDensity {
+    #[prost(int32, tag = "1")]
+    pub overlay_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
 }
 /// Host to guest: the monitor the window of the next task opens on, so that the task starts at
 /// that monitor's density and its size there from its first frame, and its app is never
@@ -446,6 +510,11 @@ pub struct InstalledApp {
     /// Empty for an app with a user ID of its own.
     #[prost(string, tag = "14")]
     pub shared_user_id: ::prost::alloc::string::String,
+    /// Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+    /// sets the older android:isGame. The host lists games first where it offers settings for
+    /// games.
+    #[prost(bool, tag = "15")]
+    pub game: bool,
 }
 /// The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
 /// and its splits together.
@@ -865,6 +934,20 @@ pub struct PowerState {
 pub struct DisplayRefresh {
     #[prost(uint32, tag = "1")]
     pub hz: u32,
+}
+/// Host to guest, to the hwcomposer: the size in pixels the guest's display grows to, without
+/// restarting Android. The host sends it when a task's window opens and the monitors connected
+/// then need a larger display than the one the guest reports with its tasks. The hwcomposer
+/// only ever grows the display, each side to at most 16384, and keeps its density; a size not
+/// larger than the display's on either side changes nothing on that side. SurfaceFlinger takes
+/// the new size as a reconnection of the same display, and the agent reports every task again
+/// with the new size as its largest. A hwcomposer that subscribes later is told the last size.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DisplaySize {
+    #[prost(uint32, tag = "1")]
+    pub width: u32,
+    #[prost(uint32, tag = "2")]
+    pub height: u32,
 }
 /// Guest to host, from the control daemon: how much memory the guest has and how hard it
 /// works to find more. The host grows the VM's memory by hot-adding it when the guest runs
@@ -1653,6 +1736,22 @@ pub struct GuestMemory {
     pub reported_total_kb: u64,
     #[prost(uint64, tag = "29")]
     pub refaulted_total_kb: u64,
+    /// The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+    /// holds, kept until one of them is written to. Cached leaves them out; those a process maps
+    /// are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+    #[prost(uint64, tag = "30")]
+    pub swap_cached_kb: u64,
+    /// The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+    /// times the page size): those of the persistent memory the guest maps directly (the disks
+    /// it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+    /// /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+    #[prost(uint64, tag = "31")]
+    pub memmap_kb: u64,
+    /// The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+    /// it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+    /// say.
+    #[prost(uint64, tag = "32")]
+    pub memmap_boot_kb: u64,
 }
 /// From the agent to the guest's control daemon, on each connection to it: the agent has
 /// subscribed and takes the host's frames. It stops at the daemon, which tells the host with
@@ -2209,6 +2308,57 @@ pub struct ClockAnswer {
 pub struct ListWidgetProviders {
     #[prost(uint32, tag = "1")]
     pub request_id: u32,
+    /// Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+    /// icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+    /// apps the user opens asks so, and asks for those widgets' previews with
+    /// GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+    /// front would take seconds and hold hundreds of images.
+    #[prost(bool, tag = "2")]
+    pub lazy_previews: bool,
+}
+/// An app's icon, for a gallery that groups the widgets by the app that offers them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetAppIcon {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// A PNG image of at most 160 pixels on a side and 48 KiB.
+    #[prost(bytes = "vec", tag = "2")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
+/// Host to guest: asks the agent for the previews of some widgets on offer, as a gallery
+/// shows them when the user opens their app. The agent answers with one or more
+/// WidgetPreviews of the same `request_id`, the last one marked `complete`. At most 64
+/// providers are asked for at once; the agent leaves out the rest.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetWidgetPreviews {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    /// The providers' components, as `package/class`.
+    #[prost(string, repeated, tag = "2")]
+    pub providers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// One widget's preview: the best the widget has (see WidgetPreviewSource), as a PNG image of
+/// at most 256 pixels on a side and 48 KiB. Empty when the widget has none, or its app is
+/// gone.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetPreview {
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub preview_png: ::prost::alloc::vec::Vec<u8>,
+    #[prost(enumeration = "WidgetPreviewSource", tag = "3")]
+    pub source: i32,
+}
+/// Guest to host, from the agent: part of the answer to GetWidgetPreviews. Each message is
+/// kept under 256 KiB, so the previews come in several; `complete` marks the last.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WidgetPreviews {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(message, repeated, tag = "2")]
+    pub previews: ::prost::alloc::vec::Vec<WidgetPreview>,
+    #[prost(bool, tag = "3")]
+    pub complete: bool,
 }
 /// One widget an app in the guest offers, as a gallery shows it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2264,6 +2414,10 @@ pub struct WidgetProviders {
     pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
     #[prost(bool, tag = "3")]
     pub complete: bool,
+    /// With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+    /// once in the whole answer.
+    #[prost(message, repeated, tag = "4")]
+    pub app_icons: ::prost::alloc::vec::Vec<WidgetAppIcon>,
 }
 /// Host to guest: place a new widget of `provider`. The agent allocates a widget ID, binds it
 /// to the provider, runs the provider's configuration activity when it has one (which shows
@@ -3692,7 +3846,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 31, 28, 29, 40, 46, 41, 407, 416, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 730, 731, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 84, 85, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 156, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691, 710, 715, 740, 741"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3726,6 +3880,8 @@ pub mod envelope {
         SetTaskDensity(super::SetTaskDensity),
         #[prost(message, tag = "13")]
         PointerEvent(super::PointerEvent),
+        #[prost(message, tag = "14")]
+        SetOverlayDensity(super::SetOverlayDensity),
         #[prost(message, tag = "15")]
         AppInfo(super::AppInfo),
         #[prost(message, tag = "16")]
@@ -3774,6 +3930,8 @@ pub mod envelope {
         PowerState(super::PowerState),
         #[prost(message, tag = "407")]
         DisplayRefresh(super::DisplayRefresh),
+        #[prost(message, tag = "416")]
+        DisplaySize(super::DisplaySize),
         #[prost(message, tag = "110")]
         PowerHint(super::PowerHint),
         #[prost(message, tag = "140")]
@@ -3854,6 +4012,8 @@ pub mod envelope {
         NotificationDismissed(super::NotificationDismissed),
         #[prost(message, tag = "730")]
         NotificationButtonClicked(super::NotificationButtonClicked),
+        #[prost(message, tag = "731")]
+        RequestTaskFrame(super::RequestTaskFrame),
         #[prost(message, tag = "74")]
         BackgroundApp(super::BackgroundApp),
         #[prost(message, tag = "75")]
@@ -4110,6 +4270,10 @@ pub mod envelope {
         LaunchPlacement(super::LaunchPlacement),
         #[prost(message, tag = "715")]
         CaptionCompat(super::CaptionCompat),
+        #[prost(message, tag = "740")]
+        GetWidgetPreviews(super::GetWidgetPreviews),
+        #[prost(message, tag = "741")]
+        WidgetPreviews(super::WidgetPreviews),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -5149,6 +5313,41 @@ impl SensorKind {
             "SENSOR_KIND_GYROSCOPE" => Some(Self::Gyroscope),
             "SENSOR_KIND_ROTATION_VECTOR" => Some(Self::RotationVector),
             "SENSOR_KIND_LIGHT" => Some(Self::Light),
+            _ => None,
+        }
+    }
+}
+/// Where a widget's preview comes from, best first: the layout the app gives for its
+/// preview (drawn by the agent at the widget's default size), the app's preview image, or,
+/// when the widget has neither, the app's icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum WidgetPreviewSource {
+    Unspecified = 0,
+    Layout = 1,
+    Image = 2,
+    Icon = 3,
+}
+impl WidgetPreviewSource {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "WIDGET_PREVIEW_SOURCE_UNSPECIFIED",
+            Self::Layout => "WIDGET_PREVIEW_SOURCE_LAYOUT",
+            Self::Image => "WIDGET_PREVIEW_SOURCE_IMAGE",
+            Self::Icon => "WIDGET_PREVIEW_SOURCE_ICON",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "WIDGET_PREVIEW_SOURCE_UNSPECIFIED" => Some(Self::Unspecified),
+            "WIDGET_PREVIEW_SOURCE_LAYOUT" => Some(Self::Layout),
+            "WIDGET_PREVIEW_SOURCE_IMAGE" => Some(Self::Image),
+            "WIDGET_PREVIEW_SOURCE_ICON" => Some(Self::Icon),
             _ => None,
         }
     }

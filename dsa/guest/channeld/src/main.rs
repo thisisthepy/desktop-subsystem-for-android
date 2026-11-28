@@ -101,14 +101,48 @@ mod daemon {
 
     impl DiagnosticFiles for Pstore {
         /// With pstore, the guest's `/proc/meminfo` as the archive is made, so the memory
-        /// snapshot has the kernel's own counts of the same moment.
+        /// snapshot has the kernel's own counts of the same moment, and `/proc/vmstat` twice,
+        /// ten seconds apart, so the page cache's churn between them can be read.
         fn files(&self) -> Vec<(String, Result<Vec<u8>, String>)> {
+            use dsa_guest_channeld::memory_report::vmstat_files;
             let mut files = files_in(std::path::Path::new(PSTORE), "android/pstore");
             files.push((
                 "android/proc-meminfo.txt".to_string(),
                 std::fs::read("/proc/meminfo").map_err(|e| format!("/proc/meminfo: {e}")),
             ));
+            files.extend(vmstat_files(
+                &|| std::fs::read("/proc/vmstat").map_err(|e| format!("/proc/vmstat: {e}")),
+                &thread::sleep,
+            ));
             files
+        }
+
+        /// Asks init for the kernel memory report (slab, vmalloc by caller, threads, page
+        /// tables, what the processes read and wrote), which root writes to the kernel's log.
+        /// Developer mode is not needed for this one: only this daemon may set the property.
+        fn prepare(&self) -> bool {
+            use dsa_guest_channeld::memory_report::SNAPSHOT_PROPERTY;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            match set_property(SNAPSHOT_PROPERTY, &now.to_string()) {
+                Ok(()) => true,
+                Err(why) => {
+                    say!("could not ask for the kernel memory report: {why}");
+                    false
+                }
+            }
+        }
+
+        /// The last whole kernel memory report in the kernel's log.
+        fn kernel_log_files(&self, log: &[String]) -> Vec<(String, Result<Vec<u8>, String>)> {
+            use dsa_guest_channeld::memory_report::{last_report, REPORT_FILE};
+            let report = last_report(log).map(String::into_bytes).ok_or_else(|| {
+                "no whole report in the kernel's log (init did not run it, or the log does \
+                 not keep the kernel's messages)"
+                    .to_string()
+            });
+            vec![(REPORT_FILE.to_string(), report)]
         }
 
         /// Unlinking a pstore file erases its record from the pstore disk. Android's init
@@ -462,10 +496,11 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            file_refaults_kb, memory_pressure, package_running, reclaim_outcome_line, MemInfo,
-            ReadFailures, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL,
-            EXIT_WAIT_LIMIT, OUTCOME_WAIT_LIMIT, RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY,
-            TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
+            file_refaults_kb, memory_pressure, package_running, reclaim_outcome_line,
+            trim_counters_line, MemInfo, ReadFailures, Reason, ReclaimPolicy, Reclaimer,
+            VmCounters, CHECK_INTERVAL, EXIT_POLL, EXIT_WAIT_LIMIT, OUTCOME_WAIT_LIMIT,
+            RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY, TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
+            TRIM_SWAPPINESS_PROPERTY,
         };
         // The command lines of the guest's processes, for whether a closed app's are gone.
         fn command_lines(failures: &mut ReadFailures) -> Vec<String> {
@@ -499,7 +534,10 @@ mod daemon {
         let mut failures = ReadFailures::default();
         let mut closed = router.apps_closed();
         // The second zram device's size last asked for, so init is asked only on a change.
-        let mut zram_extra_asked: Option<u64> = None;
+        let mut zram_extra = ZramExtra::default();
+        // What /proc/vmstat counted at the last trim, so each trim's line says what was read
+        // back and swapped since.
+        let mut last_trim_counters: Option<VmCounters> = None;
         loop {
             let now_closed = router.wait_for_closed_app(closed, CHECK_INTERVAL);
             let app_closed = now_closed != closed;
@@ -532,7 +570,7 @@ mod daemon {
                     return;
                 }
             };
-            ask_for_zram_extra(&memory, &mut zram_extra_asked);
+            ask_for_zram_extra(&memory, &mut zram_extra);
             let tasks = router.tasks_in_use();
             reclaimer.host_short(router.host_memory_low());
             // Pressure stall information is optional in the kernel: unreadable counts as busy.
@@ -572,11 +610,21 @@ mod daemon {
                     }
                 );
             }
+            let vmstat = vmstat.ok();
+            let backoff_before = reclaimer.trim_backoff();
             if let Some(refaults) = vmstat
-                .ok()
-                .and_then(|text| file_refaults_kb(&text, page_kb))
+                .as_deref()
+                .and_then(|text| file_refaults_kb(text, page_kb))
             {
                 reclaimer.refaults(refaults);
+            }
+            if reclaimer.trim_backoff() > backoff_before {
+                say!(
+                    "the last trim is being read back ({tasks} tasks in use): the next trim waits \
+                     {} s after it, working set target {} MiB",
+                    reclaimer.trim_backoff().as_secs(),
+                    reclaimer.working_set_target_kb() / 1024
+                );
             }
             if reclaimer.learns_working_set() != learnt_before {
                 say!(
@@ -593,12 +641,30 @@ mod daemon {
             if let Some(reason) = reason {
                 let property = if reason == Reason::Gradual {
                     let size = reclaimer.trim_mib().to_string();
+                    let swappiness = reclaimer.trim_swappiness();
+                    let counters = vmstat
+                        .as_deref()
+                        .map(|text| VmCounters::parse(text, page_kb));
+                    let since = counters
+                        .map(|now| trim_counters_line(last_trim_counters.as_ref(), &now))
+                        .unwrap_or_else(|| "nothing read back is known".to_string());
+                    if counters.is_some() {
+                        last_trim_counters = counters;
+                    }
                     say!(
-                        "trimming {size} MiB of cold page cache (working set target {} MiB)",
-                        reclaimer.working_set_target_kb() / 1024
+                        "trimming {size} MiB of cold page cache (working set target {} MiB, \
+                         swappiness {swappiness}, wait between trims {} s); {since}",
+                        reclaimer.working_set_target_kb() / 1024,
+                        reclaimer.trim_backoff().as_secs()
                     );
                     if let Err(why) = set_property(TRIM_SIZE_PROPERTY, &size) {
                         say!("could not size the trim: {why}");
+                        continue;
+                    }
+                    if let Err(why) =
+                        set_property(TRIM_SWAPPINESS_PROPERTY, &swappiness.to_string())
+                    {
+                        say!("could not set the trim's swappiness: {why}");
                         continue;
                     }
                     TRIM_PROPERTY
@@ -617,9 +683,25 @@ mod daemon {
                     }
                     RECLAIM_PROPERTY
                 };
+                // A repeat in an idle stretch says what low it grew from, so the log shows how
+                // often the idle reclaim runs again and what each run costs.
+                let repeat = match (reason, reclaimer.idle_grew_from_kb()) {
+                    (Reason::Idle, Some(floor)) => format!(
+                        "; again in this idle stretch, {} MiB reclaimable grown from a low of {} \
+                         MiB, first found grown back {} s after the last reclaim; the next repeat \
+                         waits at least {} s",
+                        memory.reclaimable_kb() / 1024,
+                        floor / 1024,
+                        reclaimer
+                            .idle_regrown_after()
+                            .map_or(0, |after| after.as_secs()),
+                        reclaimer.idle_repeat_wait().as_secs()
+                    ),
+                    _ => String::new(),
+                };
                 say!(
                     "reclaiming the guest's memory ({reason:?}, {tasks} tasks in use): {} MiB \
-                     droppable and {} MiB anonymous of {} MiB in use",
+                     droppable and {} MiB anonymous of {} MiB in use{repeat}",
                     memory.droppable_kb() / 1024,
                     memory.anon_pages_kb / 1024,
                     memory.used_kb() / 1024
@@ -652,12 +734,27 @@ mod daemon {
         }
     }
 
-    /// Asks init for a second zram device when the guest has more memory than zram0 was sized
-    /// for at boot, and for none when it is back (see `zram_grow`). zram0 not yet on asks
-    /// nothing.
+    /// What the daemon has asked of the second zram device and said of the first.
     #[cfg(target_os = "android")]
-    fn ask_for_zram_extra(memory: &dsa_guest_channeld::reclaim::MemInfo, asked: &mut Option<u64>) {
-        use dsa_guest_channeld::zram_grow::{extra_mib, ZRAM_EXTRA_PROPERTY};
+    #[derive(Default)]
+    struct ZramExtra {
+        /// The second device's size last asked for, so init is asked only on a change.
+        asked: Option<u64>,
+        /// zram0's size has been logged.
+        told_zram0: bool,
+        /// When the daemon last looked whether zram1 is larger than needed and empty.
+        looked_at_zram1: Option<std::time::Instant>,
+    }
+
+    /// Asks init for a second zram device when the guest has more memory than zram0 was sized
+    /// for at boot, and for none when it is back (see `zram_grow`), and again, once a minute at
+    /// most, while zram1 is larger than needed and has emptied. zram0 not yet on asks nothing.
+    #[cfg(target_os = "android")]
+    fn ask_for_zram_extra(memory: &dsa_guest_channeld::reclaim::MemInfo, state: &mut ZramExtra) {
+        use dsa_guest_channeld::zram_grow::{
+            ask_again, extra_mib, stored_bytes, REASK_INTERVAL, ZRAM_EXTRA_PROPERTY, ZRAM_PERCENT,
+        };
+        const ZRAM1: &str = "/sys/devices/virtual/block/zram1";
         let zram0 = std::fs::read_to_string("/sys/devices/virtual/block/zram0/disksize")
             .ok()
             .and_then(|v| v.trim().parse::<u64>().ok())
@@ -665,8 +762,51 @@ mod daemon {
         if zram0 == 0 {
             return;
         }
+        if !state.told_zram0 {
+            state.told_zram0 = true;
+            say!(
+                "zram0 swaps {} MiB, {ZRAM_PERCENT}% of the memory it was sized for; the guest has {} MiB",
+                zram0 / (1024 * 1024),
+                memory.mem_total_kb / 1024
+            );
+        }
         let target = extra_mib(memory.mem_total_kb, zram0);
+        let asked = &mut state.asked;
         if *asked == Some(target) || (asked.is_none() && target == 0) {
+            // Nothing new to ask. The helper leaves a zram1 larger than the target while it holds
+            // pages; once it is empty it is asked again, and a daemon started again finds a zram1
+            // its last run asked for the same way.
+            if state
+                .looked_at_zram1
+                .is_some_and(|at| at.elapsed() < REASK_INTERVAL)
+            {
+                return;
+            }
+            state.looked_at_zram1 = Some(std::time::Instant::now());
+            let zram1_mib = std::fs::read_to_string(format!("{ZRAM1}/disksize"))
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .unwrap_or(0)
+                / (1024 * 1024);
+            if zram1_mib == 0 {
+                return;
+            }
+            let stored = std::fs::read_to_string(format!("{ZRAM1}/mm_stat"))
+                .map(|text| stored_bytes(&text))
+                .unwrap_or(u64::MAX);
+            if !ask_again(target, zram1_mib, stored) {
+                return;
+            }
+            say!(
+                "zram1 swaps {zram1_mib} MiB and holds {} KiB, where {target} MiB is needed: asking \
+                 init again to cut it back",
+                stored / 1024
+            );
+            if let Err(why) = set_property(ZRAM_EXTRA_PROPERTY, &target.to_string()) {
+                say!("could not ask init for zram1: {why}");
+            } else {
+                *asked = Some(target);
+            }
             return;
         }
         say!(
@@ -713,7 +853,9 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn page_out_after_wakes(router: Arc<Router>) {
         use dsa_guest_channeld::pageout::system::{page_out, samples, Refused};
-        use dsa_guest_channeld::pageout::{Pageout, PageoutPolicy, SAMPLE_INTERVAL};
+        use dsa_guest_channeld::pageout::{
+            is_resident_service, Pageout, PageoutPolicy, SAMPLE_INTERVAL,
+        };
         // The daemon runs ahead of apps so pointer events never wait; a pageout is work that
         // may wait for them, so this thread runs behind them.
         // SAFETY: setpriority on this thread's own id has no other effect.
@@ -743,17 +885,25 @@ mod daemon {
             };
             let windows = router.task_packages();
             for target in pageout.look(start.elapsed(), &looked, &windows) {
+                let resident = is_resident_service(&target.name);
                 match page_out(&target) {
                     Ok(done) => {
                         pageout.paged(target.pid, done.after.rss_anon_kb);
+                        // The wait grows while each wake reads back all a pageout took.
+                        let wait = pageout
+                            .interval(target.pid)
+                            .map_or(0, |wait| wait.as_secs());
                         say!(
                             "paged out {} (pid {}, oom_score_adj {}{}) after it woke: resident \
                              anonymous {} -> {} MiB, swapped out {} -> {} MiB, {} MiB asked for, \
-                             {} ranges refused, {} ms",
+                             {} ranges refused, {} ms; the next pageout of it waits at least \
+                             {wait} s",
                             target.name,
                             target.pid,
                             target.oom_score_adj,
-                            if target.google_play {
+                            if resident {
+                                ", resident service"
+                            } else if target.google_play {
                                 ", Google Play services"
                             } else {
                                 ""
@@ -768,6 +918,15 @@ mod daemon {
                         );
                     }
                     Err(Refused::Skipped(_)) => {}
+                    Err(Refused::NotAllowed(why)) if resident => {
+                        // The resident services run under other users and SELinux domains than
+                        // the apps: a refusal for one says nothing about the apps.
+                        say!(
+                            "WARNING: {why}. The resident services stay resident after they wake \
+                             until the next idle reclaim; apps are still paged out."
+                        );
+                        pageout.stop_resident_services();
+                    }
                     Err(Refused::NotAllowed(why)) => {
                         say!(
                             "WARNING: {why}. Apps woken in the background stay resident until \
@@ -793,7 +952,7 @@ mod daemon {
     fn write_back_cold_zram(router: Arc<Router>) {
         use dsa_guest_channeld::writeback::{
             day_of, has_backing_device, BackingStat, Day, Run, Writeback, WritebackPolicy,
-            ZramStat, CHECK_INTERVAL, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
+            ZramStat, CHECK_INTERVAL, PAGE_KB, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
             WRITEBACK_AGE_PROPERTY, WRITEBACK_DAY_PROPERTY, WRITEBACK_PAGES_PROPERTY,
             WRITEBACK_PROPERTY, ZRAM,
         };
@@ -836,19 +995,27 @@ mod daemon {
             &read_property(WRITEBACK_AGE_PROPERTY),
         );
         let start = std::time::Instant::now();
+        // What zram's backing device took this boot counts against the boot's budget, so a
+        // daemon started again within the boot does not get the budget twice. Earlier boots'
+        // files went with them, and what they wrote counts only against the day's cap.
+        let boot_written = backing_stat().map_or(0, |stat| stat.written_kb / PAGE_KB);
         let mut writeback = Writeback::new(
             policy,
             today(),
             Day::parse(&read_property(WRITEBACK_DAY_PROPERTY)),
-        );
+        )
+        .with_boot_written(boot_written);
         say!(
             "zram writes what no one has used for {} s to its backing file once no app has been \
-             in use for {} s, at most {} MiB a run and {} MiB a day ({} MiB left today)",
+             in use for {} s, at most {} MiB a run, {} MiB a boot and {} MiB a day ({} MiB left \
+             this boot, {} MiB left today)",
             policy.age.as_secs(),
             policy.idle_after.as_secs(),
-            policy.run_pages * 4 / 1024,
-            policy.daily_pages * 4 / 1024,
-            writeback.left_pages() * 4 / 1024
+            policy.run_pages * PAGE_KB / 1024,
+            policy.boot_pages * PAGE_KB / 1024,
+            policy.daily_pages * PAGE_KB / 1024,
+            writeback.boot_left_pages() * PAGE_KB / 1024,
+            writeback.day_left_pages() * PAGE_KB / 1024
         );
         loop {
             thread::sleep(CHECK_INTERVAL);
@@ -879,6 +1046,8 @@ mod daemon {
                 backing_before,
                 backing_after: backing_stat().unwrap_or(backing_before),
                 took: began.elapsed(),
+                boot_left_pages: 0,
+                boot_pages: policy.boot_pages,
                 left_pages: 0,
                 daily_pages: policy.daily_pages,
             };
@@ -889,7 +1058,8 @@ mod daemon {
             say!(
                 "{}",
                 Run {
-                    left_pages: writeback.left_pages(),
+                    boot_left_pages: writeback.boot_left_pages(),
+                    left_pages: writeback.day_left_pages(),
                     ..run
                 }
                 .line()

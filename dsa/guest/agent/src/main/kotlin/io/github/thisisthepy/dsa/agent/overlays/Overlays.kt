@@ -31,6 +31,11 @@ data class GuestWindow(
     val focusable: Boolean,
     /** Whether it takes pointer input (FLAG_NOT_TOUCHABLE is not set). */
     val touchable: Boolean,
+    /**
+     * What the window manager names the window by: the identity hash that starts its name in
+     * SurfaceFlinger's list. Empty when the list did not say.
+     */
+    val windowName: String = "",
 )
 
 /** Where the windows of the default display come from: SurfaceFlinger's list on a device. */
@@ -64,7 +69,44 @@ data class OverlaySnapshot(
     val focusable: Boolean,
     val touchable: Boolean,
     val densityDpi: Int,
+    /** The density its app draws this window at alone ([OverlayReporter.densityGiven]); 0 for none. */
+    val windowDensityDpi: Int = 0,
 )
+
+/**
+ * The density the host gave one overlay window, and the density its app draws it at, as far
+ * as the agent can tell.
+ *
+ * The framework converts the window's views in the app's process and lays the window out
+ * again; nothing reports back when that is done. The window's size on the display changes
+ * when it is (a window drawn at another density is that much larger or smaller), so the
+ * density the host asked for counts as drawn once the size differs from the one it had when
+ * the density it is drawn at was last known.
+ */
+private class WindowDensity(
+    /** The density the app draws the window at alone; 0 for its own. */
+    var drawnAt: Int,
+) {
+    /** The density asked for and not yet drawn at; null when none is waited for. */
+    var asked: Int? = null
+
+    /** The window's size when [drawnAt] was last known to hold. */
+    var sizeAtDrawn: Pair<Int, Int>? = null
+
+    fun given(densityDpi: Int) {
+        asked = if (densityDpi == drawnAt) null else densityDpi
+    }
+
+    /** The window is [size] now. */
+    fun settle(size: Pair<Int, Int>) {
+        val waited = asked
+        if (waited != null && sizeAtDrawn != null && size != sizeAtDrawn) {
+            drawnAt = waited
+            asked = null
+        }
+        if (asked == null) sizeAtDrawn = size
+    }
+}
 
 /** Which windows are app overlay windows. */
 object OverlayRules {
@@ -122,6 +164,12 @@ object OverlayRules {
 class OverlayReporter(
     private val ownPackage: String,
     private val apps: AppInfoSource = AppInfoSource.NONE,
+    /**
+     * The density the framework says it gave a window ([GuestWindow.windowName]) before the
+     * agent started, which its app may still draw it at; 0 for none. Asked only of the overlays
+     * of the first list of windows.
+     */
+    private val givenDensity: (String) -> Int = { 0 },
     /** Sends one control frame; false when it could not be sent. */
     private val send: (ByteArray) -> Boolean,
 ) {
@@ -132,6 +180,24 @@ class OverlayReporter(
     private val labels = HashMap<String, String>()
     private var stale = false
     private var display: Size? = null
+    private val names = HashMap<Int, String>()
+    private val densities = HashMap<Int, WindowDensity>()
+    private var listed = false
+
+    /**
+     * What the window manager names the overlay's window by, while it is on the screen; null
+     * for an overlay that is not, or a window the list did not name.
+     */
+    fun windowName(overlayId: Int): String? = names[overlayId]?.takeIf { it.isNotEmpty() }
+
+    /**
+     * The framework was asked to draw the overlay's window alone at [densityDpi] (0: at its
+     * app's own). The host is told the window has it once its app has laid it out again
+     * ([OverlayWindow.density_dpi]).
+     */
+    fun densityGiven(overlayId: Int, densityDpi: Int) {
+        densities[overlayId]?.given(maxOf(0, densityDpi))
+    }
 
     /** The overlays the host was told about and not yet told are gone. */
     val reported: Set<Int> get() = told.keys.toSet()
@@ -165,6 +231,21 @@ class OverlayReporter(
         for (overlayId in told.keys.toList()) {
             if (overlayId !in current && send(Messages.taskRemoved(overlayId))) told.remove(overlayId)
         }
+        // A window keeps the density it was given while it lives, hidden or not.
+        val living = ids.values.toSet()
+        densities.keys.retainAll(living)
+        names.keys.retainAll(current.keys)
+        // The windows of the first list were there before the agent: the framework may have
+        // given one a density the agent no longer knows of.
+        val before = !listed && windows.isNotEmpty()
+        if (windows.isNotEmpty()) listed = true
+        for ((overlayId, window) in current) {
+            names[overlayId] = window.windowName
+            val density = densities.getOrPut(overlayId) {
+                WindowDensity(if (before && window.windowName.isNotEmpty()) maxOf(0, givenDensity(window.windowName)) else 0)
+            }
+            density.settle(window.surface.right - window.surface.left to window.surface.bottom - window.surface.top)
+        }
         var allSent = true
         for ((overlayId, window) in current) {
             if (!announce(window.packageName)) {
@@ -180,6 +261,7 @@ class OverlayReporter(
                 focusable = window.focusable,
                 touchable = window.touchable,
                 densityDpi = maxOf(0, densityDpi),
+                windowDensityDpi = densities[overlayId]?.drawnAt ?: 0,
             )
             if (!stale && told[overlayId] == snapshot) continue
             if (send(overlayUpdated(snapshot, display))) told[overlayId] = snapshot else allSent = false
@@ -254,7 +336,8 @@ class OverlayReporter(
                     OverlayWindow.newBuilder()
                         .setWindowType(overlay.type)
                         .setFocusable(overlay.focusable)
-                        .setTouchable(overlay.touchable),
+                        .setTouchable(overlay.touchable)
+                        .setDensityDpi(overlay.windowDensityDpi),
                 )
             if (display != null && display.width > 0 && display.height > 0) {
                 update.setMaxWidth(display.width).setMaxHeight(display.height)

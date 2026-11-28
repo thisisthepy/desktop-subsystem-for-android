@@ -1094,6 +1094,15 @@ Microsoft나 Google과 제휴하거나 그들의 보증 또는 후원을 받지 
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0}을(를) 바탕 화면에서 제거했습니다.</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>위젯 {0}개</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>위젯 1개</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>{0}개 더 보기</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK 설치 관리자</value>
   </data>
@@ -2639,7 +2648,7 @@ Android가 설치를 거부합니다.</value>
     <value>대체 스토어</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 스토어는 앱 목록에서 제거합니다.</value>
+    <value>DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 설치한 스토어는 다른 앱처럼 앱 목록에 보이며, 지울 때도 앱 목록에서 지웁니다.</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>설치되지 않음</value>
@@ -2661,5 +2670,39 @@ Android가 설치를 거부합니다.</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>열기</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>게임</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>게임</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>새로 고침</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>DSA에서 게임을 더 편하게 하는 설정입니다.</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>게임 설정을 읽거나 바꾸지 못했습니다</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>게임 편의성</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>게임 포커스 유지</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>아래에서 켠 앱은 다른 창을 눌러도 계속 실행되어, 포커스를 잃으면 멈추는 게임도 계속 돕니다.
+키 입력과 글자 입력은 지금처럼 사용 중인 창에만 갑니다.</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>전체 선택</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>아직 Android에 설치된 앱이 없습니다.</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>게임 · {0}</value>
   </data>
 </root>

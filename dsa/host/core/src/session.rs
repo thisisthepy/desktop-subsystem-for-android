@@ -170,7 +170,8 @@ use crate::tasks::{
     TaskTable, TaskWatch,
 };
 use crate::widgets::{
-    self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
+    self, AppIcon, Placement, Widget, WidgetEvent, WidgetFrame, WidgetGallery, WidgetPreview,
+    WidgetProvider, WidgetSize,
 };
 
 mod dns_port;
@@ -671,8 +672,8 @@ enum Command {
     HostMemoryLow(bool),
     /// Which tasks have their window shown changed.
     TasksShown(Vec<i32>),
-    /// Which apps start below the title bar changed.
-    CaptionCompat(Vec<String>),
+    /// Which apps start below the title bar, or keep their focus, changed.
+    CaptionCompat(control::CaptionCompat),
     /// The host's system settings or one of its game controllers changed.
     System(SystemInput),
     /// Freeze the guest after this long in Doze, or never.
@@ -709,6 +710,8 @@ struct ResizeOutcome {
     /// The guest's memory when it was asked for, for the log.
     available_mb: u64,
     stall_percent: f64,
+    /// Why a growth was asked for, for the log; `None` for a shrink.
+    reason: Option<String>,
     result: Result<(), String>,
 }
 
@@ -856,6 +859,9 @@ struct Shared {
     android_files_token: Mutex<Option<String>>,
     /// Says the device name the guest's agent is given each time it connects.
     device_name: Mutex<Option<DeviceNameSource>>,
+    /// Reads the monitors connected now, each time a task's window opens, so the guest's
+    /// display grows when they need more of it.
+    display_monitors: Mutex<Option<crate::guest_display::MonitorSource>>,
     /// The user's root elevation settings, and whether the running boot started with the
     /// feature on.
     root_config: Mutex<RootElevationNow>,
@@ -945,7 +951,10 @@ pub enum BackgroundRequest {
 
 /// What the agent answers about widgets.
 enum WidgetAnswer {
-    Providers(Vec<WidgetProvider>, bool),
+    /// Part of the gallery: its widgets, the icons of their apps, and whether it is the last.
+    Providers(Vec<WidgetProvider>, Vec<AppIcon>, bool),
+    /// Part of the previews asked for, and whether it is the last.
+    Previews(Vec<WidgetPreview>, bool),
     Added(Result<i32, String>),
     /// How a widget's setup, opened again, ended: Ok when the user finished it.
     Reconfigured(Result<(), String>),
@@ -1163,6 +1172,15 @@ impl Shared {
     }
 
     /// Records a task message and hands it to the watchers, unless it changes nothing.
+    /// Whether the guest has reported the task `task_id` and not ended it.
+    fn has_task(&self, task_id: i32) -> bool {
+        self.tasks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .table
+            .has_task(task_id)
+    }
+
     fn publish_task(&self, event: TaskEvent) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
         if !hub.table.apply(&event) {
@@ -1622,6 +1640,7 @@ impl Session {
             share_server: Mutex::new(None),
             android_files_token: Mutex::new(None),
             device_name: Mutex::new(None),
+            display_monitors: Mutex::new(None),
             root_config: Mutex::new(RootElevationNow::default()),
             root_approval: Mutex::new(None),
             prompt_language: Mutex::new(String::new()),
@@ -1653,6 +1672,7 @@ impl Session {
             battery_saver: false,
             refresh_sent: None,
             refresh_pending: false,
+            display_asked: None,
             host_memory_low: false,
             host_memory_pending: false,
             tasks_shown: None,
@@ -2658,12 +2678,20 @@ impl Session {
             .map_err(|_| SessionError::Gone)
     }
 
-    /// Says which apps start below the title bar, as the user chose for each. The session keeps
-    /// the latest word in every state; the guest is told now if it is up, and each time it
+    /// Says which apps start below the title bar, and which keep their focus while another
+    /// app's window has it (`keep_focus`), as the user chose for each. The session keeps the
+    /// latest word in every state; the guest is told now if it is up, and each time it
     /// connects, so a task that starts has its insets settled before its first screen.
-    pub fn caption_compat(&self, below_title_bar: Vec<String>) -> Result<(), SessionError> {
+    pub fn caption_compat(
+        &self,
+        below_title_bar: Vec<String>,
+        keep_focus: Vec<String>,
+    ) -> Result<(), SessionError> {
         self.commands
-            .send(Command::CaptionCompat(below_title_bar))
+            .send(Command::CaptionCompat(control::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            }))
             .map_err(|_| SessionError::Gone)
     }
 
@@ -2757,6 +2785,18 @@ impl Session {
         *self
             .shared
             .device_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source);
+    }
+
+    /// Reads the monitors connected with `source` each time a task's window opens. When they
+    /// need a larger guest display than the guest has ([`crate::guest_display::grown_for_window`]),
+    /// the guest is told to grow it, without restarting Android. Without a source the display
+    /// keeps the size it started with.
+    pub fn set_monitor_source(&self, source: crate::guest_display::MonitorSource) {
+        *self
+            .shared
+            .display_monitors
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
@@ -3407,9 +3447,10 @@ impl Session {
             TaskRequest::WindowsShown { shown } => return self.windows_shown(shown),
             TaskRequest::TasksShown { task_ids } => return self.tasks_shown(task_ids),
             TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
-            TaskRequest::CaptionCompat { below_title_bar } => {
-                return self.caption_compat(below_title_bar)
-            }
+            TaskRequest::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            } => return self.caption_compat(below_title_bar, keep_focus),
             TaskRequest::Launch { package_name } => Body::LaunchApp(control::LaunchApp {
                 package_name,
                 new_window: false,
@@ -3454,12 +3495,21 @@ impl Session {
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
+                forced,
             } => Body::SetTaskDensity(control::SetTaskDensity {
                 task_id,
                 density_dpi,
                 // The task takes the density as Android gives it; the agent is never asked to
                 // recreate its activity on top of that.
                 recreate: false,
+                forced,
+            }),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            } => Body::SetOverlayDensity(control::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
             }),
             TaskRequest::SetCaption {
                 task_id,
@@ -3474,6 +3524,9 @@ impl Session {
             }),
             TaskRequest::SetFullScreen { task_id, in_window } => {
                 Body::SetTaskFullScreen(control::SetTaskFullScreen { task_id, in_window })
+            }
+            TaskRequest::RequestFrame { task_id } => {
+                Body::RequestTaskFrame(control::RequestTaskFrame { task_id })
             }
         };
         self.send(dsa_protocol::encode(&control::Envelope {
@@ -3894,19 +3947,37 @@ impl Session {
     /// The widgets the apps in the guest offer, in label order, asking the agent and waiting
     /// up to `timeout` for its whole answer. Needs an active session.
     pub fn widget_providers(&self, timeout: Duration) -> Result<Vec<WidgetProvider>, SessionError> {
+        self.widget_gallery(false, timeout)
+            .map(|gallery| gallery.providers)
+    }
+
+    /// The widgets the apps in the guest offer, in label order, as [`widget_providers`]
+    /// gives them, and with `lazy_previews` without their previews and with each app's icon
+    /// once instead, for a gallery that groups them by app and asks for the previews of the
+    /// widgets it shows ([`widget_previews`]). Needs an active session.
+    ///
+    /// [`widget_providers`]: Self::widget_providers
+    /// [`widget_previews`]: Self::widget_previews
+    pub fn widget_gallery(
+        &self,
+        lazy_previews: bool,
+        timeout: Duration,
+    ) -> Result<WidgetGallery, SessionError> {
         let (request_id, answers) = self.widget_request();
         let result = (|| {
             self.send(dsa_protocol::encode(&control::Envelope {
                 body: Some(Body::ListWidgetProviders(control::ListWidgetProviders {
                     request_id,
+                    lazy_previews,
                 })),
             }))?;
             let deadline = Instant::now() + timeout;
             let mut providers: Vec<WidgetProvider> = Vec::new();
+            let mut app_icons: Vec<AppIcon> = Vec::new();
             loop {
                 let left = deadline.saturating_duration_since(Instant::now());
                 match answers.recv_timeout(left) {
-                    Ok(WidgetAnswer::Providers(part, complete)) => {
+                    Ok(WidgetAnswer::Providers(part, icons, complete)) => {
                         for provider in part {
                             if providers.len() >= widgets::MAX_PROVIDERS {
                                 break;
@@ -3915,11 +3986,24 @@ impl Session {
                                 providers.push(provider);
                             }
                         }
+                        for icon in icons {
+                            if app_icons.len() >= widgets::MAX_PROVIDERS {
+                                break;
+                            }
+                            if !app_icons
+                                .iter()
+                                .any(|known| known.package_name == icon.package_name)
+                            {
+                                app_icons.push(icon);
+                            }
+                        }
                         if complete {
                             break;
                         }
                     }
-                    Ok(WidgetAnswer::Added(_)) | Ok(WidgetAnswer::Reconfigured(_)) => {}
+                    Ok(WidgetAnswer::Added(_))
+                    | Ok(WidgetAnswer::Previews(..))
+                    | Ok(WidgetAnswer::Reconfigured(_)) => {}
                     Err(_) => {
                         return Err(SessionError::WidgetRefused(format!(
                             "Android did not list its widgets within {} seconds",
@@ -3934,7 +4018,61 @@ impl Session {
                     .cmp(&b.label.to_lowercase())
                     .then_with(|| a.provider.cmp(&b.provider))
             });
-            Ok(providers)
+            Ok(WidgetGallery {
+                providers,
+                app_icons,
+            })
+        })();
+        self.forget_widget_request(request_id);
+        result
+    }
+
+    /// The previews of the widgets `providers` names, as their apps give them best (the
+    /// layout an app gives for a preview, drawn by the agent; else its preview image; else its
+    /// icon), in the order asked and each once, asking the agent and waiting up to `timeout`
+    /// for its whole answer. Only [`widgets::MAX_PREVIEWS_ASKED`] are asked for; a widget not
+    /// on offer has no entry. Needs an active session.
+    pub fn widget_previews(
+        &self,
+        providers: &[String],
+        timeout: Duration,
+    ) -> Result<Vec<WidgetPreview>, SessionError> {
+        let asked = widgets::previews_to_ask(providers);
+        if asked.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (request_id, answers) = self.widget_request();
+        let result = (|| {
+            self.send(dsa_protocol::encode(&control::Envelope {
+                body: Some(Body::GetWidgetPreviews(control::GetWidgetPreviews {
+                    request_id,
+                    providers: asked.clone(),
+                })),
+            }))?;
+            let deadline = Instant::now() + timeout;
+            let mut drawn: Vec<WidgetPreview> = Vec::new();
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match answers.recv_timeout(left) {
+                    Ok(WidgetAnswer::Previews(part, complete)) => {
+                        let room = widgets::MAX_PREVIEWS_ASKED.saturating_sub(drawn.len());
+                        drawn.extend(part.into_iter().take(room));
+                        if complete {
+                            break;
+                        }
+                    }
+                    Ok(WidgetAnswer::Providers(..))
+                    | Ok(WidgetAnswer::Added(_))
+                    | Ok(WidgetAnswer::Reconfigured(_)) => {}
+                    Err(_) => {
+                        return Err(SessionError::WidgetRefused(format!(
+                            "Android did not draw the widgets' previews within {} seconds",
+                            timeout.as_secs()
+                        )))
+                    }
+                }
+            }
+            Ok(widgets::previews_in_asked_order(&asked, drawn))
         })();
         self.forget_widget_request(request_id);
         result
@@ -3970,7 +4108,9 @@ impl Session {
                     Ok(WidgetAnswer::Added(Err(why))) => {
                         return Err(SessionError::WidgetRefused(why))
                     }
-                    Ok(WidgetAnswer::Providers(..)) | Ok(WidgetAnswer::Reconfigured(_)) => {}
+                    Ok(WidgetAnswer::Providers(..))
+                    | Ok(WidgetAnswer::Previews(..))
+                    | Ok(WidgetAnswer::Reconfigured(_)) => {}
                     Err(_) => {
                         return Err(SessionError::WidgetRefused(format!(
                             "Android did not place the widget within {} seconds",
@@ -4038,7 +4178,9 @@ impl Session {
                     Ok(WidgetAnswer::Reconfigured(Err(why))) => {
                         return Err(SessionError::WidgetRefused(why))
                     }
-                    Ok(WidgetAnswer::Providers(..)) | Ok(WidgetAnswer::Added(_)) => {}
+                    Ok(WidgetAnswer::Providers(..))
+                    | Ok(WidgetAnswer::Previews(..))
+                    | Ok(WidgetAnswer::Added(_)) => {}
                     Err(_) => {
                         return Err(SessionError::WidgetRefused(format!(
                             "the widget's settings did not close within {} seconds",
@@ -4545,6 +4687,8 @@ struct Worker {
     refresh_sent: Option<u32>,
     /// Set when the rate changed while the guest was frozen, so it is told after the thaw.
     refresh_pending: bool,
+    /// The display size the guest was last asked to grow to, for the log.
+    display_asked: Option<(u32, u32)>,
     /// Whether the host is short of memory, as last recorded.
     host_memory_low: bool,
     /// Set when that changed while the guest was frozen, so it is told after the thaw.
@@ -4553,9 +4697,9 @@ struct Worker {
     tasks_shown: Option<Vec<i32>>,
     /// Set when they changed while the guest was frozen, so it is told after the thaw.
     tasks_shown_pending: bool,
-    /// The apps that start below the title bar, as last recorded, once the window manager
-    /// has said.
-    caption_compat: Option<Vec<String>>,
+    /// The apps that start below the title bar and those that keep their focus, as last
+    /// recorded, once the window manager has said.
+    caption_compat: Option<control::CaptionCompat>,
     /// Set when they changed while the guest was frozen, so it is told after the thaw.
     caption_compat_pending: bool,
     /// The host's system settings, as last recorded.
@@ -5309,9 +5453,32 @@ impl Worker {
                 Err(why) => eprintln!("widgets: dropped one from the gallery: {why}"),
             }
         }
+        let mut icons = Vec::new();
+        for icon in list.app_icons.into_iter().take(widgets::MAX_PROVIDERS) {
+            match widgets::checked_app_icon(icon) {
+                Ok(icon) => icons.push(icon),
+                Err(why) => eprintln!("widgets: dropped an app's icon from the gallery: {why}"),
+            }
+        }
         self.shared.widget_answer(
             list.request_id,
-            WidgetAnswer::Providers(providers, list.complete),
+            WidgetAnswer::Providers(providers, icons, list.complete),
+        );
+    }
+
+    /// Hands part of the previews the agent drew to whoever asked for them. Entries that do
+    /// not pass the checks are dropped and logged.
+    fn guest_widget_previews(&mut self, list: control::WidgetPreviews) {
+        let mut previews = Vec::new();
+        for preview in list.previews.into_iter().take(widgets::MAX_PREVIEWS_ASKED) {
+            match widgets::checked_preview(preview) {
+                Ok(preview) => previews.push(preview),
+                Err(why) => eprintln!("widgets: dropped a preview: {why}"),
+            }
+        }
+        self.shared.widget_answer(
+            list.request_id,
+            WidgetAnswer::Previews(previews, list.complete),
         );
     }
 
@@ -5918,6 +6085,38 @@ impl Worker {
         }
     }
 
+    /// A task's window opens while the guest's display is `display` (as the agent reported it
+    /// with the task; 0 by 0 when unknown). The monitors connected now are read, and when they
+    /// need a larger display ([`crate::guest_display::grown_for_window`]) the guest is told to
+    /// grow it at once. Its hwcomposer only ever grows the display, and the agent reports every
+    /// task again at the new size, which is the windows' new limit.
+    fn window_opens(&mut self, display: (u32, u32)) {
+        let source = self
+            .shared
+            .display_monitors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(monitors) = source.and_then(|read| read()) else {
+            return;
+        };
+        let current = (display.0 > 0 && display.1 > 0).then_some(display);
+        let Some((width, height)) = crate::guest_display::grown_for_window(current, &monitors)
+        else {
+            return;
+        };
+        if self.display_asked != Some((width, height)) {
+            eprintln!(
+                "display: a window opens and the {} monitor(s) connected need a {width}x{height} \
+                 display; the guest's is {}: it grows without a restart",
+                monitors.len(),
+                current.map_or("of unknown size".to_string(), |(w, h)| format!("{w}x{h}")),
+            );
+        }
+        self.display_asked = Some((width, height));
+        self.send_body(Body::DisplaySize(control::DisplaySize { width, height }));
+    }
+
     /// Tells the guest its display refresh rate, if it changed since it was last told and the
     /// monitors are known. Until they are, the guest keeps the rate it booted with.
     fn update_refresh(&mut self) {
@@ -6020,11 +6219,11 @@ impl Worker {
     }
 
     /// Records which apps start below the title bar, and tells a guest that is up.
-    fn set_caption_compat(&mut self, below_title_bar: Vec<String>) {
-        if self.caption_compat.as_ref() == Some(&below_title_bar) {
+    fn set_caption_compat(&mut self, compat: control::CaptionCompat) {
+        if self.caption_compat.as_ref() == Some(&compat) {
             return;
         }
-        self.caption_compat = Some(below_title_bar);
+        self.caption_compat = Some(compat);
         match self.state() {
             SessionState::Starting
             | SessionState::Stalled
@@ -6035,12 +6234,11 @@ impl Worker {
         }
     }
 
-    /// Tells the guest which apps start below the title bar, once the window manager has said.
+    /// Tells the guest which apps start below the title bar and which keep their focus, once
+    /// the window manager has said.
     fn send_caption_compat(&mut self) {
-        if let Some(below_title_bar) = self.caption_compat.clone() {
-            self.send_body(Body::CaptionCompat(control::CaptionCompat {
-                below_title_bar,
-            }));
+        if let Some(compat) = self.caption_compat.clone() {
+            self.send_body(Body::CaptionCompat(compat));
         }
     }
 
@@ -6137,14 +6335,24 @@ impl Worker {
                 self.launcher.memory_growth_failed(&why);
                 return;
             }
+            Some(GrowthAction::Wait(line)) => {
+                eprintln!("{line}");
+                return;
+            }
             Some(GrowthAction::Resize(mb)) => mb,
         };
+        // A growth says why it was asked for; a shrink needs no reason.
+        let reason = (mb > before)
+            .then(|| growth.last_reason())
+            .flatten()
+            .map(|reason| reason.to_string());
         let outcome = |result| ResizeOutcome {
             generation: 0,
             before,
             mb,
             available_mb: pressure.mem_available_kb / 1024,
             stall_percent: pressure.stall_percent,
+            reason: reason.clone(),
             result,
         };
         let generation = self.memory_generation;
@@ -6185,15 +6393,22 @@ impl Worker {
             return;
         };
         let ResizeOutcome {
-            before, mb, result, ..
+            before,
+            mb,
+            result,
+            reason,
+            ..
         } = outcome;
         match result {
             Ok(()) => {
                 growth.applied();
                 self.shared.set_vm_memory_mb(Some(mb));
+                // The growth's reason after a colon, so a line that starts as before still
+                // reads as before.
+                let reason = reason.map(|why| format!(": {why}")).unwrap_or_default();
                 eprintln!(
                     "memory: Android's memory {} from {before} to {mb} MiB ({} MiB available, \
-                     {:.1}% stalled)",
+                     {:.1}% stalled){reason}",
                     if mb > before { "grows" } else { "shrinks" },
                     outcome.available_mb,
                     outcome.stall_percent
@@ -6899,6 +7114,11 @@ impl Worker {
                 );
             }
             Some(Body::TaskUpdated(update)) => {
+                // A task the host has not heard of gets a window now; an overlay has no window
+                // the user sizes.
+                if update.overlay.is_none() && !self.shared.has_task(update.task_id) {
+                    self.window_opens((update.max_width, update.max_height));
+                }
                 let bounds = update.bounds.unwrap_or_default();
                 let orientation = match update.orientation() {
                     control::TaskOrientation::Portrait => TaskOrientation::Portrait,
@@ -6949,10 +7169,12 @@ impl Worker {
                         .collect(),
                     can_go_back: update.can_go_back,
                     handles_density_change: update.handles_density_change,
+                    forced_density_available: update.forced_density_available,
                     overlay: update.overlay.map(|overlay| OverlayWindow {
                         window_type: overlay.window_type,
                         focusable: overlay.focusable,
                         touchable: overlay.touchable,
+                        density_dpi: overlay.density_dpi,
                     }),
                     below_title_bar: update.below_title_bar,
                 }));
@@ -6994,6 +7216,7 @@ impl Worker {
                     native_libraries: NativeLibraries::from_control(&app.native_libraries),
                     primary_abi: native_abi::checked_abi(&app.primary_abi),
                     shared_user_id: app.shared_user_id,
+                    game: app.game,
                     ..Default::default()
                 });
             }
@@ -7127,6 +7350,7 @@ impl Worker {
                 InstallEvent::Done(InstallOutcome::from_control(&result)),
             ),
             Some(Body::WidgetProviders(list)) => self.guest_widget_providers(list),
+            Some(Body::WidgetPreviews(list)) => self.guest_widget_previews(list),
             Some(Body::WidgetAdded(added)) => self.shared.widget_answer(
                 added.request_id,
                 WidgetAnswer::Added(if added.widget_id > 0 {
@@ -7312,12 +7536,15 @@ impl Worker {
             | Some(Body::TasksShown(_))
             | Some(Body::PowerState(_))
             | Some(Body::DisplayRefresh(_))
+            | Some(Body::DisplaySize(_))
             | Some(Body::HostMemory(_))
             | Some(Body::HostSleep(_))
             | Some(Body::CloseTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
+            | Some(Body::RequestTaskFrame(_))
             | Some(Body::SetTaskDensity(_))
+            | Some(Body::SetOverlayDensity(_))
             | Some(Body::LaunchPlacement(_))
             | Some(Body::CaptionCompat(_))
             | Some(Body::SetTaskCaption(_))
@@ -7366,6 +7593,7 @@ impl Worker {
             | Some(Body::LaunchShortcut(_))
             | Some(Body::PinShortcutAnswer(_))
             | Some(Body::ListWidgetProviders(_))
+            | Some(Body::GetWidgetPreviews(_))
             | Some(Body::AddWidget(_))
             | Some(Body::RemoveWidget(_))
             | Some(Body::ReconfigureWidget(_))

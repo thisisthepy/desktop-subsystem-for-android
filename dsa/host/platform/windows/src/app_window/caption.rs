@@ -340,6 +340,126 @@ unsafe fn caption_font(dc: HDC, dpi: u32) -> HFONT {
     std::ptr::null_mut()
 }
 
+/// Draws `text` white on transparent into the bitmap selected into `dc` (`size` pixels),
+/// in the first of [`TITLE_FACES`] installed, `px` pixels to the em, vertically centred and
+/// cut with an ellipsis: DirectWrite lays it out and Direct2D draws it with grayscale
+/// antialiasing at the bitmap's own pixels. Returns false when it could not, and GDI draws
+/// it instead.
+///
+/// GDI's grayscale text follows each font's smoothing table, which turns smoothing off at
+/// the small sizes a caption has at 100% to 150%: the name came out in hard, stair-stepped
+/// pixels on a monitor of those scales, while at 200% it was smooth. Direct2D smooths it at
+/// every size, as Windows' own title bars do.
+unsafe fn smooth_title(dc: HDC, text: &[u16], size: (u32, u32), px: u32) -> bool {
+    use windows::core::BOOL;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::RECT as WinRect;
+    use windows::Win32::Graphics::Direct2D::Common::{
+        D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+    };
+    use windows::Win32::Graphics::Direct2D::{
+        D2D1CreateFactory, ID2D1Factory, D2D1_DRAW_TEXT_OPTIONS_NONE,
+        D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+        D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1_RENDER_TARGET_USAGE_NONE, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+    };
+    use windows::Win32::Graphics::DirectWrite::{
+        DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection, DWRITE_FACTORY_TYPE_SHARED,
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TRIMMING,
+        DWRITE_TRIMMING_GRANULARITY_CHARACTER, DWRITE_WORD_WRAPPING_NO_WRAP,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+    use windows::Win32::Graphics::Gdi::HDC as WinHdc;
+
+    if text.is_empty() || px == 0 {
+        return false;
+    }
+    let draw = || -> windows::core::Result<()> {
+        let write: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+        let mut fonts: Option<IDWriteFontCollection> = None;
+        write.GetSystemFontCollection(&mut fonts, false)?;
+        let fonts = fonts.ok_or_else(windows::core::Error::empty)?;
+        // The first face installed; DirectWrite would silently put another in its place.
+        let face = TITLE_FACES
+            .iter()
+            .map(|face| face.encode_utf16().chain([0]).collect::<Vec<u16>>())
+            .find(|face| {
+                let (mut index, mut exists) = (0u32, BOOL(0));
+                fonts
+                    .FindFamilyName(PCWSTR(face.as_ptr()), &mut index, &mut exists)
+                    .is_ok()
+                    && exists.as_bool()
+            })
+            .ok_or_else(windows::core::Error::empty)?;
+        let locale: Vec<u16> = "en-us".encode_utf16().chain([0]).collect();
+        let format = write.CreateTextFormat(
+            PCWSTR(face.as_ptr()),
+            None,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            px as f32,
+            PCWSTR(locale.as_ptr()),
+        )?;
+        format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+        format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+        let ellipsis = write.CreateEllipsisTrimmingSign(&format)?;
+        let trimming = DWRITE_TRIMMING {
+            granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+            delimiter: 0,
+            delimiterCount: 0,
+        };
+        format.SetTrimming(&trimming, &ellipsis)?;
+        let layout = write.CreateTextLayout(text, &format, size.0 as f32, size.1 as f32)?;
+        let factory: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+        // 96 DPI: one unit is one of the bitmap's pixels, which are already the monitor's.
+        let properties = D2D1_RENDER_TARGET_PROPERTIES {
+            r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            usage: D2D1_RENDER_TARGET_USAGE_NONE,
+            minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+        };
+        let target = factory.CreateDCRenderTarget(&properties)?;
+        let bounds = WinRect {
+            left: 0,
+            top: 0,
+            right: size.0 as i32,
+            bottom: size.1 as i32,
+        };
+        target.BindDC(WinHdc(dc), &bounds)?;
+        let white = D2D1_COLOR_F {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        };
+        let brush = target.CreateSolidColorBrush(&white, None)?;
+        target.BeginDraw();
+        target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        target.Clear(Some(&D2D1_COLOR_F {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.0,
+        }));
+        target.DrawTextLayout(
+            windows_numerics::Vector2 { X: 0.0, Y: 0.0 },
+            &layout,
+            &brush,
+            D2D1_DRAW_TEXT_OPTIONS_NONE,
+        );
+        target.EndDraw(None, None)
+    };
+    draw().is_ok()
+}
+
 /// `title` laid out in the caption font at `dpi` in a box of `size` pixels, vertically
 /// centred and cut with an ellipsis where it would run past the box, as one coverage byte
 /// per pixel. `None` when there is nothing to draw or GDI cannot draw it.
@@ -396,13 +516,15 @@ unsafe fn title_mask(title: &str, size: (u32, u32), dpi: u32) -> Option<Vec<u8>>
         right: width,
         bottom: height,
     };
-    DrawTextW(
-        dc,
-        text.as_mut_ptr(),
-        text.len() as i32,
-        &mut rect,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-    );
+    if !smooth_title(dc, &text, (size.0, size.1), scaled(TITLE_TEXT_AT_100, dpi)) {
+        DrawTextW(
+            dc,
+            text.as_mut_ptr(),
+            text.len() as i32,
+            &mut rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+        );
+    }
     GdiFlush();
     let pixels = std::slice::from_raw_parts(bits as *const u8, (width * height * 4) as usize);
     let mask = pixels
@@ -1201,6 +1323,29 @@ impl CaptionWindow {
 mod tests {
     use super::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::WS_OVERLAPPEDWINDOW;
+
+    #[test]
+    fn fr22_the_title_text_is_smooth_at_every_monitor_scale() {
+        // The owner's monitors: 100%, 125% (120 dpi), 150% and 200% (192 dpi).
+        for dpi in [96u32, 120, 144, 192] {
+            let layout =
+                CaptionLayout::new(1200, title_bar_height(WS_OVERLAPPEDWINDOW, 0, dpi), dpi, 0);
+            let (_, _, width, height) = layout.title_rect().expect("a title box");
+            // SAFETY: GDI and Direct2D calls on objects the function makes and frees.
+            let mask = unsafe { title_mask("Settings Files Calendar", (width, height), dpi) }
+                .expect("the name is drawn");
+            // Laid out at the monitor's own pixels, one coverage byte each.
+            assert_eq!(mask.len(), (width * height) as usize, "at {dpi} dpi");
+            let inked = mask.iter().filter(|&&c| c != 0).count();
+            let partial = mask.iter().filter(|&&c| c != 0 && c != 255).count();
+            assert!(inked > 0, "nothing drawn at {dpi} dpi");
+            // Antialiased edges, not the hard pixels of unsmoothed text.
+            assert!(
+                partial * 3 >= inked,
+                "at {dpi} dpi only {partial} of {inked} inked pixels are partly covered"
+            );
+        }
+    }
 
     #[test]
     fn fr22_a_hover_on_the_maximise_button_reaches_windows_for_snap_layouts() {

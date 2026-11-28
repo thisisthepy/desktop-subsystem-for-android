@@ -1,0 +1,142 @@
+Subject: HWUI: let go of an idle window's GPU caches
+
+DSA shows each app's task in its own desktop window, and a window the user can see but does
+not touch stays on screen for minutes or hours. Android trims an app's GPU caches only once its
+UI is hidden (TRIM_MEMORY_UI_HIDDEN, or all its windows stopped), so a visible app that draws
+nothing keeps everything its last frames left in Skia's cache: scratch textures, textures kept
+by key (bitmaps, paths, shadows) and the glyph atlases, whose page is 8 MiB on a 2880x2880
+display. The time-based cleanup HWUI runs after each frame lets go only of scratch resources,
+and only of those the last frame did not use, and only when the render thread wakes, which an
+idle window's does not. A DSA build measured 56 MiB of Vulkan memory held by the Settings app
+a minute after it was last touched, of which an estimated 25 to 40 MiB could be made again.
+
+Once the render thread has drawn no frame for 30 seconds, CacheManager now frees Skia's GPU
+resources that nothing holds (GrDirectContext::freeGpuResources: unlocked scratch and keyed
+resources and the atlases) and submits once more, waiting on it, so that ANGLE and Vulkan
+drivers free what they deferred until they see the GPU finish the work that last used it. A
+window that draws nothing submits nothing, so without that the freed memory would stay. It
+logs one line each time:
+
+  No frame for N s: let go of K KiB of GPU caches (R resources); L KiB remain
+
+Thirty seconds is long enough that a window in use never waits for its caches again (reading,
+typing pauses, a menu left open) and short enough that a window left on screen gives them back
+within the minute a memory measurement waits. One release runs per quiet stretch; the next
+frame uploads again what it draws (its glyphs, its bitmaps), a few milliseconds once. Surfaces,
+layers and hardware bitmaps are held and stay. Nothing changes while the GPU device is lost.
+
+Applies to frameworks/base at 45034f0663f960d9ee5fb0a101a4732b71f6e2f4 (Android 16), after 0013.
+---
+diff --git a/libs/hwui/renderthread/CacheManager.cpp b/libs/hwui/renderthread/CacheManager.cpp
+index 0c2dfd02..582e84a7 100644
+--- a/libs/hwui/renderthread/CacheManager.cpp
++++ b/libs/hwui/renderthread/CacheManager.cpp
+@@ -20,9 +20,12 @@
+ #include <SkGraphics.h>
+ #include <include/gpu/ganesh/GrContextOptions.h>
+ #include <include/gpu/ganesh/GrTypes.h>
++#include <log/log.h>
+ #include <math.h>
+ #include <utils/Trace.h>
+ 
++#include <algorithm>
++#include <cinttypes>
+ #include <set>
+ 
+ #include "CanvasContext.h"
+@@ -266,6 +269,9 @@ void CacheManager::dumpMemoryUsage(String8& log, const RenderState* renderState)
+ void CacheManager::onFrameCompleted() {
+     cancelDestroyContext();
+     mFrameCompletions.next() = systemTime(CLOCK_MONOTONIC);
++    mLastFrameCompleted = systemTime(CLOCK_MONOTONIC);
++    mIdleReleased = false;
++    scheduleIdleRelease(kIdleReleaseAfter);
+     if (ATRACE_ENABLED()) {
+         ATRACE_NAME("dumpingMemoryStatistics");
+         static skiapipeline::ATraceMemoryDump tracer;
+@@ -295,6 +301,48 @@ void CacheManager::onThreadIdle() {
+     }
+ }
+ 
++void CacheManager::scheduleIdleRelease(nsecs_t delay) {
++    if (mIdleReleasePending) return;
++    mIdleReleasePending = true;
++    mRenderThread.queue().postDelayed(delay, [this] { onIdleReleaseDue(); });
++}
++
++void CacheManager::onIdleReleaseDue() {
++    mIdleReleasePending = false;
++    if (!mGrContext || mGrContext->abandoned() || mIdleReleased) return;
++    const nsecs_t idleFor = systemTime(CLOCK_MONOTONIC) - mLastFrameCompleted;
++    if (idleFor < kIdleReleaseAfter) {
++        // A frame came since this was posted: wait out the rest of the quiet time after it.
++        scheduleIdleRelease(kIdleReleaseAfter - idleFor);
++        return;
++    }
++    mIdleReleased = true;
++    releaseWhileIdle(idleFor);
++}
++
++void CacheManager::releaseWhileIdle(nsecs_t idleFor) {
++    ATRACE_NAME("releaseWhileIdle");
++    int countBefore = 0;
++    size_t bytesBefore = 0;
++    mGrContext->getResourceCacheUsage(&countBefore, &bytesBefore);
++    // Everything the cache holds that no surface or image holds: scratch textures and buffers,
++    // textures kept by key (bitmaps, paths, shadows) and the glyph atlases, whose size follows
++    // the display's (8 MiB a page for a 2880x2880 display). The time-based cleanup after each
++    // frame lets go only of scratch resources, and only of those the last frame did not use.
++    mGrContext->freeGpuResources();
++    // One more submit, waited on. Vulkan drivers and ANGLE free what was let go of only once
++    // they see the GPU finish the work that last used it, which they check when they submit;
++    // a window that draws nothing submits nothing.
++    mGrContext->flushAndSubmit(GrSyncCpu::kYes);
++    int countAfter = 0;
++    size_t bytesAfter = 0;
++    mGrContext->getResourceCacheUsage(&countAfter, &bytesAfter);
++    ALOGI("No frame for %" PRId64 " s: let go of %zu KiB of GPU caches (%d resources); %zu KiB "
++          "remain",
++          ns2s(idleFor), (bytesBefore - std::min(bytesBefore, bytesAfter)) / 1024,
++          countBefore - countAfter, bytesAfter / 1024);
++}
++
+ void CacheManager::scheduleDestroyContext() {
+     if (mMemoryPolicy.contextTimeout > 0) {
+         mRenderThread.queue().postDelayed(mMemoryPolicy.contextTimeout,
+diff --git a/libs/hwui/renderthread/CacheManager.h b/libs/hwui/renderthread/CacheManager.h
+index 94f10051..47b87db1 100644
+--- a/libs/hwui/renderthread/CacheManager.h
++++ b/libs/hwui/renderthread/CacheManager.h
+@@ -74,6 +74,13 @@ private:
+     void checkUiHidden();
+     void scheduleDestroyContext();
+     void cancelDestroyContext();
++    // DSA: a window the user can see, but that draws nothing, keeps what its last frames left in
++    // the GPU caches for as long as it stays on screen; Android trims an app's caches only once
++    // its UI is hidden. Once the render thread has drawn no frame for kIdleReleaseAfter, these
++    // let go of them. The next frame uploads again what it draws.
++    void scheduleIdleRelease(nsecs_t delay);
++    void onIdleReleaseDue();
++    void releaseWhileIdle(nsecs_t idleFor);
+ 
+ #ifdef __ANDROID__ // Layoutlib does not support hardware acceleration
+     void reset(sk_sp<GrDirectContext> grContext);
+@@ -101,6 +108,18 @@ private:
+     nsecs_t mLastDeferredCleanup = 0;
+     bool mIsDestructionPending = false;
+     uint32_t mGenerationId = 0;
++
++    // How long the render thread draws no frame before an idle release. Long enough that a
++    // window in use never waits for its caches again (reading, typing pauses, a menu left open
++    // for a while), short enough that a window left on screen gives them back within the minute
++    // a memory measurement waits.
++    static constexpr nsecs_t kIdleReleaseAfter = 30_s;
++    // When the last frame was drawn (CLOCK_MONOTONIC), 0 for none yet.
++    nsecs_t mLastFrameCompleted = 0;
++    // A check is posted to the render thread's queue; it posts itself again while frames come.
++    bool mIdleReleasePending = false;
++    // An idle release ran since the last frame, so the next check does not run another.
++    bool mIdleReleased = false;
+ };
+ 
+ } /* namespace renderthread */

@@ -18,6 +18,12 @@ interface WindowingControl {
 
     /** The default display's size in pixels, as task bounds measure it. */
     fun displaySize(): Size
+
+    /**
+     * Calls [onChange] each time the default display changes, as when the host grows it while
+     * Android runs. A platform that cannot follow it never calls.
+     */
+    fun listenToDisplay(onChange: () -> Unit) {}
 }
 
 /**

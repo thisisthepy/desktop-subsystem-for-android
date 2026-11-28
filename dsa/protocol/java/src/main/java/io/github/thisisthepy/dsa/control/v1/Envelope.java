@@ -33,6 +33,7 @@ public  final class Envelope extends
     RESIZE_TASK(11),
     SET_TASK_DENSITY(12),
     POINTER_EVENT(13),
+    SET_OVERLAY_DENSITY(14),
     APP_INFO(15),
     KEY_EVENT(16),
     IME_COMPOSITION(17),
@@ -57,6 +58,7 @@ public  final class Envelope extends
     TASKS_SHOWN(46),
     POWER_STATE(41),
     DISPLAY_REFRESH(407),
+    DISPLAY_SIZE(416),
     POWER_HINT(110),
     DEVELOPER_MODE(140),
     ARM_TRANSLATION_REMOVE(152),
@@ -97,6 +99,7 @@ public  final class Envelope extends
     NOTIFICATION_CLICKED(72),
     NOTIFICATION_DISMISSED(73),
     NOTIFICATION_BUTTON_CLICKED(730),
+    REQUEST_TASK_FRAME(731),
     BACKGROUND_APP(74),
     BACKGROUND_APP_GONE(75),
     BACKGROUND_APP_ACTION(76),
@@ -225,6 +228,8 @@ public  final class Envelope extends
     DNS_ANSWER(691),
     LAUNCH_PLACEMENT(710),
     CAPTION_COMPAT(715),
+    GET_WIDGET_PREVIEWS(740),
+    WIDGET_PREVIEWS(741),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -253,6 +258,7 @@ public  final class Envelope extends
         case 11: return RESIZE_TASK;
         case 12: return SET_TASK_DENSITY;
         case 13: return POINTER_EVENT;
+        case 14: return SET_OVERLAY_DENSITY;
         case 15: return APP_INFO;
         case 16: return KEY_EVENT;
         case 17: return IME_COMPOSITION;
@@ -277,6 +283,7 @@ public  final class Envelope extends
         case 46: return TASKS_SHOWN;
         case 41: return POWER_STATE;
         case 407: return DISPLAY_REFRESH;
+        case 416: return DISPLAY_SIZE;
         case 110: return POWER_HINT;
         case 140: return DEVELOPER_MODE;
         case 152: return ARM_TRANSLATION_REMOVE;
@@ -317,6 +324,7 @@ public  final class Envelope extends
         case 72: return NOTIFICATION_CLICKED;
         case 73: return NOTIFICATION_DISMISSED;
         case 730: return NOTIFICATION_BUTTON_CLICKED;
+        case 731: return REQUEST_TASK_FRAME;
         case 74: return BACKGROUND_APP;
         case 75: return BACKGROUND_APP_GONE;
         case 76: return BACKGROUND_APP_ACTION;
@@ -445,6 +453,8 @@ public  final class Envelope extends
         case 691: return DNS_ANSWER;
         case 710: return LAUNCH_PLACEMENT;
         case 715: return CAPTION_COMPAT;
+        case 740: return GET_WIDGET_PREVIEWS;
+        case 741: return WIDGET_PREVIEWS;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -1111,6 +1121,56 @@ public  final class Envelope extends
    */
   private void clearPointerEvent() {
     if (bodyCase_ == 13) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int SET_OVERLAY_DENSITY_FIELD_NUMBER = 14;
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   */
+  @java.lang.Override
+  public boolean hasSetOverlayDensity() {
+    return bodyCase_ == 14;
+  }
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.SetOverlayDensity getSetOverlayDensity() {
+    if (bodyCase_ == 14) {
+       return (io.github.thisisthepy.dsa.control.v1.SetOverlayDensity) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   */
+  private void setSetOverlayDensity(io.github.thisisthepy.dsa.control.v1.SetOverlayDensity value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 14;
+  }
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   */
+  private void mergeSetOverlayDensity(io.github.thisisthepy.dsa.control.v1.SetOverlayDensity value) {
+    value.getClass();
+  if (bodyCase_ == 14 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.newBuilder((io.github.thisisthepy.dsa.control.v1.SetOverlayDensity) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 14;
+  }
+  /**
+   * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+   */
+  private void clearSetOverlayDensity() {
+    if (bodyCase_ == 14) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -2311,6 +2371,56 @@ public  final class Envelope extends
    */
   private void clearDisplayRefresh() {
     if (bodyCase_ == 407) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DISPLAY_SIZE_FIELD_NUMBER = 416;
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   */
+  @java.lang.Override
+  public boolean hasDisplaySize() {
+    return bodyCase_ == 416;
+  }
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DisplaySize getDisplaySize() {
+    if (bodyCase_ == 416) {
+       return (io.github.thisisthepy.dsa.control.v1.DisplaySize) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DisplaySize.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   */
+  private void setDisplaySize(io.github.thisisthepy.dsa.control.v1.DisplaySize value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 416;
+  }
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   */
+  private void mergeDisplaySize(io.github.thisisthepy.dsa.control.v1.DisplaySize value) {
+    value.getClass();
+  if (bodyCase_ == 416 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DisplaySize.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DisplaySize.newBuilder((io.github.thisisthepy.dsa.control.v1.DisplaySize) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 416;
+  }
+  /**
+   * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+   */
+  private void clearDisplaySize() {
+    if (bodyCase_ == 416) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -4311,6 +4421,56 @@ public  final class Envelope extends
    */
   private void clearNotificationButtonClicked() {
     if (bodyCase_ == 730) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int REQUEST_TASK_FRAME_FIELD_NUMBER = 731;
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  @java.lang.Override
+  public boolean hasRequestTaskFrame() {
+    return bodyCase_ == 731;
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.RequestTaskFrame getRequestTaskFrame() {
+    if (bodyCase_ == 731) {
+       return (io.github.thisisthepy.dsa.control.v1.RequestTaskFrame) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  private void setRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 731;
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  private void mergeRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+    value.getClass();
+  if (bodyCase_ == 731 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.newBuilder((io.github.thisisthepy.dsa.control.v1.RequestTaskFrame) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 731;
+  }
+  /**
+   * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+   */
+  private void clearRequestTaskFrame() {
+    if (bodyCase_ == 731) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -10716,6 +10876,106 @@ public  final class Envelope extends
     }
   }
 
+  public static final int GET_WIDGET_PREVIEWS_FIELD_NUMBER = 740;
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   */
+  @java.lang.Override
+  public boolean hasGetWidgetPreviews() {
+    return bodyCase_ == 740;
+  }
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews getGetWidgetPreviews() {
+    if (bodyCase_ == 740) {
+       return (io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   */
+  private void setGetWidgetPreviews(io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 740;
+  }
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   */
+  private void mergeGetWidgetPreviews(io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews value) {
+    value.getClass();
+  if (bodyCase_ == 740 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews.newBuilder((io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 740;
+  }
+  /**
+   * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+   */
+  private void clearGetWidgetPreviews() {
+    if (bodyCase_ == 740) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int WIDGET_PREVIEWS_FIELD_NUMBER = 741;
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   */
+  @java.lang.Override
+  public boolean hasWidgetPreviews() {
+    return bodyCase_ == 741;
+  }
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.WidgetPreviews getWidgetPreviews() {
+    if (bodyCase_ == 741) {
+       return (io.github.thisisthepy.dsa.control.v1.WidgetPreviews) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.WidgetPreviews.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   */
+  private void setWidgetPreviews(io.github.thisisthepy.dsa.control.v1.WidgetPreviews value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 741;
+  }
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   */
+  private void mergeWidgetPreviews(io.github.thisisthepy.dsa.control.v1.WidgetPreviews value) {
+    value.getClass();
+  if (bodyCase_ == 741 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.WidgetPreviews.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.WidgetPreviews.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetPreviews) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 741;
+  }
+  /**
+   * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+   */
+  private void clearWidgetPreviews() {
+    if (bodyCase_ == 741) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.Envelope parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -11448,6 +11708,54 @@ public  final class Envelope extends
     public Builder clearPointerEvent() {
       copyOnWrite();
       instance.clearPointerEvent();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+     */
+    @java.lang.Override
+    public boolean hasSetOverlayDensity() {
+      return instance.hasSetOverlayDensity();
+    }
+    /**
+     * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.SetOverlayDensity getSetOverlayDensity() {
+      return instance.getSetOverlayDensity();
+    }
+    /**
+     * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+     */
+    public Builder setSetOverlayDensity(io.github.thisisthepy.dsa.control.v1.SetOverlayDensity value) {
+      copyOnWrite();
+      instance.setSetOverlayDensity(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+     */
+    public Builder setSetOverlayDensity(
+        io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.Builder builderForValue) {
+      copyOnWrite();
+      instance.setSetOverlayDensity(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+     */
+    public Builder mergeSetOverlayDensity(io.github.thisisthepy.dsa.control.v1.SetOverlayDensity value) {
+      copyOnWrite();
+      instance.mergeSetOverlayDensity(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.SetOverlayDensity set_overlay_density = 14;</code>
+     */
+    public Builder clearSetOverlayDensity() {
+      copyOnWrite();
+      instance.clearSetOverlayDensity();
       return this;
     }
 
@@ -12600,6 +12908,54 @@ public  final class Envelope extends
     public Builder clearDisplayRefresh() {
       copyOnWrite();
       instance.clearDisplayRefresh();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+     */
+    @java.lang.Override
+    public boolean hasDisplaySize() {
+      return instance.hasDisplaySize();
+    }
+    /**
+     * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DisplaySize getDisplaySize() {
+      return instance.getDisplaySize();
+    }
+    /**
+     * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+     */
+    public Builder setDisplaySize(io.github.thisisthepy.dsa.control.v1.DisplaySize value) {
+      copyOnWrite();
+      instance.setDisplaySize(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+     */
+    public Builder setDisplaySize(
+        io.github.thisisthepy.dsa.control.v1.DisplaySize.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDisplaySize(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+     */
+    public Builder mergeDisplaySize(io.github.thisisthepy.dsa.control.v1.DisplaySize value) {
+      copyOnWrite();
+      instance.mergeDisplaySize(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DisplaySize display_size = 416;</code>
+     */
+    public Builder clearDisplaySize() {
+      copyOnWrite();
+      instance.clearDisplaySize();
       return this;
     }
 
@@ -14520,6 +14876,54 @@ public  final class Envelope extends
     public Builder clearNotificationButtonClicked() {
       copyOnWrite();
       instance.clearNotificationButtonClicked();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    @java.lang.Override
+    public boolean hasRequestTaskFrame() {
+      return instance.hasRequestTaskFrame();
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.RequestTaskFrame getRequestTaskFrame() {
+      return instance.getRequestTaskFrame();
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder setRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+      copyOnWrite();
+      instance.setRequestTaskFrame(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder setRequestTaskFrame(
+        io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.Builder builderForValue) {
+      copyOnWrite();
+      instance.setRequestTaskFrame(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder mergeRequestTaskFrame(io.github.thisisthepy.dsa.control.v1.RequestTaskFrame value) {
+      copyOnWrite();
+      instance.mergeRequestTaskFrame(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.RequestTaskFrame request_task_frame = 731;</code>
+     */
+    public Builder clearRequestTaskFrame() {
+      copyOnWrite();
+      instance.clearRequestTaskFrame();
       return this;
     }
 
@@ -20667,6 +21071,102 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+     */
+    @java.lang.Override
+    public boolean hasGetWidgetPreviews() {
+      return instance.hasGetWidgetPreviews();
+    }
+    /**
+     * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews getGetWidgetPreviews() {
+      return instance.getGetWidgetPreviews();
+    }
+    /**
+     * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+     */
+    public Builder setGetWidgetPreviews(io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews value) {
+      copyOnWrite();
+      instance.setGetWidgetPreviews(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+     */
+    public Builder setGetWidgetPreviews(
+        io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGetWidgetPreviews(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+     */
+    public Builder mergeGetWidgetPreviews(io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews value) {
+      copyOnWrite();
+      instance.mergeGetWidgetPreviews(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GetWidgetPreviews get_widget_previews = 740;</code>
+     */
+    public Builder clearGetWidgetPreviews() {
+      copyOnWrite();
+      instance.clearGetWidgetPreviews();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+     */
+    @java.lang.Override
+    public boolean hasWidgetPreviews() {
+      return instance.hasWidgetPreviews();
+    }
+    /**
+     * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.WidgetPreviews getWidgetPreviews() {
+      return instance.getWidgetPreviews();
+    }
+    /**
+     * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+     */
+    public Builder setWidgetPreviews(io.github.thisisthepy.dsa.control.v1.WidgetPreviews value) {
+      copyOnWrite();
+      instance.setWidgetPreviews(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+     */
+    public Builder setWidgetPreviews(
+        io.github.thisisthepy.dsa.control.v1.WidgetPreviews.Builder builderForValue) {
+      copyOnWrite();
+      instance.setWidgetPreviews(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+     */
+    public Builder mergeWidgetPreviews(io.github.thisisthepy.dsa.control.v1.WidgetPreviews value) {
+      copyOnWrite();
+      instance.mergeWidgetPreviews(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.WidgetPreviews widget_previews = 741;</code>
+     */
+    public Builder clearWidgetPreviews() {
+      copyOnWrite();
+      instance.clearWidgetPreviews();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -20698,6 +21198,7 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.ResizeTask.class,
             io.github.thisisthepy.dsa.control.v1.SetTaskDensity.class,
             io.github.thisisthepy.dsa.control.v1.PointerEvent.class,
+            io.github.thisisthepy.dsa.control.v1.SetOverlayDensity.class,
             io.github.thisisthepy.dsa.control.v1.AppInfo.class,
             io.github.thisisthepy.dsa.control.v1.KeyEvent.class,
             io.github.thisisthepy.dsa.control.v1.ImeComposition.class,
@@ -20845,6 +21346,7 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.SuDecision.class,
             io.github.thisisthepy.dsa.control.v1.AddonImageRead.class,
             io.github.thisisthepy.dsa.control.v1.AddonImagePart.class,
+            io.github.thisisthepy.dsa.control.v1.DisplaySize.class,
             io.github.thisisthepy.dsa.control.v1.GeocodeRequest.class,
             io.github.thisisthepy.dsa.control.v1.GeocodeResult.class,
             io.github.thisisthepy.dsa.control.v1.ShareToHost.class,
@@ -20890,37 +21392,41 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.LaunchPlacement.class,
             io.github.thisisthepy.dsa.control.v1.CaptionCompat.class,
             io.github.thisisthepy.dsa.control.v1.NotificationButtonClicked.class,
+            io.github.thisisthepy.dsa.control.v1.RequestTaskFrame.class,
+            io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews.class,
+            io.github.thisisthepy.dsa.control.v1.WidgetPreviews.class,
           };
           java.lang.String info =
-              "\u0000\u00cd\u0001\u0000\u0001\u02da\u00cd\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u00d2\u0001\u0000\u0001\u02e5\u00d2\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
-              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
-              "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
-              "\u0018<\u0000\u0019<\u0000\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000\u001e" +
-              "<\u0000\u001f<\u0000(<\u0000)<\u0000*<\u0000+<\u0000,<\u0000-<\u0000.<\u00002<\u0000" +
-              "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000A<\u0000" +
-              "B<\u0000C<\u0000D<\u0000E<\u0000F<\u0000G<\u0000H<\u0000I<\u0000J<\u0000K<\u0000" +
-              "L<\u0000M<\u0000N<\u0000O<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000T<\u0000U<\u0000" +
-              "Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000" +
-              "d<\u0000e<\u0000f<\u0000g<\u0000h<\u0000i<\u0000j<\u0000k<\u0000n<\u0000x<\u0000" +
-              "y<\u0000z<\u0000{<\u0000|<\u0000}<\u0000~<\u0000<\u0000\u0080<\u0000\u0081<\u0000" +
-              "\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000\u0086<\u0000\u0087<\u0000\u0088" +
-              "<\u0000\u008c<\u0000\u008d<\u0000\u0098<\u0000\u0099<\u0000\u009a<\u0000\u009b<\u0000" +
-              "\u009c<\u0000\u00c8<\u0000\u00c9<\u0000\u00ca<\u0000\u00dc<\u0000\u00dd<\u0000\u00de" +
-              "<\u0000\u00df<\u0000\u00f0<\u0000\u00f1<\u0000\u00f2<\u0000\u0104<\u0000\u0105<\u0000" +
-              "\u0106<\u0000\u0107<\u0000\u0108<\u0000\u0109<\u0000\u010a<\u0000\u010b<\u0000\u0122" +
-              "<\u0000\u0123<\u0000\u0154<\u0000\u0155<\u0000\u0156<\u0000\u0157<\u0000\u0158<\u0000" +
-              "\u015e<\u0000\u015f<\u0000\u0160<\u0000\u0161<\u0000\u0162<\u0000\u0179<\u0000\u017c" +
-              "<\u0000\u017d<\u0000\u017e<\u0000\u017f<\u0000\u0192<\u0000\u0193<\u0000\u0194<\u0000" +
-              "\u0195<\u0000\u0196<\u0000\u0197<\u0000\u0198<\u0000\u0199<\u0000\u019a<\u0000\u019b" +
-              "<\u0000\u019c<\u0000\u019d<\u0000\u019e<\u0000\u019f<\u0000\u01d6<\u0000\u01d7<\u0000" +
-              "\u01d8<\u0000\u01d9<\u0000\u026c<\u0000\u026d<\u0000\u026e<\u0000\u026f<\u0000\u0270" +
-              "<\u0000\u0271<\u0000\u0272<\u0000\u0273<\u0000\u0274<\u0000\u0275<\u0000\u0276<\u0000" +
-              "\u0277<\u0000\u0280<\u0000\u0281<\u0000\u0282<\u0000\u0283<\u0000\u0284<\u0000\u0285" +
-              "<\u0000\u0286<\u0000\u0287<\u0000\u0288<\u0000\u0289<\u0000\u028a<\u0000\u028b<\u0000" +
-              "\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290<\u0000\u0291<\u0000\u0292" +
-              "<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000\u02ac<\u0000\u02b2<\u0000" +
-              "\u02b3<\u0000\u02c6<\u0000\u02cb<\u0000\u02da<\u0000";
+              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000e<\u0000\u000f<\u0000\u0010" +
+              "<\u0000\u0011<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000" +
+              "\u0017<\u0000\u0018<\u0000\u0019<\u0000\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d" +
+              "<\u0000\u001e<\u0000\u001f<\u0000(<\u0000)<\u0000*<\u0000+<\u0000,<\u0000-<\u0000" +
+              ".<\u00002<\u00003<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000" +
+              "@<\u0000A<\u0000B<\u0000C<\u0000D<\u0000E<\u0000F<\u0000G<\u0000H<\u0000I<\u0000" +
+              "J<\u0000K<\u0000L<\u0000M<\u0000N<\u0000O<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000" +
+              "T<\u0000U<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000" +
+              "b<\u0000c<\u0000d<\u0000e<\u0000f<\u0000g<\u0000h<\u0000i<\u0000j<\u0000k<\u0000" +
+              "n<\u0000x<\u0000y<\u0000z<\u0000{<\u0000|<\u0000}<\u0000~<\u0000<\u0000\u0080<\u0000" +
+              "\u0081<\u0000\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000\u0086<\u0000\u0087" +
+              "<\u0000\u0088<\u0000\u008c<\u0000\u008d<\u0000\u0098<\u0000\u0099<\u0000\u009a<\u0000" +
+              "\u009b<\u0000\u009c<\u0000\u00c8<\u0000\u00c9<\u0000\u00ca<\u0000\u00dc<\u0000\u00dd" +
+              "<\u0000\u00de<\u0000\u00df<\u0000\u00f0<\u0000\u00f1<\u0000\u00f2<\u0000\u0104<\u0000" +
+              "\u0105<\u0000\u0106<\u0000\u0107<\u0000\u0108<\u0000\u0109<\u0000\u010a<\u0000\u010b" +
+              "<\u0000\u0122<\u0000\u0123<\u0000\u0154<\u0000\u0155<\u0000\u0156<\u0000\u0157<\u0000" +
+              "\u0158<\u0000\u015e<\u0000\u015f<\u0000\u0160<\u0000\u0161<\u0000\u0162<\u0000\u0179" +
+              "<\u0000\u017c<\u0000\u017d<\u0000\u017e<\u0000\u017f<\u0000\u0192<\u0000\u0193<\u0000" +
+              "\u0194<\u0000\u0195<\u0000\u0196<\u0000\u0197<\u0000\u0198<\u0000\u0199<\u0000\u019a" +
+              "<\u0000\u019b<\u0000\u019c<\u0000\u019d<\u0000\u019e<\u0000\u019f<\u0000\u01a0<\u0000" +
+              "\u01d6<\u0000\u01d7<\u0000\u01d8<\u0000\u01d9<\u0000\u026c<\u0000\u026d<\u0000\u026e" +
+              "<\u0000\u026f<\u0000\u0270<\u0000\u0271<\u0000\u0272<\u0000\u0273<\u0000\u0274<\u0000" +
+              "\u0275<\u0000\u0276<\u0000\u0277<\u0000\u0280<\u0000\u0281<\u0000\u0282<\u0000\u0283" +
+              "<\u0000\u0284<\u0000\u0285<\u0000\u0286<\u0000\u0287<\u0000\u0288<\u0000\u0289<\u0000" +
+              "\u028a<\u0000\u028b<\u0000\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290" +
+              "<\u0000\u0291<\u0000\u0292<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000" +
+              "\u02ac<\u0000\u02b2<\u0000\u02b3<\u0000\u02c6<\u0000\u02cb<\u0000\u02da<\u0000\u02db" +
+              "<\u0000\u02e4<\u0000\u02e5<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

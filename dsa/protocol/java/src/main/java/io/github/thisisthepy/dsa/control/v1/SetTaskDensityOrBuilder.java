@@ -24,4 +24,10 @@ public interface SetTaskDensityOrBuilder extends
    * @return The recreate.
    */
   boolean getRecreate();
+
+  /**
+   * <code>bool forced = 4;</code>
+   * @return The forced.
+   */
+  boolean getForced();
 }

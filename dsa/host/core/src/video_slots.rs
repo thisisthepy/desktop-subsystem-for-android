@@ -485,6 +485,40 @@ impl StreamSlots {
         fill(bytes)
     }
 
+    /// Lets `look` read the slot's bytes, while this stream holds it, has not lent it and its
+    /// pages are committed (a slot is committed before it is written). `None` otherwise.
+    pub fn read<R>(&self, slot: &Slot, look: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        let offset = slot.offset as usize;
+        {
+            let state = self.slots.state();
+            match state.held.get(&offset) {
+                Some(held)
+                    if held.stream == self.stream
+                        && held.number == slot.number
+                        && !held.lent
+                        && slot.len <= held.span => {}
+                _ => return None,
+            }
+            let (first, end) = (
+                offset / SLOT_ALIGNMENT,
+                (offset + slot.len).div_ceil(SLOT_ALIGNMENT),
+            );
+            if state
+                .committed
+                .get(first..end)
+                .is_none_or(|c| !c.iter().all(|&c| c))
+            {
+                return None;
+            }
+        }
+        // SAFETY: the slot's bytes lie inside the view and are committed, and no one writes
+        // them meanwhile: the slot is this stream's and not lent, and only this stream writes
+        // it, through `&self` on the same thread.
+        let bytes =
+            unsafe { std::slice::from_raw_parts(self.slots.region.as_ptr().add(offset), slot.len) };
+        Some(look(bytes))
+    }
+
     /// The slot goes to the guest with its picture's message: the host does not write it until
     /// the guest gives it back. False when it is not this stream's.
     pub fn lend(&self, slot: &Slot) -> bool {

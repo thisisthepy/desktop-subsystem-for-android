@@ -82,7 +82,9 @@ fi
 # a read back asks in pieces and takes only what the device changed, keeping what the
 # app wrote, and that coherent memory is then reported twice: as the host reports it, read
 # back only when the app invalidates, before a coherent twin read back at completion. A
-# flush then compares only the pages the kernel saw the app write (dsa_dirty_pages.h).
+# flush then compares only the pages the kernel saw the app write (dsa_dirty_pages.h). A
+# command recorded into no command buffer (VK_NULL_HANDLE) is dropped and logged once rather
+# than followed to address 0, and a failed vkAllocateCommandBuffers leaves no handle behind.
 for patch in "$patch_dir"/guest/mesa/*.patch; do
     git -C "$mesa_dir" apply --recount --check "$patch"
     git -C "$mesa_dir" apply --recount "$patch"

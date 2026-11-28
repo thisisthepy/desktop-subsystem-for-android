@@ -58,7 +58,9 @@ class CpuUploads {
    private:
     dsa::UploadTracker mTracker;
     std::vector<uint8_t> mStaging;
-    dsa::UploadRate mRate;
+    // The once-a-second upload line: what reached the host, counted by the planes' packed
+    // size on either path, and what was kept from it.
+    UploadTally mTally;
     // A failure that repeats on every picture is logged at its first and then once in a
     // while, with its count: a failure logged only once in a boot hid that no upload ever
     // succeeded.

@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "dsa_hardware_buffer_import.h"
+#include "log.h"
 
 namespace {
 
@@ -59,7 +60,16 @@ AHardwareBuffer* importBuffer(const HandleParts& handle, uint32_t width, uint32_
     AHardwareBuffer* buffer = nullptr;
     const int result = AHardwareBuffer_createFromHandle(&desc, header, dsa::kAhbCreateFromHandleClone, &buffer);
     std::free(header);
-    return result == 0 ? buffer : nullptr;
+    if (result != 0) {
+        // Says why, so a buffer the allocator will not take back can be told apart from one
+        // whose size or stride the description gets wrong.
+        CAMERA_LOGE("the allocator did not take back a %ux%u buffer of format %u, usage 0x%llx, %zu fds and %zu "
+                    "ints: error %d",
+                    width, height, format, static_cast<unsigned long long>(usage), handle.fds.size(),
+                    handle.ints.size(), result);
+        return nullptr;
+    }
+    return buffer;
 }
 
 bool fillPicture(AHardwareBuffer* buffer, const Nv12& picture, uint32_t width, uint32_t height, std::string* error) {

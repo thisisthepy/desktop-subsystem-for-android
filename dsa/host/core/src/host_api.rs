@@ -58,7 +58,7 @@ use dsa_protocol::host_api::types::{
     self, envelope::Body, request, response, Envelope, ErrorCode, Request, Response, Role,
 };
 use dsa_protocol::host_api::{
-    client_connect, decode, local_hello, send, service_accept, HandshakeError,
+    client_connect, decode, encode, local_hello, send, service_accept, HandshakeError,
 };
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
@@ -67,8 +67,8 @@ use dsa_transport::{Connection, Connector, TransportError};
 pub use dsa_protocol::host_api::types::AppRootStatus;
 
 use crate::accessibility::{
-    AccessibilityTarget, AccessibilityWatch, ActionRequest, ActionResult, Announcement,
-    GuestAccessibility, TreeUpdate,
+    service_focus_trace_line, AccessibilityTarget, AccessibilityWatch, ActionRequest, ActionResult,
+    Announcement, FocusTrace, GuestAccessibility, TreeUpdate,
 };
 use crate::adb_discovery::AutoConnectState;
 use crate::addon_disk::{Addon, AddonDisk};
@@ -122,8 +122,9 @@ use crate::touch_gestures::TouchGesturesState;
 use crate::update::alerts::{self as update_alerts, UpdateAlert};
 use crate::widevine::{self, WidevinePackage, WidevineStatus};
 use crate::widgets::{
-    self, MemoryWidgetPlacements, Placement, Widget, WidgetError, WidgetEvent, WidgetFrame,
-    WidgetPlacements, WidgetProvider, WidgetSize,
+    self, AppIcon, MemoryWidgetPlacements, Placement, PreviewSource, Widget, WidgetError,
+    WidgetEvent, WidgetFrame, WidgetGallery, WidgetPlacements, WidgetPreview, WidgetProvider,
+    WidgetSize,
 };
 use dsa_protocol::control;
 
@@ -147,6 +148,10 @@ const DRAG_READ_WAIT: Duration = Duration::from_secs(30);
 
 /// How long the service waits for Android to list its widgets.
 const WIDGET_LIST_WAIT: Duration = Duration::from_secs(20);
+
+/// How long the service waits for Android to draw the previews asked for at once: up to
+/// [`widgets::MAX_PREVIEWS_ASKED`] layouts, each drawn in a fraction of a second.
+const WIDGET_PREVIEW_WAIT: Duration = Duration::from_secs(30);
 
 /// How long the service waits for Android to place a widget, which includes the user
 /// setting it up when its app asks them to.
@@ -516,6 +521,23 @@ pub trait UserAndroid: Send + Sync {
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         Err(WidgetError::Refused(
             "this Android does not host widgets".into(),
+        ))
+    }
+    /// The widgets the apps in this Android offer, and with `lazy_previews` without their
+    /// previews and with each app's icon once instead. One that keeps no icons apart from
+    /// its widgets gives its widgets as [`widget_providers`](Self::widget_providers) does.
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        let _ = lazy_previews;
+        self.widget_providers().map(|providers| WidgetGallery {
+            providers,
+            app_icons: Vec::new(),
+        })
+    }
+    /// The previews of the widgets `providers` names, in that order, each once.
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        let _ = providers;
+        Err(WidgetError::Refused(
+            "this Android does not draw widget previews".into(),
         ))
     }
     /// Places a new widget of `provider` and returns its ID.
@@ -1106,6 +1128,12 @@ impl UserAndroid for Session {
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         Session::widget_providers(self, WIDGET_LIST_WAIT).map_err(widget_error)
     }
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        Session::widget_gallery(self, lazy_previews, WIDGET_LIST_WAIT).map_err(widget_error)
+    }
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        Session::widget_previews(self, providers, WIDGET_PREVIEW_WAIT).map_err(widget_error)
+    }
     fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
         Session::add_widget(self, provider, WIDGET_ADD_WAIT).map_err(widget_error)
     }
@@ -1570,10 +1598,12 @@ fn task_to_wire(task: Task) -> types::Task {
             .collect(),
         can_go_back: task.can_go_back,
         handles_density_change: task.handles_density_change,
+        forced_density_available: task.forced_density_available,
         overlay: task.overlay.map(|overlay| types::OverlayWindow {
             window_type: overlay.window_type,
             focusable: overlay.focusable,
             touchable: overlay.touchable,
+            density_dpi: overlay.density_dpi,
         }),
         below_title_bar: task.below_title_bar,
     }
@@ -1630,10 +1660,12 @@ fn task_from_wire(task: types::Task) -> Task {
             .collect(),
         can_go_back: task.can_go_back,
         handles_density_change: task.handles_density_change,
+        forced_density_available: task.forced_density_available,
         overlay: task.overlay.map(|overlay| OverlayWindow {
             window_type: overlay.window_type,
             focusable: overlay.focusable,
             touchable: overlay.touchable,
+            density_dpi: overlay.density_dpi,
         }),
         below_title_bar: task.below_title_bar,
     }
@@ -1715,6 +1747,7 @@ fn app_to_wire(app: AppInfo) -> types::AppInfo {
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_to_wire).collect(),
         shared_user_id: app.shared_user_id,
+        game: app.game,
     }
 }
 
@@ -1782,6 +1815,7 @@ fn app_from_wire(app: types::AppInfo) -> AppInfo {
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_from_wire).collect(),
         shared_user_id: app.shared_user_id,
+        game: app.game,
     }
 }
 
@@ -2008,9 +2042,13 @@ const GAPPS_ANSWER_WAIT: Duration = Duration::from_secs(30);
 const LINK_POLL: Duration = Duration::from_millis(100);
 
 /// How long a connection that watches an accessibility tree waits for its client's next action
-/// before it looks for news from Android again. Short against the second a change may take to
-/// reach a host client.
-const ACCESSIBILITY_POLL: Duration = Duration::from_millis(30);
+/// before it looks for news from Android again, on a transport that cannot send from a second
+/// thread. A tree waits at most this long, so a screen reader hears a focus move within it.
+const ACCESSIBILITY_POLL: Duration = Duration::from_millis(5);
+
+/// How long a watch whose trees go out on a thread of their own waits for its client before it
+/// checks that thread is still running. A tree never waits for this: it goes out as it comes.
+const ACCESSIBILITY_END_CHECK: Duration = Duration::from_millis(250);
 
 /// How long the service waits for the next piece of a file a client sends. A client reads
 /// the file before it starts, so a gap this long means it is stuck or gone.
@@ -2019,6 +2057,34 @@ const FILE_CHUNK_WAIT: Duration = Duration::from_secs(30);
 /// How long a client waits for the service to say Android has a file: sending 64 MiB into
 /// the guest takes seconds, and each chunk may wait half a minute for the agent.
 const FILE_ANSWER_WAIT: Duration = Duration::from_secs(5 * 60);
+
+/// What a watch's client receives for one message from the guest.
+fn client_body(update: GuestAccessibility) -> Body {
+    match update {
+        GuestAccessibility::Tree(tree) => Body::AccessibilityTree(tree.to_host_api()),
+        GuestAccessibility::ActionResult(result) => {
+            Body::AccessibilityActionResult(result.to_host_api())
+        }
+        GuestAccessibility::Announcement(announcement) => {
+            Body::AccessibilityAnnouncement(announcement.to_host_api())
+        }
+    }
+}
+
+/// Logs when a tree the service passes on moves the focus, with the time it passed.
+/// The line starts with the caller's user, so the user's diagnostics archive keeps it.
+fn trace_focus(
+    trace: &mut FocusTrace,
+    update: &GuestAccessibility,
+    target: AccessibilityTarget,
+    user: &str,
+) {
+    if let GuestAccessibility::Tree(tree) = update {
+        if let Some(line) = trace.moved(tree, target, "the host service sent it on") {
+            eprintln!("{}", service_focus_trace_line(user, &line));
+        }
+    }
+}
 
 fn from_wire(state: i32) -> Option<SessionState> {
     match types::SessionState::try_from(state).ok()? {
@@ -2938,7 +3004,7 @@ impl HostApiService {
                 }
             }
         };
-        let (android, watch) = match watch {
+        let (android, mut watch) = match watch {
             Ok(watch) => watch,
             Err(body) => {
                 let _ = send(
@@ -2958,29 +3024,75 @@ impl HostApiService {
         if send(&mut *connection, Body::Response(answer)).is_err() {
             return;
         }
+        // Android's trees go to the client as they come, on a thread of their own, while this
+        // one waits for the client's actions: a focus move then reaches the screen reader with
+        // no wait at all. A transport that cannot send from a second thread keeps both here,
+        // and the trees wait at most ACCESSIBILITY_POLL.
+        let user = peer.user.clone();
+        let forward = connection.try_clone_sender().map(|sender| {
+            let user = user.clone();
+            let sender = Arc::new(Mutex::new(sender));
+            let updates = std::mem::replace(&mut watch.updates, std::sync::mpsc::channel().1);
+            let ended = Arc::new(AtomicBool::new(false));
+            let forwarder = Arc::clone(&sender);
+            let forwarder_ended = Arc::clone(&ended);
+            let spawned = thread::Builder::new()
+                .name("dsa-accessibility-forward".into())
+                .spawn(move || {
+                    let mut trace = FocusTrace::new();
+                    while let Ok(update) = updates.recv() {
+                        trace_focus(&mut trace, &update, target, &user);
+                        let frame = encode(&Envelope {
+                            body: Some(client_body(update)),
+                        });
+                        let sent = forwarder
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .send(&frame);
+                        if sent.is_err() {
+                            break;
+                        }
+                    }
+                    forwarder_ended.store(true, Ordering::Relaxed);
+                });
+            if let Err(why) = spawned {
+                eprintln!(
+                    "local API: could not start the thread that sends {target}'s accessibility \
+                     tree ({why}); closing the watch"
+                );
+                ended.store(true, Ordering::Relaxed);
+            }
+            (sender, ended)
+        });
+        let mut trace = FocusTrace::new();
         loop {
-            loop {
-                let frame = match watch.updates.try_recv() {
-                    Ok(GuestAccessibility::Tree(tree)) => {
-                        Body::AccessibilityTree(tree.to_host_api())
-                    }
-                    Ok(GuestAccessibility::ActionResult(result)) => {
-                        Body::AccessibilityActionResult(result.to_host_api())
-                    }
-                    Ok(GuestAccessibility::Announcement(announcement)) => {
-                        Body::AccessibilityAnnouncement(announcement.to_host_api())
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => {
+            let wait = match &forward {
+                Some((_, ended)) => {
+                    if ended.load(Ordering::Relaxed) {
                         connection.close();
                         return;
                     }
-                };
-                if send(&mut *connection, frame).is_err() {
-                    return;
+                    ACCESSIBILITY_END_CHECK
                 }
-            }
-            let frame = match connection.recv(Some(ACCESSIBILITY_POLL)) {
+                None => {
+                    loop {
+                        let update = match watch.updates.try_recv() {
+                            Ok(update) => update,
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => {
+                                connection.close();
+                                return;
+                            }
+                        };
+                        trace_focus(&mut trace, &update, target, &user);
+                        if send(&mut *connection, client_body(update)).is_err() {
+                            return;
+                        }
+                    }
+                    ACCESSIBILITY_POLL
+                }
+            };
+            let frame = match connection.recv(Some(wait)) {
                 Err(TransportError::Timeout) => continue,
                 Err(_) => return,
                 Ok(frame) => frame,
@@ -3018,12 +3130,17 @@ impl HostApiService {
                             request_id,
                             outcome: Err(why),
                         };
-                        if send(
-                            &mut *connection,
-                            Body::AccessibilityActionResult(result.to_host_api()),
-                        )
-                        .is_err()
-                        {
+                        let body = Body::AccessibilityActionResult(result.to_host_api());
+                        // With the trees on their own thread, the answer goes the same way, so
+                        // the two never write to the connection at once.
+                        let replied = match &forward {
+                            Some((sender, _)) => sender
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .send(&encode(&Envelope { body: Some(body) })),
+                            None => send(&mut *connection, body),
+                        };
+                        if replied.is_err() {
                             return;
                         }
                     }
@@ -4575,14 +4692,66 @@ impl HostApiService {
         }
     }
 
-    fn widget_providers(&self, peer: &Peer) -> response::Body {
+    fn widget_providers(&self, peer: &Peer, list: types::ListWidgetProviders) -> response::Body {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
             Err(why) => return error(ErrorCode::Unavailable, why),
         };
-        match android.widget_providers() {
-            Ok(providers) => response::Body::WidgetProviders(types::WidgetProviders {
-                providers: providers.iter().map(provider_to_wire).collect(),
+        let gallery = if list.lazy_previews {
+            android.widget_gallery(true)
+        } else {
+            android.widget_providers().map(|providers| WidgetGallery {
+                providers,
+                app_icons: Vec::new(),
+            })
+        };
+        match gallery {
+            Ok(gallery) => response::Body::WidgetProviders(types::WidgetProviders {
+                providers: gallery.providers.iter().map(provider_to_wire).collect(),
+                app_icons: gallery.app_icons.iter().map(app_icon_to_wire).collect(),
+            }),
+            Err(WidgetError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(WidgetError::Refused(why)) => error(ErrorCode::WidgetRefused, why),
+        }
+    }
+
+    fn widget_previews(&self, peer: &Peer, get: types::GetWidgetPreviews) -> response::Body {
+        if get.providers.len() > widgets::MAX_PREVIEWS_ASKED {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{} previews were asked for at once; ask for at most {}",
+                    get.providers.len(),
+                    widgets::MAX_PREVIEWS_ASKED
+                ),
+            );
+        }
+        if let Some(bad) = get
+            .providers
+            .iter()
+            .find(|provider| !widgets::valid_provider_name(provider))
+        {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{:?} is not a widget's name; list the widgets to see them",
+                    bad.chars().take(80).collect::<String>()
+                ),
+            );
+        }
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.widget_previews(&get.providers) {
+            Ok(previews) => response::Body::WidgetPreviews(types::WidgetPreviews {
+                previews: widgets::previews_in_asked_order(
+                    &widgets::previews_to_ask(&get.providers),
+                    previews,
+                )
+                .iter()
+                .map(preview_to_wire)
+                .collect(),
             }),
             Err(WidgetError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
             Err(WidgetError::Refused(why)) => error(ErrorCode::WidgetRefused, why),
@@ -5409,6 +5578,14 @@ impl HostApiService {
                 TaskRequest::SetDensity {
                     task_id: density.task_id,
                     density_dpi: density.density_dpi,
+                    forced: density.forced,
+                },
+            ),
+            Some(request::Body::SetOverlayDensity(density)) => self.request(
+                peer,
+                TaskRequest::SetOverlayDensity {
+                    overlay_id: density.overlay_id,
+                    density_dpi: density.density_dpi,
                 },
             ),
             // The message stays in the protocol so that its field number is never reused, but
@@ -5423,6 +5600,7 @@ impl HostApiService {
                 peer,
                 TaskRequest::CaptionCompat {
                     below_title_bar: compat.below_title_bar,
+                    keep_focus: compat.keep_focus,
                 },
             ),
             Some(request::Body::SetTaskCaption(caption)) => self.request(
@@ -5439,6 +5617,12 @@ impl HostApiService {
                 TaskRequest::SetFullScreen {
                     task_id: full.task_id,
                     in_window: full.in_window,
+                },
+            ),
+            Some(request::Body::RequestTaskFrame(frame)) => self.request(
+                peer,
+                TaskRequest::RequestFrame {
+                    task_id: frame.task_id,
                 },
             ),
             Some(request::Body::SetWindowsShown(shown)) => {
@@ -5477,7 +5661,8 @@ impl HostApiService {
             Some(request::Body::ListBackgroundApps(_)) => self.list_background(peer),
             Some(request::Body::ActOnBackgroundApp(act)) => self.act_on_background(peer, act),
             Some(request::Body::ControlMedia(control)) => self.control_media(peer, control),
-            Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
+            Some(request::Body::ListWidgetProviders(list)) => self.widget_providers(peer, list),
+            Some(request::Body::GetWidgetPreviews(get)) => self.widget_previews(peer, get),
             Some(request::Body::GetArmTranslation(_)) => self.get_arm_translation(peer),
             Some(request::Body::RemoveArmTranslation(_)) => self.remove_arm_translation(peer),
             Some(request::Body::GetGapps(_)) => self.get_gapps(peer),
@@ -5530,6 +5715,7 @@ impl HostApiService {
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
+                        | request::Body::SetOverlayDensity(_)
                         | request::Body::LaunchPlacement(_)
                         | request::Body::SetCaptionCompat(_)
                         | request::Body::SetTaskCaption(_)
@@ -5565,6 +5751,7 @@ impl HostApiService {
                         | request::Body::ActOnBackgroundApp(_)
                         | request::Body::ControlMedia(_)
                         | request::Body::ListWidgetProviders(_)
+                        | request::Body::GetWidgetPreviews(_)
                         | request::Body::GetPackage(_)
                         | request::Body::DragOut(_)
                         | request::Body::ReadDrag(_)
@@ -5610,7 +5797,8 @@ impl HostApiService {
                         | request::Body::WatchShares(_)
                         | request::Body::ReportShare(_)
                         | request::Body::WatchAppAudio(_)
-                        | request::Body::SetAppVolume(_) => unreachable!("answered above"),
+                        | request::Body::SetAppVolume(_)
+                        | request::Body::RequestTaskFrame(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -8149,20 +8337,47 @@ impl HostApiClient {
     }
 
     /// Asks the caller's Android to draw a task at `density_dpi`, as when its window moves
-    /// to a monitor of another scale.
-    pub fn set_task_density(&mut self, task_id: i32, density_dpi: u32) -> Result<(), ClientError> {
+    /// to a monitor of another scale. With `forced`, the task's app is set to System (forced)
+    /// scaling: Android gives the task the density without relaunching its activity, or gives
+    /// it none.
+    pub fn set_task_density(
+        &mut self,
+        task_id: i32,
+        density_dpi: u32,
+        forced: bool,
+    ) -> Result<(), ClientError> {
         self.done(request::Body::SetTaskDensity(types::SetTaskDensity {
             task_id,
             density_dpi,
             // Never set: Android redraws or recreates the task at a new density on its own.
             recreate: false,
+            forced,
         }))
     }
 
-    /// Tells the caller's Android which apps start below the title bar.
-    pub fn set_caption_compat(&mut self, below_title_bar: &[String]) -> Result<(), ClientError> {
+    /// Asks the caller's Android to draw an app overlay window alone at `density_dpi`, the
+    /// density of the monitor its window is on, or at its app's own density again with 0.
+    pub fn set_overlay_density(
+        &mut self,
+        overlay_id: i32,
+        density_dpi: u32,
+    ) -> Result<(), ClientError> {
+        self.done(request::Body::SetOverlayDensity(types::SetOverlayDensity {
+            overlay_id,
+            density_dpi,
+        }))
+    }
+
+    /// Tells the caller's Android which apps start below the title bar, and which keep their
+    /// focus while another app's window has it.
+    pub fn set_caption_compat(
+        &mut self,
+        below_title_bar: &[String],
+        keep_focus: &[String],
+    ) -> Result<(), ClientError> {
         self.done(request::Body::SetCaptionCompat(types::SetCaptionCompat {
             below_title_bar: below_title_bar.to_vec(),
+            keep_focus: keep_focus.to_vec(),
         }))
     }
 
@@ -8196,6 +8411,14 @@ impl HostApiClient {
         }))
     }
 
+    /// Asks the caller's Android for the current frame of a task whose window has none yet:
+    /// it is sent even when nothing in it changed.
+    pub fn request_task_frame(&mut self, task_id: i32) -> Result<(), ClientError> {
+        self.done(request::Body::RequestTaskFrame(types::RequestTaskFrame {
+            task_id,
+        }))
+    }
+
     /// Carries out `request` against the caller's Android.
     pub fn request(&mut self, request: &TaskRequest) -> Result<(), ClientError> {
         match request {
@@ -8214,7 +8437,12 @@ impl HostApiClient {
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
-            } => self.set_task_density(*task_id, *density_dpi),
+                forced,
+            } => self.set_task_density(*task_id, *density_dpi, *forced),
+            TaskRequest::SetOverlayDensity {
+                overlay_id,
+                density_dpi,
+            } => self.set_overlay_density(*overlay_id, *density_dpi),
             TaskRequest::SetCaption {
                 task_id,
                 height,
@@ -8224,9 +8452,11 @@ impl HostApiClient {
             TaskRequest::SetFullScreen { task_id, in_window } => {
                 self.set_task_full_screen(*task_id, *in_window)
             }
-            TaskRequest::CaptionCompat { below_title_bar } => {
-                self.set_caption_compat(below_title_bar)
-            }
+            TaskRequest::RequestFrame { task_id } => self.request_task_frame(*task_id),
+            TaskRequest::CaptionCompat {
+                below_title_bar,
+                keep_focus,
+            } => self.set_caption_compat(below_title_bar, keep_focus),
             TaskRequest::WindowsShown { shown } => self.set_windows_shown(*shown),
             TaskRequest::TasksShown { task_ids } => self.set_tasks_shown(task_ids),
             TaskRequest::StopApp { package_name } => self.stop_app(package_name),
@@ -8957,15 +9187,51 @@ impl HostApiClient {
 
     /// The widgets the apps in the caller's Android offer, in label order.
     pub fn widget_providers(&mut self) -> Result<Vec<WidgetProvider>, ClientError> {
+        self.list_widget_providers(false)
+            .map(|gallery| gallery.providers)
+    }
+
+    /// The widgets the apps in the caller's Android offer, in label order, without their
+    /// previews, and the icon of each app that offers one: what a gallery grouped by app
+    /// shows before the user opens an app. The previews of the widgets it shows come from
+    /// [`widget_previews`](Self::widget_previews).
+    pub fn widget_gallery(&mut self) -> Result<WidgetGallery, ClientError> {
+        self.list_widget_providers(true)
+    }
+
+    fn list_widget_providers(&mut self, lazy_previews: bool) -> Result<WidgetGallery, ClientError> {
         match self.exchange(
-            request::Body::ListWidgetProviders(types::ListWidgetProviders {}),
+            request::Body::ListWidgetProviders(types::ListWidgetProviders { lazy_previews }),
             self.timeout.max(WIDGET_LIST_WAIT + Duration::from_secs(5)),
         )? {
-            response::Body::WidgetProviders(list) => {
-                Ok(list.providers.into_iter().map(provider_from_wire).collect())
-            }
+            response::Body::WidgetProviders(list) => Ok(WidgetGallery {
+                providers: list.providers.into_iter().map(provider_from_wire).collect(),
+                app_icons: list.app_icons.into_iter().map(app_icon_from_wire).collect(),
+            }),
             _ => Err(ClientError::Malformed(
                 "expected the widgets on offer".into(),
+            )),
+        }
+    }
+
+    /// The previews of the widgets `providers` names (at most
+    /// [`widgets::MAX_PREVIEWS_ASKED`]), each the best its app gives, in the order asked.
+    pub fn widget_previews(
+        &mut self,
+        providers: &[String],
+    ) -> Result<Vec<WidgetPreview>, ClientError> {
+        match self.exchange(
+            request::Body::GetWidgetPreviews(types::GetWidgetPreviews {
+                providers: providers.to_vec(),
+            }),
+            self.timeout
+                .max(WIDGET_PREVIEW_WAIT + Duration::from_secs(5)),
+        )? {
+            response::Body::WidgetPreviews(list) => {
+                Ok(list.previews.into_iter().map(preview_from_wire).collect())
+            }
+            _ => Err(ClientError::Malformed(
+                "expected the widgets' previews".into(),
             )),
         }
     }
@@ -9775,6 +10041,36 @@ fn provider_from_wire(provider: types::WidgetProvider) -> WidgetProvider {
         needs_configuration: provider.needs_configuration,
         app_label: provider.app_label,
         reconfigurable: provider.reconfigurable,
+    }
+}
+
+fn app_icon_to_wire(icon: &AppIcon) -> types::WidgetAppIcon {
+    types::WidgetAppIcon {
+        package_name: icon.package_name.clone(),
+        icon_png: icon.png.clone(),
+    }
+}
+
+fn app_icon_from_wire(icon: types::WidgetAppIcon) -> AppIcon {
+    AppIcon {
+        package_name: icon.package_name,
+        png: icon.icon_png,
+    }
+}
+
+fn preview_to_wire(preview: &WidgetPreview) -> types::WidgetPreview {
+    types::WidgetPreview {
+        provider: preview.provider.clone(),
+        preview_png: preview.png.clone(),
+        source: preview.source.to_wire(),
+    }
+}
+
+fn preview_from_wire(preview: types::WidgetPreview) -> WidgetPreview {
+    WidgetPreview {
+        provider: preview.provider,
+        png: preview.preview_png,
+        source: PreviewSource::from_wire(preview.source),
     }
 }
 

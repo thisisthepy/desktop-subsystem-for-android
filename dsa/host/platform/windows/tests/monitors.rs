@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use dsa_host_core::guest_display::{with_display_size, Monitor, MAX_SIDE};
-use dsa_host_windows::monitors::{record_path, recorded_display, write_record};
+use dsa_host_core::guest_display::{with_display_size, Monitor};
+use dsa_host_windows::monitors::{record_path, recorded_display, recorded_monitors, write_record};
 
 fn empty_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("dsa-monitors-{name}-{}", std::process::id()));
@@ -25,9 +25,22 @@ fn fr4_the_service_sizes_the_display_in_guest_pixels_for_monitors_of_mixed_scale
         ],
     )
     .unwrap();
-    let (side, height) = recorded_display(&dir).unwrap();
-    assert_eq!(side, height);
-    assert!(side >= 3840 || side == MAX_SIDE, "{side}");
+    // A task kept at the main monitor's density needs 4096 guest pixels across a 125% monitor,
+    // and the display is that large, not cut to 4K.
+    assert_eq!(recorded_display(&dir), Some((4096, 4096)));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn fr4_the_service_reads_the_monitors_connected_when_a_window_opens() {
+    let dir = empty_dir("at-window-open");
+    assert_eq!(recorded_monitors(&dir), None);
+    let monitors = [
+        Monitor::at_dpi(2880, 1800, 192).as_main(),
+        Monitor::at_dpi(2560, 1440, 120),
+    ];
+    write_record(&dir, &monitors).unwrap();
+    assert_eq!(recorded_monitors(&dir), Some(monitors.to_vec()));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

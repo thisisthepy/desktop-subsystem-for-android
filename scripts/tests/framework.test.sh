@@ -11,6 +11,15 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 uv run dsa/guest/framework/test_framework_lock.py
+uv run dsa/guest/framework/test_forced_density_patches.py
+uv run dsa/guest/framework/test_forced_density_views_patches.py
+uv run dsa/guest/framework/test_keep_focus_patches.py
+uv run dsa/guest/framework/test_overlay_density_patches.py
+uv run dsa/guest/framework/test_hidden_trim_patches.py
+uv run dsa/guest/framework/test_idle_window_patches.py
+uv run dsa/guest/framework/test_idle_renderengine_patches.py
+uv run dsa/guest/framework/test_idle_virtual_display_patches.py
+uv run dsa/guest/framework/test_webview_zygote_patches.py
 
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
@@ -24,4 +33,7 @@ grep -Fq 'name: framework-${{ matrix.android }}-${{ matrix.arch }}-${{ steps.pin
 grep -Fq 'wanted+=("framework-$android-$arch-$version")' .github/workflows/release-image.yml
 grep -Fq 'echo "args=--framework .scratch/framework" >> "$GITHUB_OUTPUT"' .github/workflows/release-image.yml
 grep -Fq '${{ steps.framework.outputs.args }}' .github/workflows/release-image.yml
+# A run for one version or architecture never displaces a waiting run for another.
+grep -Fq "group: framework-\${{ github.ref }}-\${{ inputs.android || 'all' }}-\${{ inputs.arch || 'all' }}" \
+  .github/workflows/framework.yml
 echo "framework build: ok"

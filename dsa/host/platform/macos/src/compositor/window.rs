@@ -21,8 +21,8 @@ use std::sync::OnceLock;
 use dsa_host_core::compositor::caption::{BandSample, CaptionBand, CaptionTone};
 use dsa_host_core::compositor::frame_follow::{Arrival, FrameFollow};
 use dsa_host_core::compositor::window_sizing::{
-    frame_placement, frame_rect, kept_frame_action, to_task_size, to_window_size, FrameRectRequest,
-    KeptFrame, MoveLoop,
+    frame_rect, kept_frame_action, shown_frame_placement, to_task_size, to_window_size,
+    FrameRectRequest, KeptFrame, MoveLoop,
 };
 use dsa_host_core::tasks::Bounds;
 use dsa_host_core::ui_text::caption::back_name;
@@ -1014,7 +1014,7 @@ impl TaskWindow {
         self.place_frame();
     }
 
-    /// Puts the frame on the screen where core places it in the window ([`frame_placement`])
+    /// Puts the frame on the screen where core places it in the window ([`shown_frame_placement`])
     /// and paints the rest of the content the colour core gives it ([`fill_colour`]), so no
     /// part of the window shows AppKit's own background and no frame is scaled unless core
     /// scales it.
@@ -1023,7 +1023,8 @@ impl TaskWindow {
         let (view, backing) = unsafe { content_pixels(window) };
         let frame = self.on_screen.unwrap_or(view);
         let held = self.follow.held() && !self.overlay;
-        let placement = frame_placement(frame, view, self.frame_scale, held);
+        let pending = held && self.follow.stretched();
+        let placement = shown_frame_placement(frame, view, self.frame_scale, held, pending);
         let sample = TONES.with(|tones| {
             tones
                 .borrow()
@@ -1032,7 +1033,14 @@ impl TaskWindow {
                 .unwrap_or_default()
         });
         // An overlay window is transparent wherever its app draws nothing.
-        let fill = fill_colour(self.overlay, sample, None, system_dark);
+        // Only beside the guest's answer to a held size that it keeps smaller, as core says
+        // (FrameFollow::strips_filled): while a zoom waits for the app, the last frame is shown
+        // with nothing drawn around it, as on every host.
+        let fill = if !self.overlay && self.follow.strips_filled(placement) {
+            fill_colour(self.overlay, sample, None, system_dark)
+        } else {
+            None
+        };
         self.presenter.place(layer_frame(placement, backing), fill);
     }
 
@@ -1399,6 +1407,15 @@ impl TaskWindow {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// The largest client area the guest can draw for the task, in client pixels: a held
+    /// window larger than it fills the strips beside its frame (FrameFollow::strips_filled).
+    pub fn set_frame_limit(&mut self, max: Option<(u32, u32)>) {
+        if self.follow.limit() != max {
+            self.follow.set_limit(max);
+            self.place_frame();
         }
     }
 

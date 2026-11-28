@@ -1067,6 +1067,56 @@ public  final class TaskUpdated extends
     handlesDensityChange_ = false;
   }
 
+  public static final int FORCED_DENSITY_AVAILABLE_FIELD_NUMBER = 29;
+  private boolean forcedDensityAvailable_;
+  /**
+   * <pre>
+   * Whether the guest can give this task a new density without relaunching its activity, even
+   * though the activity does not say it handles one: the guest's framework has the change that
+   * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+   * an app the user set to System (forced) scaling another monitor's density only when this
+   * is set, and scales its window as for System otherwise. False on an image without it.
+   * </pre>
+   *
+   * <code>bool forced_density_available = 29;</code>
+   * @return The forcedDensityAvailable.
+   */
+  @java.lang.Override
+  public boolean getForcedDensityAvailable() {
+    return forcedDensityAvailable_;
+  }
+  /**
+   * <pre>
+   * Whether the guest can give this task a new density without relaunching its activity, even
+   * though the activity does not say it handles one: the guest's framework has the change that
+   * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+   * an app the user set to System (forced) scaling another monitor's density only when this
+   * is set, and scales its window as for System otherwise. False on an image without it.
+   * </pre>
+   *
+   * <code>bool forced_density_available = 29;</code>
+   * @param value The forcedDensityAvailable to set.
+   */
+  private void setForcedDensityAvailable(boolean value) {
+    
+    forcedDensityAvailable_ = value;
+  }
+  /**
+   * <pre>
+   * Whether the guest can give this task a new density without relaunching its activity, even
+   * though the activity does not say it handles one: the guest's framework has the change that
+   * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+   * an app the user set to System (forced) scaling another monitor's density only when this
+   * is set, and scales its window as for System otherwise. False on an image without it.
+   * </pre>
+   *
+   * <code>bool forced_density_available = 29;</code>
+   */
+  private void clearForcedDensityAvailable() {
+    
+    forcedDensityAvailable_ = false;
+  }
+
   public static final int FULLSCREEN_REQUEST_FIELD_NUMBER = 27;
   private int fullscreenRequest_;
   /**
@@ -2482,6 +2532,58 @@ public  final class TaskUpdated extends
 
     /**
      * <pre>
+     * Whether the guest can give this task a new density without relaunching its activity, even
+     * though the activity does not say it handles one: the guest's framework has the change that
+     * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+     * an app the user set to System (forced) scaling another monitor's density only when this
+     * is set, and scales its window as for System otherwise. False on an image without it.
+     * </pre>
+     *
+     * <code>bool forced_density_available = 29;</code>
+     * @return The forcedDensityAvailable.
+     */
+    @java.lang.Override
+    public boolean getForcedDensityAvailable() {
+      return instance.getForcedDensityAvailable();
+    }
+    /**
+     * <pre>
+     * Whether the guest can give this task a new density without relaunching its activity, even
+     * though the activity does not say it handles one: the guest's framework has the change that
+     * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+     * an app the user set to System (forced) scaling another monitor's density only when this
+     * is set, and scales its window as for System otherwise. False on an image without it.
+     * </pre>
+     *
+     * <code>bool forced_density_available = 29;</code>
+     * @param value The forcedDensityAvailable to set.
+     * @return This builder for chaining.
+     */
+    public Builder setForcedDensityAvailable(boolean value) {
+      copyOnWrite();
+      instance.setForcedDensityAvailable(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Whether the guest can give this task a new density without relaunching its activity, even
+     * though the activity does not say it handles one: the guest's framework has the change that
+     * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+     * an app the user set to System (forced) scaling another monitor's density only when this
+     * is set, and scales its window as for System otherwise. False on an image without it.
+     * </pre>
+     *
+     * <code>bool forced_density_available = 29;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearForcedDensityAvailable() {
+      copyOnWrite();
+      instance.clearForcedDensityAvailable();
+      return this;
+    }
+
+    /**
+     * <pre>
      * Which kind of full screen the task's app asks for, if any. The host shows the task's
      * window on its whole monitor or keeps it inside its window, as the user's setting for that
      * kind of request says.
@@ -2741,13 +2843,14 @@ public  final class TaskUpdated extends
             "handlesDensityChange_",
             "fullscreenRequest_",
             "overlay_",
+            "forcedDensityAvailable_",
             "belowTitleBar_",
           };
           java.lang.String info =
-              "\u0000\u0016\u0000\u0000\u0001(\u0016\u0000\u0001\u0000\u0001\u0004\u0002\t\u0003" +
+              "\u0000\u0017\u0000\u0000\u0001(\u0017\u0000\u0001\u0000\u0001\u0004\u0002\t\u0003" +
               "\u0208\u0004\u0208\u0005\u0007\u0006\u000b\u0007\u000b\b\u000b\t\u000b\n\u000b\u000b" +
               "\f\f\u0006\u0014\f\u0015\u0007\u0016\u0007\u0017\u0007\u0018\u001b\u0019\u0007\u001a" +
-              "\u0007\u001b\f\u001c\t(\u0007";
+              "\u0007\u001b\f\u001c\t\u001d\u0007(\u0007";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

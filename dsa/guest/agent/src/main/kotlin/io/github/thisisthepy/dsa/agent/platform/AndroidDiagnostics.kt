@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import io.github.thisisthepy.dsa.agent.diagnostics.DiagnosticsSource
 import io.github.thisisthepy.dsa.agent.diagnostics.DropboxEntry
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * The agent's part of the diagnostics, from the system: the dropbox, which the agent reads with
@@ -52,8 +53,27 @@ class AndroidDiagnostics(context: Context) : DiagnosticsSource {
         return out.toByteArray()
     }
 
+    /**
+     * `getprop`'s list of the properties the agent's domain may read, read on a thread of its
+     * own while the program runs, which is ended if it takes longer than the dumps may.
+     */
+    override fun properties(): ByteArray? {
+        val process = ProcessBuilder(GETPROP).redirectErrorStream(true).start()
+        val out = ByteArrayOutputStream()
+        val reader = Thread({ process.inputStream.use { it.copyTo(out) } }, "dsa-diagnostics-getprop")
+        reader.start()
+        if (!process.waitFor(READ_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+            process.destroyForcibly()
+            reader.join(READ_TIMEOUT_MILLIS)
+            return null
+        }
+        reader.join(READ_TIMEOUT_MILLIS)
+        return if (process.exitValue() == 0) out.toByteArray() else null
+    }
+
     private companion object {
         const val READ_TIMEOUT_MILLIS = 30_000L
         const val MAX_TEXT = 16 * 1024 * 1024
+        const val GETPROP = "/system/bin/getprop"
     }
 }

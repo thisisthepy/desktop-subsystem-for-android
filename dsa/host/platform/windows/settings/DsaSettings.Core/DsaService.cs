@@ -613,18 +613,43 @@ public sealed partial class DsaService
             ? value.EnumerateArray()
             : Enumerable.Empty<JsonElement>();
 
-    /// <summary>The widgets the apps in Android offer and the ones placed on the desktop,
-    /// starting Android first when it is not running.</summary>
-    public async Task<WidgetList> WidgetsAsync()
+    private static WidgetOffer ReadOffer(JsonElement p) =>
+        new(String(p, "provider"), String(p, "package"), String(p, "label"),
+            Base64(p, "preview_png"), Int(p, "default_width_dp"), Int(p, "default_height_dp"),
+            Bool(p, "needs_configuration"), String(p, "app"));
+
+    /// <summary>The widgets the apps in Android offer, grouped by app as dsa groups them, with
+    /// each app's icon and no widget's preview, and the ones placed on the desktop, starting
+    /// Android first when it is not running.</summary>
+    public async Task<WidgetGallery> WidgetGalleryAsync()
     {
-        var json = await RunJsonAsync("widgets", "list").ConfigureAwait(true);
-        var offers = Items(json, "providers")
-            .Select(p => new WidgetOffer(String(p, "provider"), String(p, "package"), String(p, "label"),
-                Base64(p, "preview_png"), Int(p, "default_width_dp"), Int(p, "default_height_dp"),
-                Bool(p, "needs_configuration"), String(p, "app")))
+        var json = await RunJsonAsync("widgets", "list", "--by-app").ConfigureAwait(true);
+        var apps = Items(json, "apps")
+            .Select(a => new WidgetApp(String(a, "package"), String(a, "app"), Base64(a, "icon_png"),
+                Items(a, "widgets").Select(ReadOffer).ToList()))
             .ToList();
         var placed = Items(json, "widgets").Select(ReadPlaced).ToList();
-        return new WidgetList(offers, placed);
+        return new WidgetGallery(apps, placed);
+    }
+
+    /// <summary>The most previews one call asks dsa for.</summary>
+    public const int MaxPreviewsAsked = 64;
+
+    /// <summary>The previews of the widgets <paramref name="providers"/> names (at most
+    /// <see cref="MaxPreviewsAsked"/>), each the best its app gives, in the order asked. A
+    /// widget that is not on offer has none.</summary>
+    public async Task<IReadOnlyList<WidgetPreview>> WidgetPreviewsAsync(IReadOnlyList<string> providers)
+    {
+        if (providers.Count == 0)
+        {
+            return Array.Empty<WidgetPreview>();
+        }
+        var args = new List<string> { "widgets", "previews" };
+        args.AddRange(providers.Take(MaxPreviewsAsked));
+        var json = await RunJsonAsync(args.ToArray()).ConfigureAwait(true);
+        return Items(json, "previews")
+            .Select(p => new WidgetPreview(String(p, "provider"), String(p, "source"), Base64(p, "preview_png")))
+            .ToList();
     }
 
     /// <summary>Places a widget of <paramref name="provider"/> on the desktop. When its app asks

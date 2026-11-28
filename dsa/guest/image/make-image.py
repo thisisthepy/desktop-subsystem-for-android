@@ -24,7 +24,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
    whose package manager it edits so an app with arm64-v8a code
    only installs while ARM translation is on (SERVICES_ABI_CODE), and whose WebView service it
    edits so the WebView zygote starts with the first renderer (SERVICES_WEBVIEW_ZYGOTE_CODE);
-6. builds the images, and lays them out on the template of a user's Android disk.
+6. builds the images from those contents (the ones signing built before anything was compiled
+   are dropped), checks that they hold the boot images, odex and boot class path jars it made
+   (built_image_problems), and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
 
@@ -49,7 +51,10 @@ image.json describes them under "framework". When the framework build has DSA's 
 in place of the KeyMint APEX, which the image then does not select. When it has services.jar
 (FRAMEWORK_JAVA_FILES), built from source with the window manager that gives a dialog no caption
 bar inset, the system partition carries that jar in place of the build's own, which is then not
-dex edited: the patches it is built with make the same changes.
+dex edited: the patches it is built with make the same changes. framework.jar comes with it,
+built with the change that rebuilds the views of a task set to forced system scaling at its new
+density; it is on the boot class path, so the image compiles the boot images again for it, and
+every odex compiled against them (rebuild_boot_images).
 """
 
 import argparse
@@ -59,6 +64,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -516,6 +522,12 @@ SERVICES_PROFILE_INPUT = "services_profile"
 # Nothing takes its place: Android's log stays in logd's memory, and the control daemon sends
 # it to the host only while someone reads it (`dsa logcat`).
 REMOVED_INIT_SCRIPTS = ["VENDOR/etc/init/seriallogging.rc"]
+
+# update_engine, the A/B update daemon: the host updates Android by replacing the whole image
+# (its image store downloads, checks and trial-boots each one), and the system disk is read
+# only, so the daemon never has an update to apply. It started at every boot and stayed, about
+# 3.5 MiB for the guest's whole life. Its init script goes with it, so init never starts it.
+REMOVED_SYSTEM_FILES = ["SYSTEM/etc/init/update_engine.rc", "SYSTEM/bin/update_engine"]
 
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
@@ -1018,6 +1030,7 @@ def removed(name, hwcomposer=False, power=False, gnss=False, sensors=False, came
     """Whether a target_files member belongs to an app, a HAL or a service the guest must not have."""
     return (
         name in REMOVED_INIT_SCRIPTS
+        or name in REMOVED_SYSTEM_FILES
         or name in REMOVED_VENDOR_FILES
         or any(f"/{app}/" in name for app in REMOVED_APPS)
         or any(
@@ -1251,12 +1264,17 @@ ANDROID_XMLNS = 'xmlns:android="http://schemas.android.com/apk/res/android"'
 APP_XMLNS = 'xmlns:app="http://schemas.android.com/apk/res-auto"'
 
 
-def overlay_manifest(package, target, resource_map=False, priority=100, required_property=None):
+def overlay_manifest(package, target, resource_map=False, priority=100, required_property=None,
+                     target_name=None):
     """The manifest of a static overlay of `target` with no code; with `resource_map`, its
     resource map (SYSTEM_OVERLAY_MAP) names what it replaces, and only that. With
     `required_property` (a name and a value), the package manager applies the overlay only
-    while that read-only property has that value when it scans the packages at boot."""
-    mapping = f'\n        android:resourcesMap="@xml/{SYSTEM_OVERLAY_MAP}"' if resource_map else ""
+    while that read-only property has that value when it scans the packages at boot. With
+    `target_name`, it names the target's overlayable set it replaces resources of: a package
+    that declares overlayable sets lets an overlay replace only resources of the set it names,
+    and idmap2 maps none of an overlay that names no set, which then never applies."""
+    mapping = f'\n        android:targetName="{target_name}"' if target_name else ""
+    mapping += f'\n        android:resourcesMap="@xml/{SYSTEM_OVERLAY_MAP}"' if resource_map else ""
     if required_property:
         name, value = required_property
         mapping += (f'\n        android:requiredSystemPropertyName="{name}"'
@@ -1490,12 +1508,9 @@ def settings_overlay_map():
     Settings' ids."""
     mapping = {name: name for name in SETTINGS_OVERLAID}
     mapping.update({f"bool/{name}": f"bool/{name}" for name in SETTINGS_OVERLAY_BOOLEANS})
-    mapping.update({f"drawable/{name}": f"drawable/{name}" for name in SETTINGS_CARDS})
-    mapping["dimen/settingslib_preference_corner_radius"] = "dimen/settingslib_preference_corner_radius"
     mapping[f"style/{SETTINGS_TITLE_THEME}"] = "style/DsaAppBarTheme"
     mapping[f"style/{SETTINGS_TITLE_THEME_PARENT}"] = f"style/{SETTINGS_TITLE_THEME_PARENT}"
     mapping["attr/expanded"] = "attr/expanded"
-    mapping.update({f"style/{name}": f"style/{ours}" for name, (ours, _) in SETTINGS_TITLE_STYLES.items()})
     mapping[f"layout/{SETTINGS_HOME_LAYOUT}"] = f"layout/{SETTINGS_HOME_LAYOUT}"
     mapping.update({f"id/{name}": f"id/{name}" for name in SETTINGS_HOME_IDS})
     mapping.update({f"attr/{name}": f"attr/{name}" for name in SETTINGS_HOME_ATTRS})
@@ -1516,9 +1531,6 @@ def settings_overlay_files():
         "res/values/dsa_config.xml": resources_xml(
             [f'<bool name="{name}">{str(value).lower()}</bool>'
              for name, value in SETTINGS_OVERLAY_BOOLEANS.items()]),
-        "res/values-v36/dsa_design.xml": resources_xml(
-            [f'<dimen name="settingslib_preference_corner_radius">{DESIGN_CORNER_DP}dp</dimen>']
-            + [design_style(ours, "", f"{size}dp") for ours, size in SETTINGS_TITLE_STYLES.values()]),
         f"res/layout/{SETTINGS_HOME_LAYOUT}.xml": settings_home_layout(large_title=False),
         f"res/layout-h{DESIGN_TALL_WINDOW_DP}dp/{SETTINGS_HOME_LAYOUT}.xml": settings_home_layout(large_title=True),
         f"res/drawable/{SETTINGS_SEARCH_ICON}.xml": search_icon(),
@@ -1532,39 +1544,9 @@ def settings_overlay_files():
         [f'<style name="{SETTINGS_TITLE_THEME_PARENT}" parent="" />'])
     for folder, theme in (("drawable-v36", "light"), ("drawable-night-v36", "dark")):
         files[f"res/{folder}/{SETTINGS_BACK_ICON}.xml"] = settings_back_icon(theme)
-        for name, (top, bottom) in SETTINGS_CARDS.items():
-            files[f"res/{folder}/{name}.xml"] = settings_card(top, bottom, theme)
     for folder, theme in (("drawable", "light"), ("drawable-night", "dark")):
         files[f"res/{folder}/{SETTINGS_SEARCH_ICON}_background.xml"] = search_background(theme)
     return files
-
-
-def settings_card(top, bottom, theme):
-    """One of SettingsLib's group backgrounds: the row's surface, inset from the list's sides
-    as SettingsLib insets it, with the group's outer corners rounded (`top`, `bottom`) and
-    square corners where the next row of the same group joins it. The 32 dp padding is
-    SettingsLib's own, which its adapter gives the row."""
-    top_dp, bottom_dp = (DESIGN_CORNER_DP if top else 0), (DESIGN_CORNER_DP if bottom else 0)
-    return (
-        XML_HEADER
-        + f'<ripple {ANDROID_XMLNS}\n'
-        '    android:color="?android:attr/colorControlHighlight"\n'
-        '    android:paddingStart="32dp"\n'
-        '    android:paddingEnd="32dp">\n'
-        '    <item\n'
-        '        android:start="?android:attr/listPreferredItemPaddingStart"\n'
-        '        android:end="?android:attr/listPreferredItemPaddingEnd">\n'
-        '        <shape android:shape="rectangle">\n'
-        f'            <solid android:color="@*android:color/system_surface_bright_{theme}" />\n'
-        '            <corners\n'
-        f'                android:topLeftRadius="{top_dp}dp"\n'
-        f'                android:topRightRadius="{top_dp}dp"\n'
-        f'                android:bottomLeftRadius="{bottom_dp}dp"\n'
-        f'                android:bottomRightRadius="{bottom_dp}dp" />\n'
-        '        </shape>\n'
-        '    </item>\n'
-        '</ripple>\n'
-    )
 
 
 def search_icon():
@@ -1804,7 +1786,8 @@ def design_overlay_sources(dest, apk, record=None):
     write_overlay_files(dest, {
         "AndroidManifest.xml": overlay_manifest(overlay["package"], overlay["target"], resource_map=True,
                                                 priority=overlay.get("priority", 100),
-                                                required_property=overlay.get("required_property")),
+                                                required_property=overlay.get("required_property"),
+                                                target_name=overlay.get("overlayable")),
         **files,
         f"res/xml/{SYSTEM_OVERLAY_MAP}.xml": overlay_map(mapping),
     })
@@ -2080,6 +2063,90 @@ def arsc_resources(table):
     return resources
 
 
+# A package's overlayable sets: a chunk per set, with its name and actor (256 UTF-16 units
+# each), holding a chunk per policy: the policy's flags, then the IDs of its resources.
+ARSC_OVERLAYABLE = 0x0204
+ARSC_OVERLAYABLE_POLICY = 0x0205
+# The policy an overlay in /vendor/overlay meets: its partition's.
+OVERLAYABLE_POLICY_VENDOR = 0x00000004
+
+
+def arsc_overlayables(table):
+    """Each overlayable set a compiled resource table declares, by name: the policies of the
+    set (their flags, combined) and its resources ("type/name") under each policy, as
+    {name: [(flags, {"type/name"})]}. A table that declares none gives {}."""
+    chunk_type, header_size, _ = struct.unpack_from("<HHI", table, 0)
+    if chunk_type != ARSC_TABLE:
+        raise ValueError("not a compiled resource table")
+    found = {}
+    offset = header_size
+    while offset < len(table):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", table, offset)
+        if chunk_type == ARSC_PACKAGE:
+            package_id = struct.unpack_from("<I", table, offset + 8)[0]
+            type_strings, _, key_strings = struct.unpack_from("<III", table, offset + 8 + 4 + 256)
+            types = xml_strings(table, offset + type_strings)
+            keys = xml_strings(table, offset + key_strings)
+            names, sets = {}, []
+            child = offset + header_size
+            while child < offset + size:
+                kind, child_header, child_size = struct.unpack_from("<HHI", table, child)
+                if kind == ARSC_TYPE:
+                    type_id, flags, _, count, entries_start = struct.unpack_from("<BBHII", table, child + 8)
+                    kind_name = types[type_id - 1]
+                    for index, entry in _arsc_entry_offsets(table, child + child_header, flags, count):
+                        at = child + entries_start + entry
+                        first, entry_flags = struct.unpack_from("<HH", table, at)
+                        key = first if entry_flags & ARSC_ENTRY_COMPACT else struct.unpack_from("<I", table, at + 4)[0]
+                        names[(package_id << 24) | (type_id << 16) | index] = f"{kind_name}/{keys[key]}"
+                elif kind == ARSC_OVERLAYABLE:
+                    name = table[child + 8:child + 8 + 512].decode("utf-16-le").split("\0", 1)[0]
+                    policies = []
+                    inner = child + child_header
+                    while inner < child + child_size:
+                        inner_kind, inner_header, inner_size = struct.unpack_from("<HHI", table, inner)
+                        if inner_kind == ARSC_OVERLAYABLE_POLICY:
+                            flags, count = struct.unpack_from("<II", table, inner + 8)
+                            policies.append((flags, struct.unpack_from(f"<{count}I", table, inner + inner_header)))
+                        inner += inner_size
+                    sets.append((name, policies))
+                child += child_size
+            for name, policies in sets:
+                found.setdefault(name, []).extend(
+                    (flags, {names.get(ref, f"0x{ref:08x}") for ref in refs}) for flags, refs in policies)
+        offset += size
+    return found
+
+
+def overlayable_problems(overlay, overlaid, table):
+    """What keeps the overlay `overlay` (an entry of SYSTEM_OVERLAYS) from replacing
+    `overlaid` ("type/name") in the package whose resource table is `table`. A package that
+    declares overlayable sets lets an overlay replace only resources of the set its manifest
+    names, under a policy the overlay meets (/vendor/overlay: the vendor partition's); idmap2
+    maps nothing of an overlay that names no set or another one, and it is never applied. A
+    package that declares none lets a preinstalled overlay replace anything, whatever it names."""
+    sets = arsc_overlayables(table)
+    name = overlay.get("overlayable")
+    if not sets:
+        return []
+    if not name:
+        return [f"{overlay['target']} declares overlayable sets ({', '.join(sorted(sets))}) and the overlay "
+                "names none, so idmap2 maps none of its resources"]
+    if name not in sets:
+        return [f"it names the overlayable set {name}, which {overlay['target']} does not declare "
+                f"(it declares {', '.join(sorted(sets))})"]
+    allowed = set().union(*(names for flags, names in sets[name] if flags & OVERLAYABLE_POLICY_VENDOR))
+    listed = set().union(*(names for _, names in sets[name]))
+    problems = []
+    for resource in sorted(overlaid):
+        if resource not in listed:
+            problems.append(f"{resource} is not in {overlay['target']}'s overlayable set {name}")
+        elif resource not in allowed:
+            problems.append(f"{resource} is in {overlay['target']}'s overlayable set {name}, but not under the "
+                            "vendor partition's policy an overlay in /vendor/overlay meets")
+    return problems
+
+
 # What an overlay's sources name of the framework: android: attributes on elements and in
 # style items, and @android:, @*android: and ?android: references.
 FRAMEWORK_ATTRIBUTE = re.compile(r'(?<![\w:])android:(\w+)\s*=')
@@ -2170,7 +2237,7 @@ def system_overlay_targets(z, otatools, work, env, replaced=None):
     the bytes the image carries instead (a default app in the published app's place, DocumentsUI)
     is read from there, so the overlay is built against the app the image has."""
     replaced = replaced or {}
-    names = sorted(set(z.namelist()) | set(replaced))
+    names = sorted(set(z.namelist()) | (set(replaced) - {PERMISSION_CONTROLLER_IMAGE}))
     tables = {}
     for overlay in SYSTEM_OVERLAYS:
         if overlay["target_apk"] is not None:
@@ -2189,7 +2256,9 @@ def system_overlay_targets(z, otatools, work, env, replaced=None):
         apks = sorted(payload.rglob(PERMISSION_CONTROLLER_APK))
         if not apks:
             raise ValueError(f"{apex} has no {PERMISSION_CONTROLLER_APK}, which {overlay['apk']} overlays")
-        tables[overlay["apk"]] = apk_resource_table(apks[0].read_bytes())
+        # The overlay is built against the PermissionController the image carries.
+        built = replaced.get(PERMISSION_CONTROLLER_IMAGE)
+        tables[overlay["apk"]] = apk_resource_table(built if built is not None else apks[0].read_bytes())
         shutil.rmtree(folder, ignore_errors=True)
     return tables
 
@@ -2219,6 +2288,9 @@ def build_system_overlays(aapt2, framework_res, work, tables):
         if missing:
             raise ValueError(f"{apk} replaces {', '.join(missing)}, which {overlay['target']} in this "
                              "image does not have: the overlay was written for another build of it")
+        refused = overlayable_problems(overlay, overlaid_resources(apk), tables[apk])
+        if refused:
+            raise ValueError(f"{apk} would never be applied, so {overlay['without']}: {'; '.join(refused)}")
         records[apk] = overlay_record(overlay["target"], framework_table, tables[apk])
         # Every overlay's references are checked before any is linked, so one run names them
         # all, where aapt2 would stop at the first.
@@ -3109,6 +3181,10 @@ def edit_settings_apk(data, name):
 #   restores a trace that was running before the reboot. Opening System Tracing, or its
 #   quick setting, starts the app as before.
 BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk", "/Traceur.apk"]
+# System apps a phone has that open only from Settings, so no launcher lists them: System
+# Tracing (Traceur, in developer options) and the Android logo (EasterEgg, opened by tapping
+# the Android version in About). check-image.py refuses an image without them.
+SETTINGS_ONLY_APKS = ["SYSTEM/app/Traceur/Traceur.apk", "SYSTEM/app/EasterEgg/EasterEgg.apk"]
 BOOT_ACTIONS = {"android.intent.action.BOOT_COMPLETED", "android.intent.action.LOCKED_BOOT_COMPLETED"}
 
 
@@ -3246,24 +3322,25 @@ def edit_services_jar(data, name):
 
 
 def image_services_jar(data):
-    """The framework build's services.jar as the image carries it: its dex files stored and
-    aligned, as the published build stores them, so system_server maps them from the file. The
-    services build makes no odex, and a build without dexpreopt compresses a jar's dex files;
-    make-image.py compiles the jar itself (EDITED_JARS). The jar needs no dex edit: the patches it
+    """A jar of the framework build (services.jar, framework.jar) as the image carries it: its
+    dex files stored and aligned, as the published build stores them, so a process maps them
+    from the file. The services build makes no odex, and a build without dexpreopt compresses a
+    jar's dex files; make-image.py compiles services.jar itself (EDITED_JARS), and the boot images
+    again for framework.jar (rebuild_boot_images). services.jar needs no dex edit: the patches it
     is built with make the changes SERVICES_CODE makes to the published build's."""
     return aligned_zip(data, store_dex=True)
 
 
 def edit_permission_controller_apk(data, name):
-    """PermissionController.apk with its preference lists grouped in cards with Settings'
-    corners, and with the room Settings' lists keep below their last row."""
+    """PermissionController.apk with the room Settings' lists keep below their last row. Its
+    cards are SettingsLib's own as dsa/apps patches them (SOURCE_OWNED_SETTINGSLIB)."""
     return edit_apk(data, name, dimensions=permission_controller_edits())
 
 
 def permission_controller_edits():
-    """The compiled XML edits PermissionController.apk gets: its cards, and the room below
-    the last row of its lists, as Settings' have it."""
-    return {**PERMISSION_CONTROLLER_CARDS, **PERMISSION_CONTROLLER_LIST_END}
+    """The compiled XML edits PermissionController.apk gets: the room below the last row of
+    its lists, as Settings' have it."""
+    return dict(PERMISSION_CONTROLLER_LIST_END)
 
 
 # Properties the vendor and odm build.prop files may not set. init reads those two files as
@@ -4261,6 +4338,13 @@ FRAMEWORK_FILES = list(framework_lock.OUTPUTS)
 # not edit, and compiles it as it compiles an edited jar. A framework build whose services build
 # failed, or from before it, has no services.jar, and the image edits the published build's.
 FRAMEWORK_JAVA_FILES = list(framework_lock.JAVA_OUTPUTS)
+# framework.jar from the same build, with the change that rebuilds the views of a task set to
+# forced system scaling at its new density: it comes with services.jar, whose window manager calls
+# it, or not at all. It is on the boot class path, so the image compiles the boot images and
+# everything compiled against them again for it (rebuild_boot_images), and it must carry the
+# hidden API flags the build encodes into a boot jar's dex.
+FRAMEWORK_JAR = framework_lock.FRAMEWORK_JAR
+BOOT_CLASS_PATH_JAVA_FILES = [FRAMEWORK_JAR]
 GPU_RESET_PROPERTY = "debug.dsa.gpu.resets"
 GPU_RESET_RULE = "(allow surfaceflinger debug_prop (property_service (set)))"
 
@@ -4583,6 +4667,9 @@ def framework_problems(description, build_id, android_major, arch, read):
                             f"not {arch} ({machine})")
         if name in FRAMEWORK_JAVA_FILES and not dex_jar(data):
             problems.append(f"the framework's {name} is not a jar with dex code")
+        elif name in BOOT_CLASS_PATH_JAVA_FILES and not jar_has_hidden_api_flags(data):
+            problems.append(f"the framework's {name} carries no hidden API flags in its dex, so apps could "
+                            "reach every hidden API of the framework")
     return problems
 
 
@@ -4591,6 +4678,40 @@ def dex_jar(data):
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             return "classes.dex" in z.namelist() and z.read("classes.dex")[:4] == b"dex\n"
+    except zipfile.BadZipFile:
+        return False
+
+
+# The map item a dex file of the boot class path carries its hidden API flags in
+# (TYPE_HIDDENAPI_CLASS_DATA_ITEM): the build encodes them into every dex of a boot jar, and ART
+# reads them to keep apps away from the framework's hidden API.
+DEX_HIDDEN_API_CLASS_DATA = 0xF000
+
+
+def dex_has_hidden_api_flags(dex):
+    """Whether the dex file `dex` has a hidden API class data section in its map list."""
+    if len(dex) < 0x38 or dex[:4] != b"dex\n":
+        return False
+    (map_off,) = struct.unpack_from("<I", dex, 0x34)
+    if map_off + 4 > len(dex):
+        return False
+    (count,) = struct.unpack_from("<I", dex, map_off)
+    for i in range(count):
+        at = map_off + 4 + 12 * i
+        if at + 12 > len(dex):
+            return False
+        (kind,) = struct.unpack_from("<H", dex, at)
+        if kind == DEX_HIDDEN_API_CLASS_DATA:
+            return True
+    return False
+
+
+def jar_has_hidden_api_flags(data):
+    """Whether every dex file of the jar `data` carries hidden API flags."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            dexes = [n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)]
+            return bool(dexes) and all(dex_has_hidden_api_flags(z.read(n)) for n in dexes)
     except zipfile.BadZipFile:
         return False
 
@@ -4684,8 +4805,10 @@ def check_framework(manifest, names, read):
         if name not in names:
             problems.append(f"{name} is missing from the image")
         elif hashlib.sha256(read(name)).hexdigest() != files[name]:
-            problems.append(f"{name} is not the framework build's file that image.json names, so a "
-                            "dialog in a window is drawn below the place that takes its taps")
+            effect = ("an app set to forced system scaling keeps the sizes its views took at the old "
+                      "density" if name == FRAMEWORK_JAR else
+                      "a dialog in a window is drawn below the place that takes its taps")
+            problems.append(f"{name} is not the framework build's file that image.json names, so {effect}")
     policy = "SYSTEM/etc/selinux/plat_sepolicy.cil"
     if policy in names and GPU_RESET_RULE not in read(policy).decode(errors="replace"):
         problems.append(f"SurfaceFlinger may not set {GPU_RESET_PROPERTY}, so the apps never hear of a "
@@ -5107,6 +5230,15 @@ TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bo
 # How many MiB the next gradual trim takes; the daemon sets it before the trim property.
 TRIM_SIZE_PROPERTY = "vendor.dsa.memory.trim_size"
 TRIM_SIZE_PROPERTY_CONTEXT = f"{TRIM_SIZE_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
+# The swappiness the next gradual trim passes to memory.reclaim (0 while a window is shown, so the
+# shown app's memory stays out of zram); the daemon sets it before the trim property.
+TRIM_SWAPPINESS_PROPERTY = "vendor.dsa.memory.trim_swappiness"
+TRIM_SWAPPINESS_PROPERTY_CONTEXT = f"{TRIM_SWAPPINESS_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
+# The kernel memory report for the host's diagnostics: dsa-channeld sets this to the time, in
+# seconds since 1970, as a collection starts, and dsa-channeld.rc runs the report as root, in
+# developer mode or not. Only the daemon and init's own scripts may set dsa_memory_prop.
+MEMORY_REPORT_PROPERTY = "vendor.dsa.memory.report"
+MEMORY_REPORT_PROPERTY_CONTEXT = f"{MEMORY_REPORT_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
 # The zram writeback (dsa-channeld.rc): the daemon sets the budget of the run, in 4 KiB pages,
 # and then the property init acts on. init sets how long no app must be open before a
 # writeback and how long a page must go unused before it is written (dsa-memory.rc), from the
@@ -5332,9 +5464,34 @@ DEFAULT_APP_CERTIFICATE = "build/make/target/product/security/{}.x509.pem"
 DEFAULT_APP_PRIVATE_KEY = "build/make/target/product/security/{}.pk8"
 
 
-def default_apps():
-    """The default apps apps.json lists."""
+def image_apps():
+    """Every app apps.json lists: the default apps and the system screens."""
     return json.loads(DEFAULT_APPS_SOURCE.read_text(encoding="utf-8"))["apps"]
+
+
+def default_apps():
+    """The default apps apps.json lists (a clock, a gallery and the rest), not the system screens."""
+    return [app for app in image_apps() if app.get("role") != "system"]
+
+
+# The system screens apps.json lists (role "system"): Settings, PermissionController,
+# PackageInstaller and the share sheet (IntentResolver), each built in the Framework build's
+# tree from the image's own pin with DSA's design, in place of the published app. They keep
+# their AOSP names, packages and configuration; only the APK changes. PermissionController is
+# inside the permission APEX, so its "image" path is the APEX's followed by the APK's name, and
+# make-image.py puts it into the APEX's payload (edit_permission_apex).
+def system_screen_apps():
+    """The system screens apps.json lists."""
+    return [app for app in image_apps() if app.get("role") == "system"]
+
+
+def in_apex(app):
+    """Whether `app` is inside an APEX (PermissionController) rather than an APK of its own."""
+    return "apex" in app["build"]
+
+
+# Where the permission APEX's PermissionController goes in the default apps' payloads.
+PERMISSION_CONTROLLER_IMAGE = "SYSTEM/apex/com.android.permission.apex/PermissionController.apk"
 
 
 def _apps_script():
@@ -5370,7 +5527,7 @@ def load_default_apps(folder, android):
     is not the one this repository makes."""
     folder = Path(folder)
     payloads, records, problems = {}, [], []
-    for app in default_apps():
+    for app in image_apps():
         record_path = folder / f"{app['name']}.json"
         if not record_path.is_file():
             problems.append(f"{folder} has no {record_path.name}, so the image would have no {app['label']} app")
@@ -5424,19 +5581,29 @@ def default_apps_permissions(apps):
 def default_app_apkcerts(app):
     """The apkcerts.txt line that has signing give a default app its certificate."""
     key = app.get("certificate", "testkey")
+    partition = app["image"].split("/", 1)[0].lower()
     return (f'name="{Path(app["image"]).name}" certificate="{DEFAULT_APP_CERTIFICATE.format(key)}" '
-            f'private_key="{DEFAULT_APP_PRIVATE_KEY.format(key)}" partition="system"')
+            f'private_key="{DEFAULT_APP_PRIVATE_KEY.format(key)}" partition="{partition}"')
+
+
+def fs_config_path(name):
+    """The filesystem_config.txt path of a target_files member: its partition folder in lower
+    case (SYSTEM/ is system/) and the rest exactly as it is. mkfs.erofs looks paths up with
+    their case, so system/app/dsacalculator does not match system/app/DsaCalculator and the
+    image fails to build."""
+    partition, _, rest = name.partition("/")
+    return f"{partition.lower()}/{rest}" if rest else partition.lower()
 
 
 def default_apps_fs_config(apps):
     """The filesystem_config.txt lines of the default apps' folders, APKs and configuration."""
     lines = []
     for app in apps:
-        folder = Path(app["image"]).parent.as_posix().lower()
+        folder = fs_config_path(Path(app["image"]).parent.as_posix())
         lines.append(f"{folder} 0 0 755 capabilities=0x0")
-        lines.append(f"{app['image'].lower()} 0 0 644 capabilities=0x0")
-    lines.append(f"{DEFAULT_APPS_SYSCONFIG.lower()} 0 0 644 capabilities=0x0")
-    lines.append(f"{DEFAULT_APPS_PERMISSIONS.lower()} 0 0 644 capabilities=0x0")
+        lines.append(f"{fs_config_path(app['image'])} 0 0 644 capabilities=0x0")
+    lines.append(f"{fs_config_path(DEFAULT_APPS_SYSCONFIG)} 0 0 644 capabilities=0x0")
+    lines.append(f"{fs_config_path(DEFAULT_APPS_PERMISSIONS)} 0 0 644 capabilities=0x0")
     return lines
 
 
@@ -5491,6 +5658,74 @@ def default_apps_problems(names, read, records, android):
     for name in sorted(names):
         if name.endswith(".apk") and (replaced_by_default_apps(name, apps) or "/Calendar/" in name):
             problems.append(f"{name} is still in the image, beside the default app that replaces it")
+    return problems
+
+
+def system_screen_override_problems():
+    """What in the image would override what the patched SettingsLib owns
+    (SOURCE_OWNED_SETTINGSLIB): a Settings or PermissionController overlay resource, or a
+    compiled edit of PermissionController.apk, that replaces one of them."""
+    owned = set(SOURCE_OWNED_SETTINGSLIB)
+    problems = [f"DsaSettingsOverlay.apk replaces {name}, which the patched SettingsLib owns"
+                for name in sorted(owned & set(settings_overlay_map()))]
+    overlay_files = settings_overlay_files()
+    for path in sorted(overlay_files):
+        parts = path.split("/")
+        if len(parts) == 3 and parts[0] == "res":
+            kind = parts[1].split("-")[0]
+            if f"{kind}/{Path(parts[2]).stem}" in owned:
+                problems.append(f"DsaSettingsOverlay.apk has {path}, which the patched SettingsLib owns")
+        if path.endswith(".xml") and path.startswith("res/values"):
+            for name in re.findall(r'<(?:dimen|color|style) name="([^"]+)"', overlay_files[path]):
+                for kind in ("dimen", "color", "style"):
+                    if f"{kind}/{name}" in owned and f'<{kind} name="{name}"' in overlay_files[path]:
+                        problems.append(f"DsaSettingsOverlay.apk sets {kind}/{name} in {path}, which the "
+                                        "patched SettingsLib owns")
+    for xml in permission_controller_edits():
+        kind_folder, name = xml.split("/")[1], Path(xml).stem
+        if f"{kind_folder.split('-')[0]}/{name}" in owned:
+            problems.append(f"PermissionController.apk's {xml} is edited, which the patched SettingsLib owns")
+    for overlay in DESIGN_OVERLAYS:
+        if overlay == "DsaPermissionControllerOverlay.apk":
+            for name in sorted(owned & set(design_overlay_resources(overlay)[1])):
+                problems.append(f"{overlay} replaces {name}, which the patched SettingsLib owns")
+    return problems
+
+
+def system_screens_problems(names, read, records, android):
+    """What is wrong with the system screens of a signed target_files whose members are `names`
+    and read with `read`: one missing or under another package, or built from another pin or
+    other patches than dsa/apps has now (`records`, image.json's "default_apps"), so the image
+    would show the published AOSP screen and not DSA's design. PermissionController is inside
+    the permission APEX, which takes otatools to open, so for it the APEX must be there and the
+    record must match."""
+    problems = []
+    names = set(names)
+    recorded = {r.get("name"): r for r in records or []}
+    for app in system_screen_apps():
+        label = app["label"]
+        if in_apex(app):
+            if not any(apex in names for apex in PERMISSION_APEXES):
+                problems.append(f"the image has no permission APEX, so it has no {label} screens")
+        elif app["image"] not in names:
+            problems.append(f"{app['image']} is missing, so the image has no {label} screens")
+            continue
+        else:
+            try:
+                package = apk_manifest_package(read(app["image"]))
+            except (ValueError, KeyError, zipfile.BadZipFile) as e:
+                problems.append(f"{app['image']} has no readable manifest ({e})")
+                continue
+            if package != app["package"]:
+                problems.append(f"{app['image']} is {package}, not {app['package']}")
+        wanted = default_app_provenance(app, android)
+        record = recorded.get(app["name"])
+        if record is None:
+            problems.append(f"image.json does not say what the {label} screens were built from, so the "
+                            "image may carry the published AOSP app without DSA's design")
+        elif {key: record.get(key) for key in wanted} != wanted:
+            problems.append(f"the {label} screens were built from another source or other patches than "
+                            "dsa/apps has now")
     return problems
 
 
@@ -5772,7 +6007,8 @@ SYSTEM_OVERLAY_MAP = "dsa_overlay"
 FRAMEWORK_RES = "SYSTEM/framework/framework-res.apk"
 # Each overlay: its file in /vendor/overlay, its package, the package it overlays, where that
 # package's APK is in target_files (a path suffix, or the permission APEX), and what is wrong
-# with an image that lacks it.
+# with an image that lacks it. An overlay of a package that declares overlayable sets names
+# the set its resources are in ("overlayable"), or it never applies (overlay_manifest).
 SYSTEM_OVERLAYS = [
     {"apk": "DsaFrameworkOverlay.apk", "package": FRAMEWORK_OVERLAY_PACKAGE, "target": "android",
      "target_apk": FRAMEWORK_RES,
@@ -5786,15 +6022,18 @@ SYSTEM_OVERLAYS = [
                 "has no large title or rounded cards"},
     {"apk": "DsaDocumentsUiOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.documentsui",
      "target": "com.android.documentsui", "target_apk": "/priv-app/DocumentsUI/DocumentsUI.apk",
+     "overlayable": "DocumentsUICustomization",
      "without": "Files keeps its old look instead of the rounded one"},
     {"apk": "DsaPermissionControllerOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.permissioncontroller",
      "target": "com.android.permissioncontroller", "target_apk": None,
+     "overlayable": "PermissionControllerStyles",
      "without": "the permission dialog's title is not bold"},
     {"apk": "DsaPackageInstallerOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.packageinstaller",
      "target": "com.android.packageinstaller", "target_apk": "/priv-app/PackageInstaller/PackageInstaller.apk",
      "without": "the install dialog's title is not bold"},
     {"apk": "DsaIntentResolverOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.intentresolver",
      "target": "com.android.intentresolver", "target_apk": "/priv-app/IntentResolver/IntentResolver.apk",
+     "overlayable": "IntentResolver",
      "without": "the share sheet's headline keeps its small size"},
     {"apk": "DsaFrameworkGappsOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.framework.gapps",
      "target": "android", "target_apk": FRAMEWORK_RES,
@@ -5818,9 +6057,172 @@ DESIGN_BLUE_TONES = {
     400: "#4F8AFF", 500: "#2B6EF2", 600: "#1A5AD7", 700: "#0D46AE", 800: "#053486", 900: "#001B4A",
     1000: "#000000",
 }
+
+
+# Every other colour role comes from the same blue, the way Material's tonal spot scheme makes
+# them: the secondary palette is the blue with little colour, the tertiary the blue's hue turned
+# 60 degrees towards cyan (towards violet it reads as a dull purple beside the blue), the
+# neutrals the blue nearly grey. A palette's tone is its CIE L* (0 black, 100 white), so two
+# roles a fixed number of tones apart have the same contrast whatever their hue; hue and chroma
+# are OKLCh's, which keeps a hue as it gets lighter (blue stays blue, not violet). Without
+# this, every role the design does not set keeps the framework's own grey violet scheme, and
+# the apps mix the blue primary with lavender containers, a violet tertiary and dark theme
+# surfaces of another hue. The agent makes the same palettes from the host's accent at run time.
+DESIGN_SEED = "#2B6EF2"
+# Each palette: its hue offset from the seed's (degrees) and its chroma (OKLCh). The first
+# accent keeps at least this chroma, more when the seed has more.
+DESIGN_PALETTES = {
+    "accent1": (0, 0.09), "accent2": (0, 0.04), "accent3": (-60, 0.06),
+    "neutral1": (0, 0.008), "neutral2": (0, 0.018),
+}
+# Each shade of a framework palette (system_accent1_500 and so on) and the tone it has.
+DESIGN_SHADE_TONES = {0: 100, 10: 99, 50: 95, 100: 90, 200: 80, 300: 70, 400: 60, 500: 50,
+                      600: 40, 700: 30, 800: 20, 900: 10, 1000: 0}
+# Each colour role of each theme: the palette and the tone it takes.
+DESIGN_ROLE_TONES = {
+    "light": {
+        "primary": ("accent1", 40), "on_primary": ("accent1", 100),
+        "primary_container": ("accent1", 90), "on_primary_container": ("accent1", 10),
+        "inverse_primary": ("accent1", 80), "surface_tint": ("accent1", 40),
+        "primary_dim": ("accent1", 35), "control_activated": ("accent1", 90),
+        "secondary": ("accent2", 40), "on_secondary": ("accent2", 100),
+        "secondary_container": ("accent2", 90), "on_secondary_container": ("accent2", 10),
+        "secondary_dim": ("accent2", 35),
+        "tertiary": ("accent3", 40), "on_tertiary": ("accent3", 100),
+        "tertiary_container": ("accent3", 90), "on_tertiary_container": ("accent3", 10),
+        "tertiary_dim": ("accent3", 35),
+        "on_background": ("neutral1", 10), "on_surface": ("neutral1", 10),
+        "surface_variant": ("neutral2", 90), "on_surface_variant": ("neutral2", 30),
+        "control_normal": ("neutral2", 30),
+        "outline": ("neutral2", 50), "outline_variant": ("neutral2", 80),
+        "inverse_surface": ("neutral1", 20), "inverse_on_surface": ("neutral1", 95),
+        "palette_key_color_primary": ("accent1", 50), "palette_key_color_secondary": ("accent2", 50),
+        "palette_key_color_tertiary": ("accent3", 50), "palette_key_color_neutral": ("neutral1", 50),
+        "palette_key_color_neutral_variant": ("neutral2", 50),
+    },
+    "dark": {
+        "primary": ("accent1", 80), "on_primary": ("accent1", 20),
+        "primary_container": ("accent1", 30), "on_primary_container": ("accent1", 90),
+        "inverse_primary": ("accent1", 40), "surface_tint": ("accent1", 80),
+        "primary_dim": ("accent1", 75), "control_activated": ("accent1", 30),
+        "secondary": ("accent2", 80), "on_secondary": ("accent2", 20),
+        "secondary_container": ("accent2", 30), "on_secondary_container": ("accent2", 90),
+        "secondary_dim": ("accent2", 75),
+        "tertiary": ("accent3", 80), "on_tertiary": ("accent3", 20),
+        "tertiary_container": ("accent3", 30), "on_tertiary_container": ("accent3", 90),
+        "tertiary_dim": ("accent3", 75),
+        "on_background": ("neutral1", 90), "on_surface": ("neutral1", 90),
+        "surface_variant": ("neutral2", 30), "on_surface_variant": ("neutral2", 80),
+        "control_normal": ("neutral2", 80),
+        "outline": ("neutral2", 60), "outline_variant": ("neutral2", 30),
+        "inverse_surface": ("neutral1", 90), "inverse_on_surface": ("neutral1", 20),
+        "palette_key_color_primary": ("accent1", 50), "palette_key_color_secondary": ("accent2", 50),
+        "palette_key_color_tertiary": ("accent3", 50), "palette_key_color_neutral": ("neutral1", 50),
+        "palette_key_color_neutral_variant": ("neutral2", 50),
+    },
+}
+# The fixed roles, the same in both themes.
+DESIGN_FIXED_ROLE_TONES = {
+    **{f"{role}_fixed": (palette, 90) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+    **{f"{role}_fixed_dim": (palette, 80) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+    **{f"on_{role}_fixed": (palette, 10) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+    **{f"on_{role}_fixed_variant": (palette, 30) for role, palette in
+       (("primary", "accent1"), ("secondary", "accent2"), ("tertiary", "accent3"))},
+}
+def _linear(channel):
+    c = channel / 255
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _gamma(value):
+    v = 12.92 * value if value <= 0.0031308 else 1.055 * value ** (1 / 2.4) - 0.055
+    return round(min(max(v, 0.0), 1.0) * 255)
+
+
+def color_lch(color):
+    """The OKLCh lightness (0 to 100), chroma and hue (degrees) of a #RRGGBB colour."""
+    value = color.lstrip("#")
+    r, g, b = (_linear(int(value[i:i + 2], 16)) for i in (0, 2, 4))
+    l_, m_, s_ = (math.copysign(abs(v) ** (1 / 3), v) for v in (
+        0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+        0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+        0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b))
+    lightness = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+    a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+    b_ = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    return lightness * 100, math.hypot(a, b_), math.degrees(math.atan2(b_, a)) % 360
+
+
+def _lch_linear_rgb(lightness, chroma, hue):
+    a, b = chroma * math.cos(math.radians(hue)), chroma * math.sin(math.radians(hue))
+    lightness /= 100
+    l_ = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (lightness - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    return (4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+            -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+            -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
+
+
+def tone_color(hue, chroma, tone):
+    """The #RRGGBB colour of a tone (CIE L*, 0 to 100) at an OKLCh hue, with the given chroma
+    or, where the screen cannot show that much, the most it can."""
+    if tone >= 100:
+        return "#FFFFFF"
+    if tone <= 0:
+        return "#000000"
+    # The OKLab lightness of a grey with that L*: the cube root of its luminance.
+    f = (tone + 16) / 116
+    luminance = f ** 3 if f ** 3 > 216 / 24389 else (116 * f - 16) / (24389 / 27)
+    lightness = 100 * luminance ** (1 / 3)
+
+    def inside(c):
+        return all(-1e-4 <= v <= 1 + 1e-4 for v in _lch_linear_rgb(lightness, c, hue))
+
+    low, high = 0.0, float(chroma)
+    if not inside(high):
+        for _ in range(24):
+            middle = (low + high) / 2
+            low, high = (middle, high) if inside(middle) else (low, middle)
+        high = low
+    return "#" + "".join(f"{_gamma(v):02X}" for v in _lch_linear_rgb(lightness, high, hue))
+
+
+def dynamic_palettes(seed):
+    """The five framework palettes of a seed colour: {palette: (hue, chroma)}."""
+    _, chroma, hue = color_lch(seed)
+    palettes = {}
+    for name, (turn, amount) in DESIGN_PALETTES.items():
+        palettes[name] = ((hue + turn) % 360, max(chroma, amount) if name == "accent1" else amount)
+    return palettes
+
+
+def dynamic_scheme(seed):
+    """The framework colours of a seed colour: each palette's shades in both themes, and each
+    colour role."""
+    palettes = dynamic_palettes(seed)
+    colors = {}
+    for name, (hue, chroma) in palettes.items():
+        for shade, tone in DESIGN_SHADE_TONES.items():
+            value = tone_color(hue, chroma, tone)
+            for theme in ("light", "dark"):
+                colors[f"system_{name}_{shade}_{theme}"] = value
+    for theme, roles in DESIGN_ROLE_TONES.items():
+        for role, (palette, tone) in roles.items():
+            colors[f"system_{role}_{theme}"] = tone_color(*palettes[palette], tone)
+    for role, (palette, tone) in DESIGN_FIXED_ROLE_TONES.items():
+        colors[f"system_{role}"] = tone_color(*palettes[palette], tone)
+    return colors
+
+
 # The page is a light grey (or black) and the cards on it white (or a dark grey), so the
-# cards stand out; dialogs and sheets sit a step above the page.
+# cards stand out; dialogs and sheets sit a step above the page. The values set here by hand
+# replace the scheme's.
 DESIGN_COLORS = {
+    **dynamic_scheme(DESIGN_SEED),
     **{f"system_accent1_{tone}_{theme}": value for tone, value in DESIGN_BLUE_TONES.items()
        for theme in ("light", "dark")},
     "system_primary_light": "#0B64D8",
@@ -5889,16 +6291,26 @@ FRAMEWORK_DESIGN_OVERLAID = (
     + [f"layout/{DIALOG_BUTTON_BAR_LAYOUT}", f"layout/{TOAST_LAYOUT}", f"drawable/{TOAST_FRAME}"]
 )
 
-# Settings: SettingsLib's group backgrounds round the outer corners of a group by
-# settingslib_preference_corner_radius and the inner ones by 4 dp, so every row is a card of
-# its own. Here the inner corners are square, and a group reads as one card; the 2 dp
-# SettingsLib keeps below each row shows the page through as the line between rows.
-SETTINGS_CARDS = {
-    "settingslib_round_background": (True, True),
-    "settingslib_round_background_top": (True, False),
-    "settingslib_round_background_center": (False, False),
-    "settingslib_round_background_bottom": (False, True),
-}
+# What SettingsLib, as dsa/apps patches it, owns in Settings and PermissionController: the cards
+# of a preference group (their shape, the shape a pressed row morphs to, their surface colour in
+# light and dark, their corner radius), the room between groups, and the large and folded
+# titles. The patched source is the one place that says them, so neither the Settings overlay
+# nor an edit of a compiled APK replaces any of them: an override would put the published
+# values back over the design (system_screen_override_problems checks it).
+SOURCE_OWNED_SETTINGSLIB = [
+    "drawable/settingslib_round_background",
+    "drawable/settingslib_round_background_top",
+    "drawable/settingslib_round_background_center",
+    "drawable/settingslib_round_background_bottom",
+    "dimen/settingslib_preference_corner_radius",
+    "color/settingslib_dsa_card",
+    "dimen/settingslib_dsa_inner_corner",
+    "dimen/settingslib_dsa_group_gap",
+    "style/ExpressivePreferenceCategoryRootLayoutStyle",
+    "style/ExpressivePreferenceCategoryTitleStyle",
+    "style/SettingsLibCollapsingToolbarTitle.Expanded",
+    "style/SettingsLibCollapsingToolbarTitle.Collapsed",
+]
 # The large title of a SettingsLib page opens expanded in a window 600 dp tall or more and
 # folded below it. SettingsLib's app bar takes the theme overlay SETTINGS_TITLE_THEME (an
 # empty style over Material's theme); the overlay's version of it says whether the app bar
@@ -5909,10 +6321,6 @@ SETTINGS_CARDS = {
 SETTINGS_TITLE_THEME = "SettingsLibTheme.CollapsingToolbar.Expressive"
 SETTINGS_TITLE_THEME_PARENT = "Theme.MaterialComponents.DayNight"
 SETTINGS_TITLE_EXPANDS = {"values-v36": False, f"values-h{DESIGN_TALL_WINDOW_DP}dp-v36": True}
-SETTINGS_TITLE_STYLES = {
-    "SettingsLibCollapsingToolbarTitle.Expanded": ("DsaLargeTitle", DESIGN_LARGE_TITLE_DP),
-    "SettingsLibCollapsingToolbarTitle.Collapsed": ("DsaToolbarTitle", DESIGN_TOOLBAR_TITLE_DP),
-}
 # Settings' home page has no title: its app bar holds only the search bar. The overlay's
 # layout puts the large title above the search bar in windows 600 dp tall or more, where it
 # scrolls away and leaves the search bar as the toolbar. The ids are Settings' own, which the
@@ -5941,7 +6349,8 @@ SETTINGS_SEARCH_ICON = "dsa_search"
 # option. Its layouts are not overlayable, so it gets no large title.
 DOCUMENTSUI_DESIGN = {"bool/force_material3": "true"}
 # PermissionController lets an overlay replace only what it declares overlayable: the
-# permission dialog's title is, its list backgrounds are not (PERMISSION_CONTROLLER_CARDS).
+# permission dialog's title is, its list backgrounds are not (the patched SettingsLib draws
+# them, SOURCE_OWNED_SETTINGSLIB).
 PERMISSION_TITLE_STYLE = "PermissionGrantTitleMessageExpressive"
 # PackageInstaller's dialog titles, for its DeviceDefault and Material 3 themes.
 PACKAGE_INSTALLER_TITLES = {
@@ -5992,7 +6401,7 @@ SETTINGS_LIST_END = {
 # The permission pages Settings opens (the permission manager, an app's permissions) are
 # PermissionController's, with the same preference list and the same missing inset. Its
 # <overlayable> lets no overlay replace the layout, so the compiled one in its APK gets the
-# room (the APK is edited for its cards already, see PERMISSION_CONTROLLER_CARDS).
+# room (its cards are the patched SettingsLib's, see SOURCE_OWNED_SETTINGSLIB).
 PERMISSION_CONTROLLER_LIST_END = {
     "res/layout/preference_recyclerview.xml": [(RECYCLER_VIEW, *_LIST_END)],
 }
@@ -6003,35 +6412,6 @@ SETTINGS_LIST_END_CLASSES = [
     f"{_SPA}/framework/compose/VerticalPaddingValues;->calculateBottomPadding-D9Ej5fM",
     f"{_SPA}/widget/scaffold/SearchScaffoldKt;->SearchScaffold",
 ]
-
-# PermissionController's lists are SettingsLib's, but the app declares <overlayable> and its
-# list backgrounds are not in it, so idmap2 refuses any overlay of them. Their compiled
-# drawables in the APK get the corners Settings' cards have instead: outer corners of
-# DESIGN_CORNER_DP, square inner ones.
-ANDROID_RADIUS = 0x010101A8
-ANDROID_TOP_LEFT_RADIUS = 0x010101A9
-ANDROID_TOP_RIGHT_RADIUS = 0x010101AA
-ANDROID_BOTTOM_LEFT_RADIUS = 0x010101AB
-ANDROID_BOTTOM_RIGHT_RADIUS = 0x010101AC
-
-
-def card_corner_edits(top, bottom, single):
-    """The corner edits of one of SettingsLib's group backgrounds: a whole-card one names one
-    radius, the others the four corners."""
-    if single:
-        return [("corners", ANDROID_RADIUS, DESIGN_CORNER_DP if top else 0)]
-    top_dp, bottom_dp = (DESIGN_CORNER_DP if top else 0), (DESIGN_CORNER_DP if bottom else 0)
-    return [("corners", ANDROID_TOP_LEFT_RADIUS, top_dp), ("corners", ANDROID_TOP_RIGHT_RADIUS, top_dp),
-            ("corners", ANDROID_BOTTOM_LEFT_RADIUS, bottom_dp), ("corners", ANDROID_BOTTOM_RIGHT_RADIUS, bottom_dp)]
-
-
-# The center and single backgrounds name one radius for all four corners; the top and bottom
-# ones name each corner.
-PERMISSION_CONTROLLER_CARDS = {
-    f"res/drawable-v36/{name}.xml": card_corner_edits(top, bottom, single=name in (
-        "settingslib_round_background", "settingslib_round_background_center"))
-    for name, (top, bottom) in SETTINGS_CARDS.items()
-}
 
 SYSTEM_EXT_FS_CONFIG = "META/system_ext_filesystem_config.txt"
 AGENT_FS_CONFIG = [
@@ -6129,6 +6509,10 @@ def update_vendor_property_contexts(text):
         lines.append(TRIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [TRIM_SIZE_PROPERTY] for line in lines):
         lines.append(TRIM_SIZE_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [TRIM_SWAPPINESS_PROPERTY] for line in lines):
+        lines.append(TRIM_SWAPPINESS_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [MEMORY_REPORT_PROPERTY] for line in lines):
+        lines.append(MEMORY_REPORT_PROPERTY_CONTEXT)
     for name, context in WRITEBACK_PROPERTY_CONTEXTS.items():
         if not any(line.split()[:1] == [name] for line in lines):
             lines.append(context)
@@ -6810,10 +7194,15 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     `default_apps_payloads`, the default apps' APKs by their target_files names
     (load_default_apps), the image carries them with their configuration, in place of the AOSP
     apps they replace."""
-    apps_in_image = [app for app in default_apps() if app["image"] in (default_apps_payloads or {})]
+    apps_in_image = [app for app in image_apps() if app["image"] in (default_apps_payloads or {})]
+    # The default apps get their own configuration; the system screens keep the build's.
+    default_apps_in_image = [app for app in apps_in_image if app.get("role") != "system"]
+    permission_controller_payload = None
     if default_apps_payloads is not None:
         default_apps_payloads = dict(default_apps_payloads)
-        unknown = sorted(set(default_apps_payloads) - {app["image"] for app in default_apps()})
+        # PermissionController goes into the permission APEX, not to a path of its own.
+        permission_controller_payload = default_apps_payloads.pop(PERMISSION_CONTROLLER_IMAGE, None)
+        unknown = sorted(set(default_apps_payloads) - {app["image"] for app in image_apps()})
         if unknown:
             raise ValueError(f"{', '.join(unknown)} is not where apps.json puts a default app")
     fstab = (HERE / "fstab.dsa").read_bytes()
@@ -6932,11 +7321,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 added_fs_config.setdefault(config, []).extend(rules)
         for folder in added_gapps_folders:
             config = GAPPS_PARTITION_FS_CONFIG[folder.split("/", 1)[0]]
-            added_fs_config.setdefault(config, []).append(f"{folder.lower()} 0 0 755 capabilities=0x0")
+            added_fs_config.setdefault(config, []).append(f"{fs_config_path(folder)} 0 0 755 capabilities=0x0")
         if default_apps_payloads is not None:
             # A default app replaced in place (DocumentsUI) keeps the build's own lines.
             added_fs_config.setdefault(SYSTEM_FS_CONFIG, []).extend(
-                default_apps_fs_config([app for app in apps_in_image if app["image"] not in names]))
+                default_apps_fs_config([app for app in default_apps_in_image if app["image"] not in names]))
         for name in names:
             if name.endswith(".cil"):
                 cil_map[name] = zin.read(name)
@@ -7081,7 +7470,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 continue
             if kept_modules.match(name):
                 continue
-            if name.startswith("IMAGES/"):
+            if name.startswith(PARTITION_IMAGES_FOLDER):
                 # Rebuilt after signing from the modified contents.
                 continue
             if name.endswith("/etc/selinux/precompiled_sepolicy"):
@@ -7109,9 +7498,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 data = framework[name]
                 replaced_framework.add(name)
             elif default_apps_payloads is not None and name in default_apps_payloads:
-                # A default app in the published app's place (DocumentsUI).
-                print(f"replacing {name} with the default app built from dsa/apps", flush=True)
+                # A default app or a system screen in the published app's place (DocumentsUI,
+                # Settings, PackageInstaller, IntentResolver). Settings still gets its edits.
+                print(f"replacing {name} with the app built from dsa/apps", flush=True)
                 data = default_apps_payloads.pop(name)
+                if name.endswith(SETTINGS_APK):
+                    data = edit_settings_apk(data, name)
             else:
                 data = zin.read(name)
                 if name in PROP_FILES:
@@ -7145,7 +7537,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 elif name == SERVICES_JAR:
                     data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:
-                    data = edit_permission_apex(data, name, otatools, Path(dest).parent)
+                    data = edit_permission_apex(data, name, otatools, Path(dest).parent,
+                                                replacement=permission_controller_payload)
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
                     data = b""
                 elif name == "META/apexkeys.txt":
@@ -7161,12 +7554,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         if not any(f'name="{a}.apk"' in line.decode()
                                    for a in REMOVED_APPS + ["DsaAgent"]
                                    + [Path(overlay).stem for overlay in SYSTEM_OVERLAY_FILES]
-                                   + ([Path(app["image"]).stem for app in apps_in_image]
+                                   + ([Path(app["image"]).stem for app in apps_in_image if not in_apex(app)]
                                       + [r for app in default_apps() for r in app["replaces"]]
                                       if default_apps_payloads is not None else []))
                     )
                     for app in apps_in_image:
-                        data += default_app_apkcerts(app).encode() + b"\n"
+                        if not in_apex(app):
+                            data += default_app_apkcerts(app).encode() + b"\n"
                     if agent_payload is not None:
                         data += AGENT_APKCERTS.encode() + b"\n"
                     if overlay_payload is not None:
@@ -7357,8 +7751,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             for path, payload in default_apps_payloads.items():
                 print(f"adding the default app {path}", flush=True)
                 zout.writestr(path, payload)
-            zout.writestr(DEFAULT_APPS_SYSCONFIG, default_apps_sysconfig(apps_in_image))
-            zout.writestr(DEFAULT_APPS_PERMISSIONS, default_apps_permissions(apps_in_image))
+            zout.writestr(DEFAULT_APPS_SYSCONFIG, default_apps_sysconfig(default_apps_in_image))
+            zout.writestr(DEFAULT_APPS_PERMISSIONS, default_apps_permissions(default_apps_in_image))
         if agent_payload is not None:
             zout.writestr(AGENT_APK, agent_payload)
             zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
@@ -7802,11 +8196,15 @@ def apex_jar_sources(bootclasspath, names):
 
 
 def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_images, contexts,
-                    filter, profile=None, extra=(), app_image=None):
+                    filter, profile=None, extra=(), app_image=None, oat_location=None):
     """The dex2oat command line the build itself uses to compile a system app, aimed at the
-    guest's boot image (COMPILED_ISA), with an app image (.art) at `app_image` when given."""
+    guest's boot image (COMPILED_ISA), with an app image (.art) at `app_image` when given. The
+    odex is named as beside the APK or jar unless `oat_location` says where the device has it
+    (a system server jar of an APEX has its odex in /system/framework/oat)."""
     host_context, stored_context = contexts
     jars = bootclasspath.split(":")
+    if oat_location is None:
+        oat_location = f"{dex_location.rsplit('/', 1)[0]}/oat/{COMPILED_ISA}/{Path(odex).name}"
     cmd = [
         dex2oat, "--avoid-storing-invocation",
         # The build's own heap size: the heap must fit in the low 4 GiB, and 2 GiB did not.
@@ -7817,7 +8215,7 @@ def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_
         f"--stored-class-loader-context={stored_context}",
         "--boot-image=" + ":".join(f"{root}{i}" for i in boot_images),
         f"--dex-file={apk}", f"--dex-location={dex_location}",
-        f"--oat-file={odex}", f"--oat-location={dex_location.rsplit('/', 1)[0]}/oat/{COMPILED_ISA}/{Path(odex).name}",
+        f"--oat-file={odex}", f"--oat-location={oat_location}",
         f"--android-root={root}/empty",
         f"--instruction-set={COMPILED_ISA}", f"--instruction-set-variant={COMPILED_ISA_VARIANT}",
         "--instruction-set-features=default",
@@ -7831,6 +8229,580 @@ def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_
     if app_image is not None:
         cmd += [f"--app-image-file={app_image}", "--image-format=lz4"]
     return cmd
+
+
+# framework.jar from the Framework build (framework_lock.FRAMEWORK_JAR), built from the published
+# build's source with DSA's change that rebuilds the views of a task set to forced system scaling
+# at its new density. It is on the boot class path, and its code is in the primary boot image
+# (boot.art, .oat and .vdex and one more of each per jar: the ART module's jars, framework.jar and
+# the other framework jars, compiled together). ART throws a boot image away whole when one of its
+# jars is not the dex it was compiled from, and every process then runs the framework from its
+# dex, interpreted, with the framework's classes in its own memory. So when a jar of the system
+# partition on the boot class path differs from the one the published boot image was compiled from
+# (stale_boot_jars), the image compiles the boot images again (rebuild_boot_images) as the build
+# compiles them (build/soong's java/dexpreopt_bootjars.go): the primary image, then each extension
+# (the mainline one, boot-framework-adservices.art) against it, with the published build's
+# profiles, dirty image objects, preloaded classes, filters and base address. Every odex names the
+# checksums of the boot images it was compiled against, so every odex the image ships is then
+# compiled again too: the system server's and the other framework jars' (boot_image_jar_jobs) and
+# every app the published build compiled (compile_jobs). boot_image_problems checks the result.
+#
+# ART finds the boot images by name, not by looking at what is in the folder: the primary image is
+# boot.art, and the image that holds the boot class path's jar <jar> (an extension, or a later
+# component of a multi-image) is boot-<jar>.art. The runtime adds the mainline extension as
+# boot-<first mainline jar>.art. dex2oat names its output the same way from the --image it is
+# given (ImageSpace::ExpandMultiImageLocations), so the build gives it boot.art for every image,
+# the extensions too, and dex2oat makes boot-framework-adservices.art of it. An extension given
+# boot-framework-adservices.art itself comes out as boot-framework-adservices-framework-adservices
+# .art, which nothing loads, while the published extension stays where ART looks.
+BOOT_IMAGE_PROFILE = "SYSTEM/etc/boot-image.prof"
+BOOT_IMAGE_DIRTY_OBJECTS = "SYSTEM/etc/dirty-image-objects"
+BOOT_IMAGE_PRELOADED_CLASSES = "SYSTEM/etc/preloaded-classes"
+# The boot image profile an APEX of the boot class path carries for its own jars (the ART module's).
+APEX_BOOT_IMAGE_PROFILE = "etc/boot-image.prof"
+# The partitions whose framework jars have their odex in framework/oat/<isa>/.
+FRAMEWORK_OAT_PARTITIONS = ("SYSTEM", "SYSTEM_EXT", "PRODUCT", "VENDOR", "ODM")
+# The instruction sets a build may have boot images for, each in SYSTEM/framework/<isa>/.
+BOOT_IMAGE_ISAS = ("arm", "arm64", "x86", "x86_64", "riscv64")
+BOOT_IMAGE_SUFFIXES = (".art", ".oat", ".vdex")
+
+
+def art_header(data):
+    """The fields of a boot image (.art) header that say which image it is: its component count
+    (0 for a later component of a multi-image), the address it is mapped at, its reservation size,
+    its checksum, and the same of the images it extends (0 for a primary image): their address,
+    the size they reserve together, their component count and their checksums XORed together."""
+    if data[:4] != b"art\n":
+        raise ValueError("not an ART image")
+    fields = struct.unpack_from("<14I", data, 8)
+    return {"reservation": fields[0], "components": fields[1], "begin": fields[2], "checksum": fields[4],
+            "boot_begin": fields[10], "boot_size": fields[11], "boot_components": fields[12],
+            "boot_checksum": fields[13]}
+
+
+def boot_image_stem(index, jars):
+    """The name ART gives the boot image files of the boot class path's `index`th jar: boot for
+    the first jar, boot-<jar> for every other, whether it starts an extension or is a later
+    component of a multi-image."""
+    return "boot" if index == 0 else f"boot-{Path(jars[index]).stem}"
+
+
+def boot_image_chunks(names, read, bootclasspath):
+    """The guest's boot images, as ART finds them: [(art member, header)], the primary image
+    (boot.art) first, then each extension, the image named after the first jar no image before it
+    holds (boot_image_stem). Each header also says the index of its first jar (start). A
+    multi-image's later components (boot-framework.art) are part of the image before them, not
+    images of their own, and a boot image file under any other name is not loaded at all."""
+    folder = f"SYSTEM/framework/{COMPILED_ISA}/"
+    jars = bootclasspath.split(":")
+    chunks, index = [], 0
+    while index < len(jars):
+        member = f"{folder}{boot_image_stem(index, jars)}.art"
+        header = art_header(read(member)) if member in names else None
+        if header is not None and header["components"] and (index == 0) == (header["boot_components"] == 0):
+            chunks.append((member, dict(header, start=index)))
+            index += header["components"]
+        elif index == 0:
+            return []
+        else:
+            index += 1
+    return chunks
+
+
+def boot_image_component_stems(names, header, jars):
+    """The names of the files of the boot image `header` describes (see boot_image_chunks): one
+    per jar for a multi-image, the first jar's alone for an image compiled as a single image."""
+    start, count = header["start"], header["components"]
+    later = [boot_image_stem(i, jars) for i in range(start + 1, min(start + count, len(jars)))]
+    folder = f"SYSTEM/framework/{COMPILED_ISA}/"
+    if later and not any(f"{folder}{stem}.art" in names for stem in later):
+        return [boot_image_stem(start, jars)]
+    return [boot_image_stem(start, jars)] + later
+
+
+def boot_image_vdex_member(names, stem):
+    """Where the system partition keeps a boot image's vdex: beside the images' folder, which
+    links to it, or in the images' folder when only that has it."""
+    shared, own = f"SYSTEM/framework/{stem}.vdex", f"SYSTEM/framework/{COMPILED_ISA}/{stem}.vdex"
+    return own if own in names and shared not in names else shared
+
+
+def boot_image_files(names, read, bootclasspath):
+    """Every member of the guest's boot image chain: the .art, .oat and .vdex of each component of
+    each image, and the links the images' folder has to the vdex files beside it."""
+    jars = bootclasspath.split(":")
+    files = set()
+    for _, header in boot_image_chunks(names, read, bootclasspath):
+        for stem in boot_image_component_stems(names, header, jars):
+            folder = f"SYSTEM/framework/{COMPILED_ISA}/{stem}"
+            files |= {folder + ".art", folder + ".oat", folder + ".vdex", boot_image_vdex_member(names, stem)}
+    return files
+
+
+def boot_image_leftovers(names, read, bootclasspath):
+    """The boot image files of the guest's instruction set that are no part of its boot image
+    chain (boot_image_files): ART never loads them, and an image compiled under another name
+    leaves the one ART loads as it was."""
+    expected = boot_image_files(names, read, bootclasspath)
+    folder = f"SYSTEM/framework/{COMPILED_ISA}/"
+    found = {name for name in names
+             if Path(name).name.startswith("boot") and Path(name).suffix in BOOT_IMAGE_SUFFIXES
+             and (name.startswith(folder) and "/" not in name[len(folder):]
+                  or name.startswith("SYSTEM/framework/") and name.count("/") == 2
+                  and name.endswith(".vdex"))}
+    return sorted(found - expected)
+
+
+def other_isa_boot_images(names):
+    """The boot image files of the instruction sets the guest does not run, which compiling the
+    guest's boot images again would leave pointing at the vdex files it replaced."""
+    return sorted(name for name in names
+                  for isa in BOOT_IMAGE_ISAS if isa != COMPILED_ISA
+                  if name.startswith(f"SYSTEM/framework/{isa}/boot")
+                  and Path(name).suffix in BOOT_IMAGE_SUFFIXES)
+
+
+def boot_image_checksums(names, read, bootclasspath):
+    """What an odex compiled against the guest's boot images records of them at the start of its
+    bootclasspath-checksums: i;<component count>/<checksum> for each image, as dex2oat writes it."""
+    return ":".join(f"i;{header['components']}/{header['checksum']:08x}"
+                    for _, header in boot_image_chunks(names, read, bootclasspath))
+
+
+def boot_image_locations_of(chunks):
+    """The --boot-image locations of the boot images boot_image_chunks found."""
+    return [f"/system/framework/{Path(member).name}" for member, _ in chunks]
+
+
+def extended_images(chunks, header):
+    """What an image (an extension or an app image) whose header is `header` must say of the boot
+    images it extends, from the guest's boot images `chunks`: the component count, XORed checksum
+    and reservation size of the images it covers, which ART counts from the primary image on and
+    which must end where an image ends. None when its count ends inside an image."""
+    count = checksum = size = 0
+    for _, before in chunks:
+        if count == header["boot_components"]:
+            break
+        count += before["components"]
+        checksum ^= before["checksum"]
+        size += before["reservation"]
+    if count != header["boot_components"]:
+        return None
+    return {"boot_components": count, "boot_checksum": checksum, "boot_size": size}
+
+
+def extends_guest_images(chunks, header):
+    """Whether an image with `header` extends a prefix of the guest's boot images `chunks` as
+    ART checks it (BootImageLayout::ValidateBootImageChecksum)."""
+    expected = extended_images(chunks, header)
+    return expected is not None and all(header[key] == value for key, value in expected.items())
+
+
+def boot_image_chain_problems(names, read, bootclasspath):
+    """What is wrong with the guest's boot image chain itself: an image that does not start where
+    the one before it ends or holds more jars than the boot class path has left, an extension
+    whose header does not name the images before it as ART counts them, a file of an image
+    missing, and a boot image file no image is (boot_image_leftovers)."""
+    jars = bootclasspath.split(":")
+    chunks = boot_image_chunks(names, read, bootclasspath)
+    problems, covered = [], 0
+    for index, (member, header) in enumerate(chunks):
+        start, count = header["start"], header["components"]
+        if start != covered:
+            problems.append(f"{member} starts at {jars[start]}, but the boot images before it end at "
+                            f"{jars[covered] if covered < len(jars) else 'the end'}, so ART leaves the jars "
+                            "between them out of every boot image")
+        if start + count > len(jars):
+            problems.append(f"{member} holds {count} jars, but the boot class path has {len(jars) - start} "
+                            "from it on, so ART does not load it")
+        if index and not extends_guest_images(chunks[:index], header):
+            problems.append(f"{member} extends another boot image than the guest's "
+                            f"{', '.join(Path(m).name for m, _ in chunks[:index])} (it names "
+                            f"{header['boot_components']} components, checksum {header['boot_checksum']:08x}), "
+                            "so ART does not load it")
+        for stem in boot_image_component_stems(names, header, jars):
+            folder = f"SYSTEM/framework/{COMPILED_ISA}/{stem}"
+            for file in (folder + ".art", folder + ".oat", boot_image_vdex_member(names, stem)):
+                if file not in names:
+                    problems.append(f"{file} is missing, so ART does not load {Path(member).name}")
+        covered = start + count
+    for leftover in boot_image_leftovers(names, read, bootclasspath):
+        problems.append(f"{leftover} is a boot image file of no boot image ART loads (they are named "
+                        "boot.art and boot-<first jar>.art)")
+    return problems
+
+
+def boot_image_vdex(index, jar):
+    """The vdex of the primary boot image's `index`th jar (boot.vdex for the first, then one
+    named after each jar), where the system partition keeps it: beside the images' folder, which
+    links to it."""
+    stem = "boot" if index == 0 else f"boot-{Path(jar).stem}"
+    return f"SYSTEM/framework/{stem}.vdex"
+
+
+def system_jar_member(jar):
+    """The target_files member of a boot class path jar of the system partition, or None for a
+    jar of an APEX."""
+    return "SYSTEM" + jar[len("/system"):] if jar.startswith("/system/") else None
+
+
+def stale_boot_jars(names, read, bootclasspath):
+    """The boot class path jars of the system partition in a boot image whose dex is not the dex
+    the image was compiled from (the checksums its vdex was made for). A vdex of an image compiled
+    as a single image holds the checksums of all its jars; one that holds a jar of an APEX, which
+    the target_files has only inside the APEX, is not checked."""
+    jars = bootclasspath.split(":")
+    stale = []
+    for _, header in boot_image_chunks(names, read, bootclasspath):
+        stems = boot_image_component_stems(names, header, jars)
+        start, count = header["start"], header["components"]
+        groups = ([(stem, [jars[start + i]]) for i, stem in enumerate(stems)] if len(stems) > 1
+                  else [(stems[0], jars[start:start + count])])
+        for stem, group in groups:
+            members = [system_jar_member(jar) for jar in group]
+            if None in members:
+                continue
+            vdex = boot_image_vdex_member(names, stem)
+            if vdex not in names or any(member not in names for member in members):
+                stale += group
+                continue
+            dex = [checksum for member in members for checksum in apk_dex_checksums(read(member))]
+            if vdex_checksums(read(vdex)) != dex:
+                stale += group
+    return stale
+
+
+def boot_image_command(dex2oat, root, out, jars, base, filter, profiles=(), dirty=None,
+                       preloaded=None, extra=(), base_images=(), deps=(), single_image=False):
+    """The dex2oat command line the build compiles a boot image with (build/soong's
+    buildBootImageVariant), aimed at the guest (COMPILED_ISA): `jars` (device paths, their copies
+    under `root`) into `out`. A primary image is mapped at `base`; an extension is compiled against
+    `base_images` (device paths of the images before it) with the boot class path `deps`, every
+    jar up to its own. Like the build, it names every image boot.art (and boot.oat), and dex2oat
+    names the files after the jars as ART looks for them: boot.art and boot-<jar>.art for the
+    primary image, boot-<first jar>.art on for an extension."""
+    # The build's own boot image heap (dalvik.vm.image-dex2oat-Xms and -Xmx, 64m each). The debug
+    # dex2oat keeps its heap in the low 4 GiB, where the primary image is mapped too, and the
+    # concurrent mark-compact collector reserves a from-space of the heap's size plus its
+    # alignment there: -Xmx1024m asked for 2 GiB less a page and aborted on the CI runner.
+    cmd = [dex2oat, "--avoid-storing-invocation",
+           "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx64m"]
+    cmd += [f"--profile-file={profile}" for profile in profiles]
+    if dirty is not None:
+        cmd.append(f"--dirty-image-objects={dirty}")
+    if base_images:
+        cmd += ["--runtime-arg", "-Xbootclasspath:" + ":".join(f"{root}{jar}" for jar in deps),
+                "--runtime-arg", "-Xbootclasspath-locations:" + ":".join(deps),
+                "--boot-image=" + ":".join(f"{root}{image}" for image in base_images)]
+    else:
+        cmd.append(f"--base={base:#x}")
+    if preloaded is not None:
+        cmd.append(f"--preloaded-classes={preloaded}")
+    cmd += [f"--dex-file={root}{jar}" for jar in jars]
+    cmd += [f"--dex-location={jar}" for jar in jars]
+    cmd += [
+        "--generate-debug-info", "--generate-build-id", "--image-format=lz4hc",
+        f"--oat-symbols={Path(out) / 'symbols' / 'boot.oat'}",
+        f"--oat-file={Path(out) / 'boot.oat'}",
+        f"--oat-location=/system/framework/{COMPILED_ISA}/boot.oat",
+        f"--image={Path(out) / 'boot.art'}",
+        f"--instruction-set={COMPILED_ISA}", f"--android-root={root}/empty",
+        "--no-inline-from=core-oj.jar", "--force-determinism", "--abort-on-hard-verifier-error",
+        "--strip", f"--compiler-filter={filter}",
+    ]
+    if single_image:
+        cmd.append("--single-image")
+    cmd += [f"--instruction-set-variant={COMPILED_ISA_VARIANT}", "--instruction-set-features=default", *extra]
+    return cmd
+
+
+def boot_image_member(path, names=()):
+    """Where the system partition keeps a boot image file dex2oat made: the .art and .oat files
+    in framework/<isa>/, the .vdex files where the published build has them
+    (boot_image_vdex_member)."""
+    if path.suffix == ".vdex":
+        return boot_image_vdex_member(names, path.stem)
+    return f"SYSTEM/framework/{COMPILED_ISA}/{path.name}"
+
+
+def boot_profile_commands(profman, profile, jars, root, old_jars, listing, updated):
+    """The profman command lines that carry the published boot image profile over to the jars
+    that changed: the first lists its classes and methods (a text profile, as the build's own
+    boot-image-profile.txt) from the jars it was made for, `old_jars` (device path to the published
+    jar) in place of the changed ones; the second makes a boot profile of that list for the jars
+    the image has, as the build makes SYSTEM/etc/boot-image.prof. The binary profile names each
+    jar's dex checksum, and dex2oat finds nothing in it for a jar whose dex is another, so without
+    this framework.jar's classes would be left out of the boot image and its code uncompiled."""
+    locations = [f"--dex-location={jar}" for jar in jars]
+    dump = [profman, f"--profile-file={profile}", "--dump-classes-and-methods",
+            *[f"--apk={old_jars.get(jar, f'{root}{jar}')}" for jar in jars], *locations]
+    create = [profman, "--output-profile-type=boot", f"--create-profile-from={listing}",
+              *[f"--apk={root}{jar}" for jar in jars], *locations, f"--reference-profile-file={updated}"]
+    return dump, create
+
+
+def updated_boot_profile(profman, profile, jars, root, old_jars, out, env):
+    """The published boot image profile made for the jars the image has (boot_profile_commands),
+    or the published one when profman cannot make it."""
+    listing, updated = out / "boot-image-profile.txt", out / "boot-image.prof"
+    dump, create = boot_profile_commands(profman, profile, jars, root, old_jars, listing, updated)
+    try:
+        with open(listing, "wb") as text:
+            run(*dump, env=env, stdout=text)
+        run(*create, env=env)
+    except subprocess.CalledProcessError:
+        print("profman could not carry the boot image profile over to the changed jars, so the "
+              "boot image is compiled with the published one", flush=True)
+        return profile
+    print(f"carried the boot image profile over to {', '.join(sorted(old_jars))}: "
+          f"{len(listing.read_bytes().splitlines())} classes and methods", flush=True)
+    return updated
+
+
+def rebuild_boot_images(z, names, root, work, dex2oat, extra, env, bootclasspath, profman=None,
+                        old_jars=None):
+    """Compiles the guest's boot images again from the jars in the signed target_files `z`
+    (rebuild_boot_images' notes above), in place of the published ones under `root`, where the
+    apps are compiled against them next. `old_jars` maps each changed jar (its device path) to
+    the published one, for the boot image profile (updated_boot_profile). Returns the members it
+    made, by name, and the boot image members the image no longer has: the published ones of no
+    boot image ART loads (boot_image_leftovers) and those of other instruction sets, whose vdex
+    files it replaced."""
+    jars = bootclasspath.split(":")
+    out = Path(work) / "boot-image"
+    shutil.rmtree(out, ignore_errors=True)
+    inputs = out / "inputs"
+    inputs.mkdir(parents=True)
+
+    def written(member):
+        if member not in names:
+            return None
+        path = inputs / Path(member).name
+        path.write_bytes(z.read(member))
+        return path
+
+    chunks = boot_image_chunks(names, z.read, bootclasspath)
+    if not chunks:
+        raise ValueError(f"the image has no {COMPILED_ISA} boot image to compile again")
+    framework_profile = written(BOOT_IMAGE_PROFILE)
+    if framework_profile is not None and old_jars and profman is not None:
+        old = {}
+        for jar, data in old_jars.items():
+            old[jar] = inputs / "published" / Path(jar).name
+            old[jar].parent.mkdir(parents=True, exist_ok=True)
+            old[jar].write_bytes(data)
+        primary = chunks[0][1]
+        framework_profile = updated_boot_profile(profman, framework_profile, jars[:primary["components"]],
+                                                 root, old, inputs, env)
+    dirty = written(BOOT_IMAGE_DIRTY_OBJECTS)
+    preloaded = written(BOOT_IMAGE_PRELOADED_CLASSES)
+    removed = set(boot_image_leftovers(names, z.read, bootclasspath)) | set(other_isa_boot_images(names))
+    for member in sorted(removed):
+        print(f"removing {member}: it is no part of the guest's boot images", flush=True)
+        (root / "system" / member[len("SYSTEM/"):]).unlink(missing_ok=True)
+    compiled, images, first = {}, [], 0
+    for member, header in chunks:
+        start, count = header["start"], header["components"]
+        image_jars = jars[start:start + count]
+        if start != first or len(image_jars) != count:
+            raise ValueError(f"{member} holds the boot class path's jars {start} to {start + count - 1}, but "
+                             f"the images before it end at {first} and the boot class path has {len(jars)}")
+        name = Path(member).stem
+        keys = oat_key_values(z.read(member[:-len(".art")] + ".oat"))
+        filter = keys.get("compiler-filter", "speed-profile")
+        profiles = []
+        if filter == "speed-profile":
+            profiles = [framework_profile] if framework_profile is not None else []
+            for apex in sorted({jar.split("/")[2] for jar in image_jars if jar.startswith("/apex/")}):
+                profile = root / "apex" / apex / APEX_BOOT_IMAGE_PROFILE
+                if profile.is_file():
+                    profiles.append(profile)
+        # A multi-image has an image file per jar; an image of several jars in one file was
+        # compiled as a single image.
+        stems = boot_image_component_stems(names, header, jars)
+        single = count > 1 and len(stems) == 1
+        chunk = out / name
+        (chunk / "symbols").mkdir(parents=True)
+        # The build gives only the primary image the preloaded classes (the mainline extension's
+        # configuration names none).
+        run(*boot_image_command(dex2oat, root, chunk, image_jars, header["begin"], filter, profiles,
+                                dirty, None if images else preloaded, extra, base_images=images, deps=jars[:start + count],
+                                single_image=single),
+            env=dict(env, ANDROID_LOG_TAGS="*:e"))
+        made = sorted(path for path in chunk.iterdir() if path.is_file() and path.suffix in BOOT_IMAGE_SUFFIXES)
+        expected = sorted(stem + suffix for stem in stems for suffix in BOOT_IMAGE_SUFFIXES)
+        if sorted(path.name for path in made) != expected:
+            raise ValueError(f"dex2oat made {', '.join(path.name for path in made)} for {name}, but ART "
+                             f"loads {', '.join(expected)}")
+        for path in made:
+            data = path.read_bytes()
+            target = boot_image_member(path, names)
+            compiled[target] = data
+            host = root / "system" / target[len("SYSTEM/"):]
+            host.parent.mkdir(parents=True, exist_ok=True)
+            if host.is_symlink():
+                host.unlink()
+            host.write_bytes(data)
+        print(f"compiled the boot image {name} ({count} jars, {filter}): "
+              f"{sum(len(path.read_bytes()) for path in made) >> 10} KiB", flush=True)
+        images.append(f"/system/framework/{name}.art")
+        first += count
+    shutil.rmtree(out, ignore_errors=True)
+    return compiled, removed - set(compiled)
+
+
+def boot_image_jar_jobs(names, read):
+    """The framework jars whose odex the image ships and that compile_jobs does not compile: the
+    system server's (those of APEXes too, whose odex is in /system/framework/oat) and the other
+    jars of the framework folders, [{"jar": member or None, "location": device path, "odex":
+    member, "filter": f, "classpath": c, "app_image": bool}], each with the filter and the shared
+    libraries the published build compiled it with. A jar of an APEX has no member of its own."""
+    names = set(names)
+    record = json.loads(read(PREBUILT_OAT_RECORD)) if PREBUILT_OAT_RECORD in names else {}
+    pattern = re.compile(rf"((?:{'|'.join(FRAMEWORK_OAT_PARTITIONS)})/framework)/oat/{COMPILED_ISA}/([^/]+)\.odex")
+    jobs = []
+    for odex in sorted(names):
+        match = pattern.fullmatch(odex)
+        if not match:
+            continue
+        stem = match.group(2)
+        if stem.startswith("apex@"):
+            # apex@com.android.wifi@javalib@service-wifi.jar@classes
+            parts = stem.split("@")
+            jar, location = None, "/" + "/".join(parts[:-1])
+        else:
+            jar = f"{match.group(1)}/{stem}.jar"
+            if jar not in names or jar in record:
+                continue
+            location = device_path(jar)
+        keys = oat_key_values(read(odex))
+        jobs.append({"jar": jar, "location": location, "odex": odex,
+                     "filter": keys.get("compiler-filter", "speed"),
+                     "classpath": keys.get("classpath", DEFAULT_CLASS_LOADER_CONTEXT),
+                     "app_image": odex[:-len(".odex")] + ".art" in names})
+    return jobs
+
+
+def compiled_against(odex, expected):
+    """Whether an odex was compiled against the boot images whose checksums are `expected`
+    (boot_image_checksums): its bootclasspath-checksums start with them."""
+    found = oat_key_values(odex).get("bootclasspath-checksums", "")
+    return found == expected or found.startswith(expected + ":")
+
+
+def check_compiled_against(odex, expected, location):
+    """Stops the image at the first odex dex2oat compiled against other boot images than
+    `expected`: dex2oat only logs a boot image it cannot load and compiles against the images
+    before it, and ART would throw every such odex away."""
+    if not compiled_against(odex, expected):
+        found = oat_key_values(odex).get("bootclasspath-checksums", "")
+        raise ValueError(f"dex2oat compiled {location} against boot images {found.split(':d/')[0]}, not "
+                         f"the guest's {expected}: it could not load all of them")
+
+
+def compile_boot_image_jars(z, names, root, out, dex2oat, extra, env, bootclasspath, boot_images,
+                            compiled, sizes, expected=None):
+    """Compiles each framework jar boot_image_jar_jobs lists again, against the boot images
+    rebuild_boot_images made under `root`, with the filter, shared libraries and app image the
+    published build compiled it with, and its profile (the binary one the build installs beside
+    the jar, <jar>.prof); adds the files to `compiled` and their size to `sizes`. A jar compiled
+    with speed-profile that has no profile beside it is compiled with speed, which compiles all
+    of what speed-profile compiles."""
+    for job in boot_image_jar_jobs(names, z.read):
+        location = job["location"]
+        host_jar = root / location.lstrip("/")
+        if not host_jar.is_file():
+            raise ValueError(f"{job['odex']} is compiled from {location}, which the image does not have")
+        profile = None
+        if job["jar"] is not None and job["jar"] + ".prof" in names:
+            profile = out / "profiles" / (job["jar"] + ".prof")
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_bytes(z.read(job["jar"] + ".prof"))
+        elif job["jar"] is None and Path(f"{host_jar}.prof").is_file():
+            profile = Path(f"{host_jar}.prof")
+        filter = job["filter"]
+        if filter == "speed-profile" and profile is None:
+            print(f"{location}: the published build compiled it with speed-profile and no profile is "
+                  "beside it, so it is compiled with speed", flush=True)
+            filter = "speed"
+        odex = out / job["odex"]
+        odex.parent.mkdir(parents=True, exist_ok=True)
+        run(*dex2oat_command(dex2oat, host_jar, location, odex, root, bootclasspath, boot_images,
+                             class_loader_contexts(job["classpath"], root), filter,
+                             profile=profile if filter == "speed-profile" else None, extra=extra,
+                             app_image=odex.with_suffix(".art") if job["app_image"] else None,
+                             oat_location=device_path(job["odex"])),
+            env=dict(env, ANDROID_LOG_TAGS="*:e"))
+        if expected is not None:
+            check_compiled_against(odex.read_bytes(), expected, location)
+        stem = job["odex"][:-len(".odex")]
+        members = [job["odex"], stem + ".vdex"] + ([stem + ".art"] if job["app_image"] else [])
+        for member in members:
+            compiled[member] = (out / member).read_bytes()
+        sizes[location] = sum(len(compiled[member]) for member in members)
+        print(f"compiled {location} with {filter} against the new boot images: {sizes[location] >> 10} KiB",
+              flush=True)
+
+
+def system_server_apexes(names):
+    """The APEXes whose jars have their odex in a framework/oat folder, by name, each with the
+    member that holds it."""
+    found = {}
+    for name in names:
+        match = re.search(rf"/framework/oat/{COMPILED_ISA}/apex@([^@/]+)@", name)
+        if not match or match.group(1) in found:
+            continue
+        apex = match.group(1)
+        members = [f"{p}/apex/{apex}{ext}" for p in PARTITION_DIRS for ext in (".apex", ".capex")
+                   if f"{p}/apex/{apex}{ext}" in names]
+        if not members:
+            raise ValueError(f"{name} is compiled from the {apex} APEX, which no partition has")
+        found[apex] = members[0]
+    return found
+
+
+def boot_image_problems(z):
+    """What is wrong with the boot images in a target_files: a jar of the system partition on the
+    boot class path that is not the dex the primary image was compiled from, an extension
+    compiled against another primary image, or a framework jar's or an app's odex compiled
+    against other boot images than the guest's (the primary image and every extension, as ART
+    finds them: boot_image_chunks), the chain itself broken (boot_image_chain_problems), or an
+    app image (.art beside an odex) made against other boot images."""
+    names = set(z.namelist())
+    if FRAMEWORK_ODEX not in names:
+        return []
+    bootclasspath = oat_key_values(z.read(FRAMEWORK_ODEX)).get("bootclasspath", "")
+    chunks = boot_image_chunks(names, z.read, bootclasspath)
+    if not chunks:
+        return []
+    problems = []
+    for jar in stale_boot_jars(names, z.read, bootclasspath):
+        problems.append(f"{jar} is not the dex the boot image was compiled from, so ART throws the boot "
+                        "image away and every process runs the framework interpreted")
+    problems += boot_image_chain_problems(names, z.read, bootclasspath)
+    expected = boot_image_checksums(names, z.read, bootclasspath)
+    pattern = re.compile(rf"(?:{'|'.join(PARTITION_DIRS)})/.+/oat/{COMPILED_ISA}/[^/]+\.odex")
+    for odex in sorted(names):
+        if not pattern.fullmatch(odex):
+            continue
+        if not compiled_against(z.read(odex), expected):
+            found = oat_key_values(z.read(odex)).get("bootclasspath-checksums", "")
+            problems.append(f"{odex} was compiled against boot images {found.split(':d/')[0]}, but the "
+                            f"guest's are {expected}, so ART throws it away")
+    images = re.compile(rf"(?:{'|'.join(PARTITION_DIRS)})/.+/oat/{COMPILED_ISA}/[^/]+\.art")
+    for image in sorted(names):
+        if not images.fullmatch(image):
+            continue
+        try:
+            header = art_header(z.read(image))
+        except ValueError:
+            problems.append(f"{image} is not an app image, so ART does not load it")
+            continue
+        if not extends_guest_images(chunks, header):
+            problems.append(f"{image} was made against other boot images than the guest's {expected} (it "
+                            f"names {header['boot_components']} components, checksum "
+                            f"{header['boot_checksum']:08x}), so ART does not load it")
+    return problems
 
 
 def compiled_app_problems(z):
@@ -7948,27 +8920,33 @@ def prebuilt_oat_problems(z):
     return problems
 
 
-def compile_jobs(names, read):
+def compile_jobs(names, read, boot_image_rebuilt=False):
     """What compile_apps compiles in a signed target_files: [(apk, filter, class loader
     context, whether it has an app image)]. COMPILED_APPS come first, their filter None (speed,
     or speed-profile when the APK carries a profile, see compiler_filter). Then each app the
     published build compiled (PREBUILT_OAT_RECORD) whose odex no longer matches its APK's dex,
-    with the filter, the shared libraries and the app image it was compiled with."""
+    with the filter, the shared libraries and the app image it was compiled with; with
+    `boot_image_rebuilt`, every one of them, as each odex names the boot image it was compiled
+    against (rebuild_boot_images)."""
     names = set(names)
     jobs = []
+    record = json.loads(read(PREBUILT_OAT_RECORD)) if PREBUILT_OAT_RECORD in names else {}
     for apk in COMPILED_APPS:
         if apk not in names:
             continue
         published = factory_odex(apk)
         context = (oat_key_values(read(published)).get("classpath", DEFAULT_CLASS_LOADER_CONTEXT)
                    if published in names else DEFAULT_CLASS_LOADER_CONTEXT)
-        jobs.append((apk, None, context, False))
-    record = json.loads(read(PREBUILT_OAT_RECORD)) if PREBUILT_OAT_RECORD in names else {}
+        # An app the published build shipped with an app image keeps one: it is made against the
+        # boot images too, so the published one cannot stay.
+        jobs.append((apk, None, context, any(member.endswith(".art")
+                                             for member in record.get(apk, {}).get("files", []))))
     for apk, entry in sorted(record.items()):
         if apk in COMPILED_APPS or apk not in names:
             continue
         vdex = entry["files"][0][:-len(".odex")] + ".vdex"
-        if vdex in names and vdex_checksums(read(vdex)) == apk_dex_checksums(read(apk)):
+        if (not boot_image_rebuilt and vdex in names
+                and vdex_checksums(read(vdex)) == apk_dex_checksums(read(apk))):
             continue
         app_image = any(member.endswith(".art") for member in entry["files"])
         jobs.append((apk, entry["filter"], entry["classpath"], app_image))
@@ -8067,10 +9045,11 @@ def edit_apex_apks(data, name, edit, otatools, work):
     return result
 
 
-def edit_permission_apex(data, name, otatools, work):
+def edit_permission_apex(data, name, otatools, work, replacement=None):
     """The permission APEX with PermissionController's lists edited (see
-    permission_controller_edits). Without otatools nothing can pack it again, and it is
-    left as it is."""
+    permission_controller_edits), and with `replacement`, PermissionController built from
+    dsa/apps, in place of the published APK first. Without otatools nothing can pack it again,
+    and it is left as it is."""
     if otatools is None:
         print(f"not editing {name}: there is no otatools to pack it again", flush=True)
         return data
@@ -8078,6 +9057,9 @@ def edit_permission_apex(data, name, otatools, work):
     def edit(apk, apk_name):
         if not apk_name.endswith("/" + PERMISSION_CONTROLLER_APK):
             return apk
+        if replacement is not None:
+            print(f"replacing {apk_name} with the app built from dsa/apps", flush=True)
+            apk = replacement
         return edit_permission_controller_apk(apk, apk_name)
 
     return edit_apex_apks(data, name, edit, otatools, work)
@@ -8134,9 +9116,8 @@ def settings_list_end_problems(apk):
 
 
 def permission_controller_problems(signed, otatools, work, env):
-    """What is wrong with PermissionController in a signed target_files: its lists without
-    their cards' corners or the room below their last row, looked for in the permission APEX
-    the image ships."""
+    """What is wrong with PermissionController in a signed target_files: its lists without the
+    room below their last row, looked for in the permission APEX the image ships."""
     with zipfile.ZipFile(signed) as z:
         found = [n for n in PERMISSION_APEXES if n in z.namelist()]
         if not found:
@@ -8150,7 +9131,7 @@ def permission_controller_problems(signed, otatools, work, env):
         left = apk_edits_left(apk.read_bytes(), dimensions=permission_controller_edits())
         if left:
             problems.append(f"{found[0]}:{apk.relative_to(payload).as_posix()} still has {'; '.join(left)}, "
-                            "so its lists keep corners of their own or end on the window's bottom edge")
+                            "so its lists end on the window's bottom edge")
     shutil.rmtree(folder, ignore_errors=True)
     return problems
 
@@ -8171,12 +9152,145 @@ def services_profiles(spec, inputs):
     return {SERVICES_JAR: paths}
 
 
-def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
+# sign_target_files_apks builds the partition images itself once it has signed the apps
+# (IMAGES/system.img and the rest, through add_img_to_target_files), from the contents as they are
+# then, before compile_apps compiles anything. add_img_to_target_files -a after compile_apps only
+# adds the images that are missing, so an image signing left kept the published build's boot
+# images and odex beside the framework.jar and services.jar the image replaced, and none of the
+# apps compile_apps compiled: the guest ran a boot image compiled for another framework.jar
+# (artd reported its boot-framework.oat as made for other dex), and an app protected by Google
+# Play's PairIP crashed at its start. Every partition image is therefore dropped once the
+# contents change, and built again from them.
+PARTITION_IMAGES_FOLDER = "IMAGES/"
+
+
+def write_compiled_target_files(z, out, compiled, removed, rules):
+    """Writes the target_files `z` to `out` with what compile_apps made: the members in
+    `compiled` (name to bytes) in place of the ones of that name, the members in `removed` left
+    out, the filesystem rules of `rules` (config member to lines) added, and none of the partition
+    images (PARTITION_IMAGES_FOLDER), which add_img_to_target_files then builds from these
+    contents."""
+    with zipfile.ZipFile(out, "w", allowZip64=True) as zout:
+        for info in z.infolist():
+            if (info.filename in compiled or info.filename in removed
+                    or info.filename.startswith(PARTITION_IMAGES_FOLDER)):
+                continue
+            data = z.read(info)
+            if info.filename in rules:
+                data = add_filesystem_config(data.decode(), rules[info.filename]).encode()
+            zout.writestr(info, data)
+        for member, data in compiled.items():
+            info = zipfile.ZipInfo(member, date_time=(2008, 1, 1, 0, 0, 0))
+            info.external_attr = 0o100644 << 16
+            zout.writestr(info, data)
+
+
+# What partition_image_problems compares between the target files and the partition images built
+# from them: compiled code (boot images, odex, vdex and app images) and the boot class path's jars.
+COMPILED_SUFFIXES = (".art", ".oat", ".odex", ".vdex")
+EROFS_MAGIC_BYTES = struct.pack("<I", 0xE0F5E1E2)
+SPARSE_MAGIC = struct.pack("<I", 0xED26FF3A)
+
+
+def partition_image_checked(name, partition, jars):
+    """Whether partition_image_problems compares the target_files member `name` of `partition`:
+    compiled code, or a jar of the boot class path (`jars`, target_files members)."""
+    return name.startswith(partition + "/") and (name.endswith(COMPILED_SUFFIXES) or name in jars)
+
+
+def partition_image_problems(partition, names, read, image_names, image_read, bootclasspath):
+    """What the image of `partition` (IMAGES/<partition>.img) carries other than the target
+    files it was built from (`names` and `read`, regular files only), given the files the image
+    holds as target_files members (`image_names` and `image_read`): compiled code or a boot class
+    path jar that is missing from the image, another in it, or left in it after the image removed
+    it. Each means the guest runs code compiled for other dex than it has."""
+    jars = {system_jar_member(jar) for jar in bootclasspath.split(":") if jar} - {None}
+    image = f"{PARTITION_IMAGES_FOLDER}{PARTITION_DIRS[partition]}.img"
+    problems = []
+    for name in sorted(n for n in names if partition_image_checked(n, partition, jars)):
+        if name not in image_names:
+            problems.append(f"{image} has no {device_path(name)}, which the image compiled")
+        elif image_read(name) != read(name):
+            problems.append(f"{image} holds another {device_path(name)} than the image made, so the guest "
+                            "runs code compiled for other dex than it has")
+    left = (n for n in image_names if partition_image_checked(n, partition, jars) and n not in names)
+    for name in sorted(left):
+        problems.append(f"{image} still has {device_path(name)}, which the image removed")
+    return problems
+
+
+def image_tree_members(root, partition):
+    """The regular files of an extracted partition image under `root`, as target_files members
+    ({member: path}). The system image holds the root file system with the system partition in
+    system/; a symbolic link is left out, as target_files keeps it as a link."""
+    base = root / "system" if partition == "SYSTEM" and (root / "system" / "build.prop").is_file() else root
+    members = {}
+    for path in base.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            members[f"{partition}/{path.relative_to(base).as_posix()}"] = path
+    return members
+
+
+def extract_partition_image(z, member, otatools, folder, env):
+    """Extracts the erofs partition image `member` of the target_files `z` into `folder`/tree
+    (an Android sparse image is unsparsed first) and returns that folder."""
+    folder.mkdir(parents=True, exist_ok=True)
+    image = folder / "partition.img"
+    with z.open(member) as source, open(image, "wb") as target:
+        shutil.copyfileobj(source, target, 1 << 22)
+    with open(image, "rb") as f:
+        head = f.read(1028)
+    if head[:4] == SPARSE_MAGIC:
+        raw = folder / "partition.raw"
+        run(otatools / "bin/simg2img", image, raw, env=env)
+        image.unlink()
+        image = raw
+        with open(image, "rb") as f:
+            head = f.read(1028)
+    if head[1024:1028] != EROFS_MAGIC_BYTES:
+        raise ValueError(f"{member} is not an erofs image, so the image cannot check what it holds")
+    tree = folder / "tree"
+    run(otatools / "bin/fsck.erofs", f"--extract={tree}", image, env=env)
+    image.unlink()
+    return tree
+
+
+def built_image_problems(signed, otatools, work, env):
+    """What the partition images add_img_to_target_files built into the signed target_files carry
+    other than its contents (partition_image_problems), one partition at a time."""
+    problems = []
+    with zipfile.ZipFile(signed) as z:
+        infos = {i.filename: i for i in z.infolist()
+                 if not i.filename.endswith("/") and not stat.S_ISLNK(i.external_attr >> 16)}
+        names = set(infos)
+        bootclasspath = (oat_key_values(z.read(FRAMEWORK_ODEX)).get("bootclasspath", "")
+                         if FRAMEWORK_ODEX in names else "")
+        jars = {system_jar_member(jar) for jar in bootclasspath.split(":") if jar} - {None}
+        for partition, folder_name in PARTITION_DIRS.items():
+            if not any(partition_image_checked(n, partition, jars) for n in names):
+                continue
+            member = f"{PARTITION_IMAGES_FOLDER}{folder_name}.img"
+            if member not in names:
+                problems.append(f"the signed target files have no {member} to check")
+                continue
+            folder = work / "image-check" / folder_name
+            shutil.rmtree(folder, ignore_errors=True)
+            tree = extract_partition_image(z, member, otatools, folder, env)
+            built = {name: path for name, path in image_tree_members(tree, partition).items()
+                     if partition_image_checked(name, partition, jars)}
+            problems += partition_image_problems(partition, names, z.read, set(built),
+                                                 lambda name: built[name].read_bytes(), bootclasspath)
+            shutil.rmtree(folder, ignore_errors=True)
+    return problems
+
+
+def compile_apps(signed, tools_zip, otatools, work, env, profiles=None, published=None):
     """Compiles COMPILED_APPS in the signed target_files, and again each app or edited jar
     whose dex no longer matches the odex the published build shipped (compile_jobs), and adds
     their odex and vdex files and filesystem rules to it. `profiles` maps a jar to the text
     profiles (frameworks/base's art-profile format) the published build compiled it with.
-    Returns the bytes each app's compiled files take."""
+    `published` is the published target_files, whose boot class path jars the boot image
+    profile was made for. Returns the bytes each app's compiled files take."""
     tools = work / "dexpreopt-tools"
     with zipfile.ZipFile(tools_zip) as z:
         z.extractall(tools)
@@ -8197,7 +9311,15 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
         boot_images = boot_image_locations(bootclasspath, framework["bootclasspath-checksums"])
         for partition, folder in PARTITION_DIRS.items():
             extract_tree(z, f"{partition}/framework/", root / folder / "framework")
-        for apex, member in apex_jar_sources(bootclasspath, names).items():
+        # framework.jar from the Framework build is not the dex the published boot image was
+        # compiled from: the boot images, and everything compiled against them, are compiled
+        # again (rebuild_boot_images), the system server's jars of the APEXes among them.
+        stale = stale_boot_jars(names, z.read, bootclasspath)
+        apexes = apex_jar_sources(bootclasspath, names)
+        if stale:
+            print(f"{', '.join(stale)} changed, so the boot images are compiled again", flush=True)
+            apexes = {**system_server_apexes(names), **apexes}
+        for apex, member in apexes.items():
             packed = work / "apex" / Path(member).name
             packed.parent.mkdir(parents=True, exist_ok=True)
             packed.write_bytes(z.read(member))
@@ -8214,11 +9336,43 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
             if not (root / image.lstrip("/")).parent.joinpath(COMPILED_ISA, Path(image).name).exists():
                 raise ValueError(f"the image has no {COMPILED_ISA} boot image at {image}")
 
-        compiled, sizes, rules = {}, {}, {}
+        compiled, sizes, rules, removed = {}, {}, {}, set()
+        if stale:
+            old_jars = {}
+            if published is not None:
+                with zipfile.ZipFile(published) as p:
+                    old_jars = {jar: p.read(system_jar_member(jar)) for jar in stale
+                                if system_jar_member(jar) in p.namelist()}
+            made, removed = rebuild_boot_images(z, names, root, work, dex2oat, extra, env, bootclasspath,
+                                                profman=profman, old_jars=old_jars)
+            compiled.update(made)
+            sizes["boot images"] = sum(len(data) for data in compiled.values())
+        else:
+            # A boot image file of no image ART loads is not shipped either.
+            removed = set(boot_image_leftovers(names, z.read, bootclasspath))
+            for member in sorted(removed):
+                print(f"removing {member}: it is no part of the guest's boot images", flush=True)
+        # The boot images every odex and app image is compiled against: the new ones, as ART finds
+        # them on the guest, checked before anything is compiled against them.
+        view = (names - removed) | set(compiled)
+
+        def current(member):
+            return compiled[member] if member in compiled else z.read(member)
+
+        chain = boot_image_chunks(view, current, bootclasspath)
+        problems = boot_image_chain_problems(view, current, bootclasspath)
+        if not chain or problems:
+            raise ValueError("; ".join(problems or [f"the image has no {COMPILED_ISA} boot image"]))
+        boot_images = boot_image_locations_of(chain)
+        expected = boot_image_checksums(view, current, bootclasspath)
+        if stale:
+            print(f"the guest's boot images: {', '.join(boot_images)} ({expected})", flush=True)
+            compile_boot_image_jars(z, names, root, out, dex2oat, extra, env, bootclasspath,
+                                    boot_images, compiled, sizes, expected=expected)
         for apk in COMPILED_APPS:
             if apk not in names:
                 print(f"not compiling {apk}: the image does not have it", flush=True)
-        for apk, filter, context, app_image in compile_jobs(names, z.read):
+        for apk, filter, context, app_image in compile_jobs(names, z.read, boot_image_rebuilt=bool(stale)):
             data = z.read(apk)
             host_apk = out / apk
             host_apk.parent.mkdir(parents=True, exist_ok=True)
@@ -8266,7 +9420,13 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
                                  extra=extra + (["--abort-on-hard-verifier-error"] if edited else []),
                                  app_image=odex.with_suffix(".art") if app_image else None),
                 env=dict(env, ANDROID_LOG_TAGS="*:e"))
+            check_compiled_against(odex.read_bytes(), expected, location)
             members = [odex_member, vdex_member] + ([art_member] if app_image else [])
+            if not app_image and art_member in names:
+                # An app image is made against the boot images too; one left from the published
+                # build would name the old ones.
+                print(f"removing {art_member}: {apk} is compiled without an app image", flush=True)
+                removed.add(art_member)
             for member in members:
                 compiled[member] = (out / member).read_bytes()
             sizes[apk] = sum(len(compiled[member]) for member in members)
@@ -8278,21 +9438,10 @@ def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
             rules.setdefault(config, []).extend(app_rules)
 
         updated = signed.with_name(signed.stem + "-compiled.zip")
-        with zipfile.ZipFile(updated, "w", allowZip64=True) as zout:
-            for info in z.infolist():
-                if info.filename in compiled:
-                    continue
-                data = z.read(info)
-                if info.filename in rules:
-                    data = add_filesystem_config(data.decode(), rules[info.filename]).encode()
-                zout.writestr(info, data)
-            for member, data in compiled.items():
-                info = zipfile.ZipInfo(member, date_time=(2008, 1, 1, 0, 0, 0))
-                info.external_attr = 0o100644 << 16
-                zout.writestr(info, data)
+        write_compiled_target_files(z, updated, compiled, removed, rules)
     updated.replace(signed)
     with zipfile.ZipFile(signed) as z:
-        problems = compiled_app_problems(z) + prebuilt_oat_problems(z)
+        problems = compiled_app_problems(z) + prebuilt_oat_problems(z) + boot_image_problems(z)
     if problems:
         raise ValueError("; ".join(problems))
     print(f"compiled system apps: {sum(sizes.values()) >> 20} MiB in all", flush=True)
@@ -8665,8 +9814,11 @@ def main():
     if problems:
         raise ValueError("; ".join(problems))
     compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env,
-                 profiles=services_profiles(spec, inputs))
+                 profiles=services_profiles(spec, inputs), published=target_files)
     run(otatools / "bin/add_img_to_target_files", "-p", otatools, "-a", signed, env=env)
+    problems = built_image_problems(signed, otatools, work, env)
+    if problems:
+        raise ValueError("; ".join(problems))
 
     images = work / "images"
     with zipfile.ZipFile(signed) as z:

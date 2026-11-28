@@ -69,12 +69,13 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   minimized), or most of its memory is cache, the control daemon sets
   `vendor.dsa.memory.reclaim`. Once boot has finished, init moves cold pages to zram, drops the
   clean caches and compacts memory, which free page reporting then hands back to Hyper-V.
-  While idle it does so again when memory has grown back, and then has the kernel report
+  While idle it does so again when memory has grown back, no sooner than three minutes after
+  the last time and twice as long each time memory came straight back, and then has the kernel report
   every free page to the host again (`page_reporting.rereport`). What stays cold in zram goes
   on to a backing file on the data disk (`/data/per_boot/zram_swap`, 512 MiB, made again each
   boot): once no app has been open for ten minutes, at most every ten minutes, the daemon has
   init write zram's pages unused for half an hour, incompressible ones first, at most 32 MiB a
-  run and 512 MiB a day. ART keeps less free heap
+  run, 512 MiB a boot and 2 GiB a day. ART keeps less free heap
   (`MEMORY_PROPS` in `make-image.py`), and the zygote does not preload the classes of the
   features a desktop guest has no device for (`PRELOAD_DROPPED_PREFIXES`). Only the daemon
   may set the property, and only init's vendor scripts may write those kernel settings.
@@ -130,6 +131,16 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   compiled with `--abort-on-hard-verifier-error`, so an edited method the verifier
   rejects stops the build instead of closing the app when it loads. PermissionController is
   not compiled: it is inside the permission APEX, where ART takes no odex.
+- Signing builds the partition images (`IMAGES/system.img` and the rest) before anything is
+  compiled, and `add_img_to_target_files -a` keeps an image that is already there. So
+  `make-image.py` drops them once it has compiled, builds them again from the compiled
+  contents, and then reads each image back (`fsck.erofs --extract`): the build fails when an
+  image holds another boot image, odex, vdex, app image or boot class path jar than the target
+  files, or one the image removed. Images made before this kept the published boot image and
+  odex beside the rebuilt `framework.jar` and `services.jar` (artd reports the boot image's
+  `boot-framework.oat` as made for other dex than `framework.jar`), and the compiled system
+  apps were not in the image at all. On such an image FLO, an app that Google Play's PairIP
+  protects, crashed at its start.
 - The apps the published build itself compiled into their own partition (KeyChain,
   SettingsProvider, Telecom and a few more on Android 16) keep their odex, vdex and app image:
   signing leaves an APK's dex as it is. `make-image.py` records them from the published
@@ -196,7 +207,12 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
     checked against that framework-res before any is built: one that names a resource it
     lacks, or a private one other than through `@*android:`, stops the image with all of
     them listed, since aapt2 links an overlay only to the framework's public resources and
-    would stop at the first. It records the SHA-256 of the two resource tables
+    would stop at the first. Files, PermissionController and the share sheet declare
+    overlayable sets, and idmap2 maps an overlay of such an app only when its manifest names
+    the set (`android:targetName`) and the set lets the vendor partition replace what the
+    overlay replaces; otherwise the overlay is listed but never applied. So each of their
+    overlays names its set, and an overlay that names none, names another, or replaces a
+    resource outside it stops the image. It records the SHA-256 of the two resource tables
     in `assets/dsa-overlay.json`; `check-image.py` fails an image with an overlay missing, or
     one built against another framework-res or another build of its app.
   - What no overlay can reach is edited in the app. SettingsLib's toolbar layouts start the

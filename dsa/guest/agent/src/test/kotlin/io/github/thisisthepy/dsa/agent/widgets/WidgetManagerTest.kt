@@ -5,12 +5,14 @@ import io.github.thisisthepy.dsa.agent.RecordingLog
 import io.github.thisisthepy.dsa.agent.decode
 import io.github.thisisthepy.dsa.control.v1.AddWidget
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.GetWidgetPreviews
 import io.github.thisisthepy.dsa.control.v1.ListWidgetProviders
 import io.github.thisisthepy.dsa.control.v1.PointerAction
 import io.github.thisisthepy.dsa.control.v1.ReconfigureWidget
 import io.github.thisisthepy.dsa.control.v1.RemoveWidget
 import io.github.thisisthepy.dsa.control.v1.ResizeWidget
 import io.github.thisisthepy.dsa.control.v1.WidgetPointer
+import io.github.thisisthepy.dsa.control.v1.WidgetPreviewSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -120,7 +122,50 @@ class FakeWidgetPlatform : WidgetPlatform {
         this.changed = changed
         this.failed = failed
     }
+
+    /** Whether [galleryProviders] was read, which leaves the previews out. */
+    var galleryRead = 0
+
+    override fun galleryProviders(): List<WidgetInfo> {
+        galleryRead++
+        return offered.map { it.copy(previewPng = ByteArray(0)) }
+    }
+
+    /** Each app's icon, by package. */
+    val icons = mutableMapOf<String, ByteArray>()
+
+    /** The icons drawn, by package, in order. */
+    val iconsDrawn = mutableListOf<String>()
+
+    override fun appIcon(packageName: String): ByteArray {
+        iconsDrawn += packageName
+        return icons[packageName] ?: ByteArray(0)
+    }
+
+    /** The kinds of preview each widget offers, by provider; a widget not here is not offered. */
+    val previewKinds = mutableMapOf<String, PreviewKinds>()
+
+    /**
+     * What drawing a preview gives, by provider and source, as a function of the side asked
+     * for; a pair not here draws nothing (null), as a layout that fails to apply.
+     */
+    val drawings = mutableMapOf<Pair<String, WidgetPreviewSource>, (Int) -> ByteArray?>()
+
+    /** Each preview drawn: provider, source and side, in order. */
+    val drawn = mutableListOf<Triple<String, WidgetPreviewSource, Int>>()
+
+    override fun previewKinds(providers: List<String>): Map<String, PreviewKinds> =
+        previewKinds.filterKeys { it in providers }
+
+    override fun drawPreview(provider: String, source: WidgetPreviewSource, maxPixels: Int): ByteArray? {
+        drawn += Triple(provider, source, maxPixels)
+        return drawings[provider to source]?.invoke(maxPixels)
+    }
 }
+
+/** A PNG's signature followed by [size] - 4 bytes, as a stand-in for a drawn image. */
+fun png(size: Int = 8, fill: Byte = 1): ByteArray =
+    byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()) + ByteArray(size - 4) { fill }
 
 fun clock(configure: Boolean = false, provider: String = "com.example.clock/.ClockWidget") = WidgetInfo(
     provider = provider,
@@ -169,6 +214,179 @@ class WidgetManagerTest {
         assertTrue(parts.dropLast(1).none { it.complete })
         assertTrue(parts.last().complete)
         assertEquals(40, parts.sumOf { it.providersCount })
+    }
+
+    private fun listByApp(requestId: Int = 9) {
+        manager.handle(
+            Envelope.newBuilder()
+                .setListWidgetProviders(ListWidgetProviders.newBuilder().setRequestId(requestId).setLazyPreviews(true))
+                .build(),
+        )
+    }
+
+    private fun askPreviews(vararg providers: String, requestId: Int = 11) {
+        manager.handle(
+            Envelope.newBuilder()
+                .setGetWidgetPreviews(GetWidgetPreviews.newBuilder().setRequestId(requestId).addAllProviders(providers.toList()))
+                .build(),
+        )
+        scheduler.runDue()
+    }
+
+    private fun previewsSent(): List<io.github.thisisthepy.dsa.control.v1.WidgetPreview> =
+        sent.filter { it.hasWidgetPreviews() }.flatMap { it.widgetPreviews.previewsList }
+
+    @Test
+    fun fr12_a_gallery_by_app_carries_no_previews_and_each_apps_icon_once() {
+        started()
+        platform.offered += clock()
+        platform.offered += clock(provider = "com.example.clock/.Analog").copy(label = "Analog")
+        platform.offered += clock(provider = "com.appslab.widgets/.Battery").copy(label = "Battery")
+        platform.icons["com.example.clock"] = png(16)
+        platform.icons["com.appslab.widgets"] = png(20)
+        listByApp()
+        val parts = sent.filter { it.hasWidgetProviders() }.map { it.widgetProviders }
+        assertTrue(parts.last().complete)
+        val providers = parts.flatMap { it.providersList }
+        assertEquals(3, providers.size)
+        assertTrue("no widget carries a preview", providers.all { it.previewPng.isEmpty })
+        val icons = parts.flatMap { it.appIconsList }
+        assertEquals(listOf("com.example.clock", "com.appslab.widgets"), icons.map { it.packageName })
+        assertEquals(16, icons[0].iconPng.size())
+        // Read without drawing any widget's preview, and each icon drawn once.
+        assertEquals(1, platform.galleryRead)
+        assertEquals(listOf("com.example.clock", "com.appslab.widgets"), platform.iconsDrawn)
+        assertTrue(platform.drawn.isEmpty())
+    }
+
+    @Test
+    fun fr12_the_plain_gallery_still_carries_each_widgets_preview_and_no_icons() {
+        started()
+        platform.offered += clock()
+        manager.handle(Envelope.newBuilder().setListWidgetProviders(ListWidgetProviders.newBuilder().setRequestId(3)).build())
+        val part = sent.single { it.hasWidgetProviders() }.widgetProviders
+        assertEquals(4, part.getProviders(0).previewPng.size())
+        assertEquals(0, part.appIconsCount)
+        assertEquals(0, platform.galleryRead)
+    }
+
+    @Test
+    fun fr12_a_preview_layout_comes_before_a_preview_image_and_the_app_icon_last() {
+        assertEquals(
+            listOf(
+                WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT,
+                WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE,
+                WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON,
+            ),
+            PreviewChoice.order(PreviewKinds(layout = true, image = true)),
+        )
+        assertEquals(
+            listOf(WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE, WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON),
+            PreviewChoice.order(PreviewKinds(layout = false, image = true)),
+        )
+        assertEquals(
+            listOf(WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON),
+            PreviewChoice.order(PreviewKinds(layout = false, image = false)),
+        )
+    }
+
+    @Test
+    fun fr12_a_widget_that_gives_only_a_preview_layout_shows_the_layout_drawn() {
+        // As every widget of Material You Widgets: a previewLayout, no previewImage. Before,
+        // the gallery showed only the app's icon for each of them.
+        val battery = "com.appslab.widgets/.BatteryProgressWidget2R"
+        started()
+        platform.previewKinds[battery] = PreviewKinds(layout = true, image = false)
+        platform.drawings[battery to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT] = { png(32) }
+        platform.drawings[battery to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON] = { png(12) }
+        askPreviews(battery)
+        val preview = previewsSent().single()
+        assertEquals(battery, preview.provider)
+        assertEquals(WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT, preview.source)
+        assertEquals(32, preview.previewPng.size())
+        // Drawn once, at the largest side; the icon was never needed.
+        assertEquals(listOf(Triple(battery, WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT, 256)), platform.drawn)
+        val last = sent.last { it.hasWidgetPreviews() }.widgetPreviews
+        assertEquals(11, last.requestId)
+        assertTrue(last.complete)
+    }
+
+    @Test
+    fun fr12_a_preview_that_does_not_draw_gives_way_to_the_next_and_one_too_large_is_drawn_smaller() {
+        val notes = "com.example.notes/.Note"
+        val photo = "com.example.photos/.Frame"
+        val bare = "com.example.bare/.Bare"
+        started()
+        // The layout fails to apply: the picture is shown instead.
+        platform.previewKinds[notes] = PreviewKinds(layout = true, image = true)
+        platform.drawings[notes to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE] = { png(10) }
+        // The layout is too large at 256 pixels and fits at 192.
+        platform.previewKinds[photo] = PreviewKinds(layout = true, image = false)
+        platform.drawings[photo to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT] = { side ->
+            png(if (side > 192) WidgetManager.MAX_PREVIEW_BYTES + 1 else 1000)
+        }
+        // Neither a layout nor a picture: the app's icon.
+        platform.previewKinds[bare] = PreviewKinds(layout = false, image = false)
+        platform.drawings[bare to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON] = { png(6) }
+        askPreviews(photo, "com.example.gone/.Gone", notes, bare, photo)
+        val previews = previewsSent()
+        // In the order asked, each once; a widget no app offers has no entry.
+        assertEquals(listOf(photo, notes, bare), previews.map { it.provider })
+        assertEquals(
+            listOf(
+                WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT,
+                WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE,
+                WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON,
+            ),
+            previews.map { it.source },
+        )
+        assertEquals(1000, previews[0].previewPng.size())
+        assertTrue(previews.all { it.previewPng.size() <= WidgetManager.MAX_PREVIEW_BYTES })
+        assertEquals(
+            listOf(256, 192),
+            platform.drawn.filter { it.first == photo }.map { it.third },
+        )
+    }
+
+    @Test
+    fun fr12_previews_are_drawn_off_the_agents_thread_and_sent_from_it() {
+        val queued = mutableListOf<() -> Unit>()
+        val manager = WidgetManager(platform, store, { frame -> sent += decode(frame); true }, log, { connected }) { work ->
+            queued += work
+        }
+        manager.start { work -> scheduler.post(work) }
+        val clock = "com.example.clock/.ClockWidget"
+        platform.previewKinds[clock] = PreviewKinds(layout = false, image = true)
+        platform.drawings[clock to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE] = { png(9) }
+        manager.handle(
+            Envelope.newBuilder().setGetWidgetPreviews(GetWidgetPreviews.newBuilder().setRequestId(5).addProviders(clock)).build(),
+        )
+        // Nothing is drawn on the agent's thread.
+        assertTrue(platform.drawn.isEmpty())
+        assertEquals(1, queued.size)
+        queued.single()()
+        // Drawn on the other thread; sent once the agent's thread runs.
+        assertEquals(1, platform.drawn.size)
+        assertTrue(sent.none { it.hasWidgetPreviews() })
+        scheduler.runDue()
+        assertEquals(clock, previewsSent().single().provider)
+    }
+
+    @Test
+    fun fr12_many_previews_come_in_parts_that_fit_a_frame() {
+        started()
+        val providers = (0 until 40).map { "com.example.w$it/.W" }
+        for (provider in providers) {
+            platform.previewKinds[provider] = PreviewKinds(layout = true, image = false)
+            platform.drawings[provider to WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT] = { png(40 * 1024) }
+        }
+        askPreviews(*providers.toTypedArray())
+        val parts = sent.filter { it.hasWidgetPreviews() }.map { it.widgetPreviews }
+        assertTrue(parts.size > 1)
+        assertTrue(parts.all { it.serializedSize < 300 * 1024 })
+        assertTrue(parts.dropLast(1).none { it.complete })
+        assertTrue(parts.last().complete)
+        assertEquals(providers, parts.flatMap { it.previewsList }.map { it.provider })
     }
 
     @Test

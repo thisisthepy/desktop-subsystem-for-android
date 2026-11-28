@@ -403,6 +403,59 @@ pub fn frame_placement(
     }
 }
 
+/// Where a window of `view` pixels shows the last frame it has (`frame` task pixels, at
+/// `scale`), stretched over the whole window when `stretched`
+/// ([`FrameFollow::stretched`](super::frame_follow::FrameFollow::stretched)): only while a
+/// window moved onto a monitor of another scale waits for a frame drawn for it, when the window
+/// keeps its shape and the frame covers its client area. Its `size` is then the window's, and
+/// its `scale` is the height's; each axis is scaled by [`placement_ratios`]. Otherwise,
+/// including while a maximised, snapped or restored window waits for the frame of its new size,
+/// the frame is placed as [`frame_placement`] says: never stretched to another shape.
+pub fn shown_frame_placement(
+    frame: (u32, u32),
+    view: (u32, u32),
+    scale: Scale,
+    held: bool,
+    stretched: bool,
+) -> FramePlacement {
+    let placed = frame_placement(frame, view, scale, held);
+    if !stretched || frame.0 == 0 || frame.1 == 0 || view.0 == 0 || view.1 == 0 {
+        return placed;
+    }
+    if to_window_size(frame, scale) == view {
+        return placed;
+    }
+    FramePlacement {
+        scale: scale_between(view.1, frame.1),
+        origin: (0, 0),
+        size: view,
+    }
+}
+
+/// How much each axis of a frame of `frame` task pixels is scaled to cover `placement`: the
+/// placement's own scale on both axes, unless the placement stretches the frame to a size of
+/// another shape (more than a pixel off on an axis), when each axis is scaled to the size.
+pub fn placement_ratios(frame: (u32, u32), placement: FramePlacement) -> (f64, f64) {
+    let (numerator, denominator) = placement.scale;
+    let ratio = f64::from(numerator) / f64::from(denominator.max(1));
+    if frame.0 == 0 || frame.1 == 0 {
+        return (ratio, ratio);
+    }
+    let at_scale = to_window_size(frame, placement.scale);
+    let off = |a: u32, b: u32| a.abs_diff(b) > 1;
+    let axis = |size: u32, at: u32, frame: u32| {
+        if off(size, at) {
+            f64::from(size) / f64::from(frame)
+        } else {
+            ratio
+        }
+    };
+    (
+        axis(placement.size.0, at_scale.0, frame.0),
+        axis(placement.size.1, at_scale.1, frame.1),
+    )
+}
+
 /// `frame` task pixels scaled to fit a window of `view` pixels, keeping their shape, centred.
 fn fit_placement(frame: (u32, u32), view: (u32, u32)) -> FramePlacement {
     // The direction that fills the window first sets the scale.
@@ -422,8 +475,10 @@ fn fit_placement(frame: (u32, u32), view: (u32, u32)) -> FramePlacement {
 }
 
 /// The solid colour (`0xAARRGGBB`, opaque) under a task's frame, which shows wherever the
-/// frame does not cover the window: beside the last frame, shown 1:1, while a frame of the
-/// new size is pending, or beside a frame the guest keeps smaller. It is the app's own
+/// frame does not cover the window: beside a frame the guest keeps smaller than a window that
+/// holds its size, once that frame is the guest's answer to the window's size
+/// ([`FrameFollow::strips_filled`](super::frame_follow::FrameFollow::strips_filled)). While a
+/// frame of the new size is pending, nothing is drawn around the last frame. It is the app's own
 /// colour, never the desktop and never a white the app did not draw: the colour of the
 /// frame's top edge
 /// (`band`, then `fill`, as the title bar's band reads it) when it is known, else the app's
@@ -609,6 +664,10 @@ pub struct WindowSizing {
     placed: bool,
     /// Whether the task follows its window's monitor's density or keeps its own.
     mode: ScalingMode,
+    /// Whether the density requests go out forced: the task's app is set to System (forced)
+    /// scaling, so the guest gives it a new density without relaunching its activity
+    /// ([`set_forced`](Self::set_forced)).
+    forced: bool,
     /// The density of the window's monitor, once the window has said; 0 until then.
     monitor_density: u32,
     /// The density the task keeps while its window is scaled ([`ScalingMode::System`]); 0
@@ -646,6 +705,9 @@ pub struct WindowSizing {
     /// the sizes it reports until the drag ends are the desktop's rescaling of it, not sizes
     /// for the task ([`view_resized`](Self::view_resized)).
     rescaled_in_drag: bool,
+    /// Whether the guest's display grew while the window was larger than the task could be,
+    /// so the task is to be asked for more of the window ([`limit_grown`](Self::limit_grown)).
+    limit_grew: bool,
 }
 
 /// The most task pixels, in either direction, by which the size a desktop gives a window for
@@ -688,6 +750,7 @@ impl WindowSizing {
             reconfigure: false,
             placed: false,
             mode,
+            forced: false,
             monitor_density: 0,
             kept_density: match mode {
                 ScalingMode::App => 0,
@@ -703,12 +766,20 @@ impl WindowSizing {
             ignored: None,
             late_echo: None,
             rescaled_in_drag: false,
+            limit_grew: false,
         }
     }
 
     /// How the task follows its window's monitor now.
     pub fn mode(&self) -> ScalingMode {
         self.mode
+    }
+
+    /// Whether the density requests from now on go out forced: the task's app is set to System
+    /// (forced) scaling, which follows the monitor's density as [`ScalingMode::App`] does, and
+    /// the guest is to give it each density without relaunching its activity.
+    pub fn set_forced(&mut self, forced: bool) {
+        self.forced = forced;
     }
 
     /// The task's app now says it does (`App`) or does not handle a change of density, as the
@@ -794,6 +865,7 @@ impl WindowSizing {
                 TaskRequest::SetDensity {
                     task_id: self.task_id,
                     density_dpi: wanted,
+                    forced: self.forced,
                 }
             });
         let size = rescale(self.guest, self.density, density_for_dpi(dpi));
@@ -892,6 +964,7 @@ impl WindowSizing {
         let mut requests = vec![TaskRequest::SetDensity {
             task_id: self.task_id,
             density_dpi: wanted,
+            forced: self.forced,
         }];
         let size = clamp_size(self.view, self.max);
         let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
@@ -993,6 +1066,32 @@ impl WindowSizing {
         })
     }
 
+    /// Returns the request that gives the task more of its window once the guest's display
+    /// has grown while the window was larger than the task could be, as a window maximised on
+    /// a monitor the display was too small for is: the window's client size at its scale,
+    /// within the new limit, given live as a maximise gives it, and reconfigured once taken
+    /// ([`reconfigure`](Self::reconfigure)). `None` when the display did not grow under such a
+    /// window, and while the user drags it, whose end asks for its size anyway.
+    pub fn limit_grown(&mut self, now: Instant) -> Option<TaskRequest> {
+        if !self.limit_grew || self.dragging {
+            return None;
+        }
+        self.limit_grew = false;
+        let size = clamp_size(to_task_size(self.view, self.asking_scale()), self.max);
+        let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
+        if size == current {
+            return None;
+        }
+        self.asked = Some((size, now));
+        self.reconfigure = true;
+        Some(TaskRequest::Resize {
+            task_id: self.task_id,
+            width: size.0,
+            height: size.1,
+            live: true,
+        })
+    }
+
     /// The user started (`true`) or finished dragging the window. While they drag, the
     /// window never resizes itself under them. The guest has [`SETTLE`] from the end of the
     /// drag to take the last size.
@@ -1001,7 +1100,8 @@ impl WindowSizing {
     /// gives the task the window's size and reconfigures it for that size. It is sent even
     /// when the task has that size already: the live steps left the task with the
     /// configuration it had when the drag began. A drag that only moved the window asks
-    /// nothing.
+    /// nothing, unless it crossed monitor scales and ended at a size other than the task's: the
+    /// task is then given the window's size live, as a maximise gives it.
     pub fn dragging(&mut self, active: bool, now: Instant) -> Option<TaskRequest> {
         if active {
             if !self.dragging {
@@ -1038,16 +1138,35 @@ impl WindowSizing {
             self.resized_live = false;
             let size = clamp_size(to_task_size(self.view, self.asking_scale()), self.max);
             let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
-            if !beyond_rescale_rounding(size, current) {
+            if beyond_rescale_rounding(size, current) {
+                self.pass(size);
+                self.asked = Some((size, now));
+                return Some(TaskRequest::Resize {
+                    task_id: self.task_id,
+                    width: size.0,
+                    height: size.1,
+                    live: false,
+                });
+            }
+            if size == current {
                 return None;
             }
+            // Dropped after a move across scales (back on the monitor it began on, or not) at a
+            // size a few pixels off the task's: since the scale changed, the window shows only
+            // frames of its own size, so without this request no frame the app draws would ever
+            // be shown again. The window keeps
+            // the size the desktop gave it, and the task takes that size live, like a maximise,
+            // so an app that does not handle a change of size is laid out again rather than
+            // recreated; it is reconfigured at that size afterwards
+            // ([`reconfigure`](Self::reconfigure)).
             self.pass(size);
             self.asked = Some((size, now));
+            self.reconfigure = true;
             return Some(TaskRequest::Resize {
                 task_id: self.task_id,
                 width: size.0,
                 height: size.1,
-                live: false,
+                live: true,
             });
         }
         if !std::mem::take(&mut self.resized_live) {
@@ -1085,6 +1204,18 @@ impl WindowSizing {
             self.kept_density = task.density_dpi;
         }
         if let Some(max) = task.max_size() {
+            let grew = self
+                .max
+                .is_some_and(|before| max.0 > before.0 || max.1 > before.1);
+            if grew && self.view.0 > 0 && self.view.1 > 0 {
+                // The guest's display grew. A window that is larger than its task could be
+                // (maximised on a monitor the display was too small for) asks for more of
+                // itself now.
+                let wanted = to_task_size(self.view, self.asking_scale());
+                if clamp_size(wanted, self.max) != clamp_size(wanted, Some(max)) {
+                    self.limit_grew = true;
+                }
+            }
             self.max = Some(max);
         }
         if let Some(min) = task.min_size() {
@@ -1254,6 +1385,24 @@ pub fn frame_rect(request: FrameRectRequest) -> (i32, i32, i32, i32) {
         frame_width,
         frame_height,
     )
+}
+
+/// The rectangle a proposal (`proposed`, x, y, width, height) stands for while the user drags
+/// an edge: the one the pointer last asked for (`pointer`, as the desktop reported it while
+/// sizing). Windows ends a size loop with one more proposal built from a rectangle the window
+/// was held to earlier in the drag (the size of a frame it showed then), not from where the
+/// pointer let go. Taken as it is, the guest was asked for that smaller, older size and the
+/// window shrank to it after the release. Outside an edge drag, or before the pointer asked
+/// for anything, the proposal stands.
+pub fn edge_drag_proposal(
+    pointer: Option<(i32, i32, i32, i32)>,
+    proposed: (i32, i32, i32, i32),
+    edge_drag: bool,
+) -> (i32, i32, i32, i32) {
+    match pointer {
+        Some(pointer) if edge_drag => pointer,
+        _ => proposed,
+    }
 }
 
 /// What a window does when a frame of another size than its own is kept for it.
@@ -1531,6 +1680,44 @@ mod tests {
         }
     }
 
+    /// FLO, task 149, a right edge drag on build 1.0.1-dev.12: the pointer asked for 1069x891
+    /// while the window was held to the 1041x891 frame, the 1069 frame arrived and the window
+    /// took it, and the size loop ended with a proposal of 1041x891. The guest was asked for
+    /// 1041 and the window shrank to it 150 ms after the release.
+    #[test]
+    fn fr4_the_release_of_an_edge_drag_keeps_the_size_the_pointer_left() {
+        let mut pointer = None;
+        let mut shown = (343, 343, 1027, 891);
+        // Each step: the pointer's rectangle (WM_SIZING), then Windows' proposal for it.
+        for asked in [1041, 1055, 1069] {
+            pointer = Some((343, 343, asked, 891));
+            let taken = edge_drag_proposal(pointer, (343, 343, asked, 891), true);
+            assert_eq!(taken, (343, 343, asked, 891));
+            // Held to the frame shown, as keep_to_frame does.
+            shown = frame_rect(FrameRectRequest {
+                requested: taken,
+                frame_outer: Some((shown.2, shown.3)),
+                edge_drag: true,
+                moves: (false, false),
+            });
+        }
+        // The 1069 frame arrives and the window takes it.
+        shown = (343, 343, 1069, 891);
+        // The release: Windows proposes a rectangle the window was held to mid-drag.
+        let released = edge_drag_proposal(pointer, (343, 343, 1041, 891), true);
+        assert_eq!(released, (343, 343, 1069, 891));
+        assert_eq!((released.2, released.3), (shown.2, shown.3));
+        // Outside a drag a proposal is the desktop's and stands.
+        assert_eq!(
+            edge_drag_proposal(pointer, (0, 0, 800, 600), false),
+            (0, 0, 800, 600)
+        );
+        assert_eq!(
+            edge_drag_proposal(None, (343, 343, 1041, 891), true),
+            (343, 343, 1041, 891)
+        );
+    }
+
     #[test]
     fn fr4_a_frame_at_the_new_density_before_its_report_is_shown_1_to_1() {
         // A move from 125% to 200% ends: the task is asked for 262 dpi and the window's
@@ -1596,6 +1783,7 @@ mod tests {
         Some(TaskRequest::SetDensity {
             task_id: 7,
             density_dpi,
+            forced: false,
         })
     }
 
@@ -1825,6 +2013,126 @@ mod tests {
             host_sizing: true,
             ..SizeProposal::default()
         }));
+    }
+
+    #[test]
+    fn fr4_a_held_frame_that_is_not_pending_is_placed_as_before() {
+        // Settings at 1041x1495, drawn at its window's density, maximised on the 2880x1800 main
+        // monitor: a held frame of another size that is not pending (shown_frame_placement
+        // stretches none) is placed 1:1 in the window's middle, as it always was.
+        let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), true);
+        assert_eq!(
+            placed,
+            FramePlacement {
+                scale: (1, 1),
+                origin: (919, 104),
+                size: (1041, 1495),
+            }
+        );
+        // The frame of the maximised size fills the window from its top left.
+        let placed = frame_placement((2880, 1704), (2880, 1704), (1, 1), true);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (2880, 1704));
+        // A window that does not hold its size shows its frame at its top left, as it always did.
+        let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), false);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (1041, 1495));
+    }
+
+    #[test]
+    fn fr4_a_maximise_shows_the_last_frame_as_1_0_0_does_never_changing_its_shape() {
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        let shown = |follow: &FrameFollow, frame: (u32, u32)| {
+            shown_frame_placement(frame, follow.view(), (1, 1), true, follow.stretched())
+        };
+        // FLO restored at 471x831 on the 2880x1800 main monitor at 200%, maximised (the button,
+        // a double click on the title bar and SC_MAXIMIZE take the same path): the client
+        // becomes 2880x1704 and no frame of that size has come yet.
+        let mut follow = FrameFollow::new((471, 831));
+        follow.set_limit(Some((2880, 2880)));
+        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        follow.set_held(true);
+        follow.view_taken((2880, 1704));
+        assert!(follow.pending());
+        assert!(!follow.stretched());
+        // FLO keeps drawing its old size meanwhile: shown 1:1 in the window's middle, as 1.0.0
+        // shows it, with the same scale on both axes, and nothing filled around it.
+        assert_eq!(follow.frame_arrived((471, 831)), Arrival::Show);
+        let placed = shown(&follow, (471, 831));
+        assert_eq!(
+            placed,
+            frame_placement((471, 831), (2880, 1704), (1, 1), true)
+        );
+        assert_eq!(placed.scale, (1, 1));
+        assert_eq!(placed.size, (471, 831));
+        assert_eq!(placed.origin, ((2880 - 471) / 2, (1704 - 831) / 2));
+        let (x, y) = placement_ratios((471, 831), placed);
+        assert_eq!(x, y);
+        assert!(!follow.strips_filled(placed));
+        // The frame of the maximised size comes and covers the window 1:1.
+        assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
+        assert!(!follow.pending());
+        let placed = shown(&follow, (2880, 1704));
+        assert_eq!((placed.origin, placed.size), ((0, 0), (2880, 1704)));
+        assert!(!follow.strips_filled(placed));
+        // Snapped or restored to a smaller size while held: the large frame is scaled down to
+        // fit, keeping its shape, until the frame of the new size comes.
+        follow.view_taken((1440, 1704));
+        assert!(follow.pending());
+        let placed = shown(&follow, (2880, 1704));
+        assert_eq!(
+            placed,
+            frame_placement((2880, 1704), (1440, 1704), (1, 1), true)
+        );
+        let (x, y) = placement_ratios((2880, 1704), placed);
+        assert_eq!(x, y);
+        // Settings (1041x1495), and a task kept at another density, keep their shape too.
+        let placed = shown_frame_placement((1041, 1495), (2880, 1704), (1, 1), true, false);
+        assert_eq!((placed.size, placed.scale), ((1041, 1495), (1, 1)));
+        let placed = frame_placement((1041, 1495), (2880, 1704), (82, 131), true);
+        let (x, y) = placement_ratios((1041, 1495), placed);
+        assert_eq!(x, y);
+    }
+
+    #[test]
+    fn fr4_a_size_limited_maximise_on_a_secondary_monitor_fills_what_the_frame_leaves() {
+        use crate::compositor::frame_follow::FrameFollow;
+        let filled = |follow: &FrameFollow| {
+            let frame = follow.shown().unwrap_or(follow.view());
+            let placement =
+                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.stretched());
+            follow.strips_filled(placement)
+        };
+        // On a 2560x1440 monitor at 125% the guest can draw at most 2400x1380 window pixels
+        // for a task kept at the main monitor's density; the maximised window is 2560x1380.
+        let mut follow = FrameFollow::new((1140, 836));
+        follow.set_limit(Some((2400, 1380)));
+        follow.frame_arrived((1140, 836));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        // The window is beyond what the guest can draw, so no frame will ever cover it: the
+        // strips beside the unstretched last frame are filled from the start.
+        assert!(follow.pending());
+        assert!(!follow.stretched());
+        let placed = shown_frame_placement((1140, 836), (2560, 1380), (1, 1), true, false);
+        assert_eq!((placed.size, placed.scale), ((1140, 836), (1, 1)));
+        assert!(filled(&follow));
+        // The guest's answer at its limit: shown 1:1, the strips beside it filled.
+        follow.frame_arrived((2400, 1380));
+        assert!(!follow.pending());
+        let placed = shown_frame_placement((2400, 1380), (2560, 1380), (1, 1), true, false);
+        assert_eq!((placed.origin, placed.size), ((80, 0), (2400, 1380)));
+        assert!(filled(&follow));
+        // On the main monitor the frame of the maximised size covers the window: nothing is
+        // filled, as in 1.0.0.
+        let mut follow = FrameFollow::new((1041, 1495));
+        follow.set_limit(Some((2880, 2880)));
+        follow.frame_arrived((1041, 1495));
+        follow.set_held(true);
+        follow.view_taken((2880, 1704));
+        assert!(!filled(&follow));
+        follow.frame_arrived((2880, 1704));
+        assert!(!filled(&follow));
     }
 
     #[test]
@@ -2227,6 +2535,38 @@ mod tests {
         );
     }
 
+    /// YouTube on build 1.0.1-dev.23, kept at 262 dpi (the 200% main monitor's) in the system
+    /// way, maximised on a 2560x1440 secondary monitor at 125% (164 dpi) whose taskbar leaves
+    /// a 2560x1380 work area. Its task asked for 4090x2205: the size a task drawn at 164 dpi
+    /// in that window would be, at 262 dpi, so the app looks as large there as an app drawn
+    /// at the monitor's own density. That is what the system way promises, not a task larger
+    /// than its window needs; on the main monitor the same maximise is 1:1.
+    #[test]
+    fn fr4_a_system_mode_task_maximised_on_a_lower_scale_monitor_draws_at_its_own_density() {
+        let mut settings = task(1229, 903, 262);
+        settings.max_width = 4096;
+        settings.max_height = 4096;
+        let now = Instant::now();
+
+        let mut secondary = WindowSizing::with_mode(&settings, ScalingMode::System);
+        assert_eq!(secondary.dpi_reported(120), (Some((769, 565)), None));
+        assert_eq!(secondary.scale(), (82, 131));
+        // The 4096 pixel guest display is 2564 window pixels wide here, so the work area fits.
+        assert_eq!(secondary.max_client_size(), Some((2564, 2564)));
+        assert_eq!(
+            secondary.view_resized((2560, 1380), now),
+            live_resize(4090, 2205)
+        );
+
+        let mut main = WindowSizing::with_mode(&settings, ScalingMode::System);
+        main.dpi_reported(192);
+        assert_eq!(main.scale(), (1, 1));
+        assert_eq!(
+            main.view_resized((2880, 1704), now),
+            live_resize(2880, 1704)
+        );
+    }
+
     #[test]
     fn fr4_density_follows_the_monitor_scale() {
         assert_eq!(density_for_dpi(96), 130);
@@ -2436,11 +2776,23 @@ mod tests {
             assert_eq!(sizing.view_resized((595, 857), now), None, "{mode:?}");
             assert_eq!(sizing.dpi_changed(192), None);
             assert_eq!(sizing.view_resized((1188, 1712), now), None, "{mode:?}");
-            // Back where it began: the task keeps its size, and nothing is due.
-            assert_eq!(sizing.dragging(false, now), None, "{mode:?}");
+            // Back where it began, at the desktop's size a pixel or two off the task's: the drop
+            // gives the task the window's size live, so a frame of the window's size comes and
+            // is shown. Without it every frame of 1186x1711 stayed out of sight.
+            assert_eq!(
+                sizing.dragging(false, now),
+                live_resize(1188, 1712),
+                "{mode:?}"
+            );
             assert_eq!(sizing.settle(now), vec![], "{mode:?}");
-            assert_eq!(sizing.task_size().0, (1186, 1711));
             assert_eq!(sizing.scale(), (1, 1));
+            // The window keeps the size it ends at when the guest takes it.
+            assert_eq!(
+                sizing.guest_updated(&big(1188, 1712, 262)),
+                None,
+                "{mode:?}"
+            );
+            assert_eq!(sizing.task_size().0, (1188, 1712));
         }
     }
 
@@ -2498,6 +2850,237 @@ mod tests {
     }
 
     #[test]
+    fn fr4_the_window_limit_follows_the_display_when_it_grows() {
+        // A task kept at the main monitor's 262 dpi (System scaling), maximised on a 125%
+        // monitor: its 2560x1380 client area needs about 4090 guest pixels across, more than
+        // a display of 3840 has.
+        let mut sizing = WindowSizing::with_mode(&big(1186, 1711, 262), ScalingMode::System);
+        let now = Instant::now();
+        sizing.dpi_reported(120);
+        let view = (2560, 1380);
+        let wanted = to_task_size(view, sizing.scale());
+        assert!(wanted.0 > 3840 && wanted.0 <= 4096, "{wanted:?}");
+        assert_eq!(sizing.view_resized(view, now), live_resize(3840, wanted.1));
+        assert_eq!(
+            sizing.max_client_size(),
+            Some(to_window_size((3840, 3840), sizing.scale()))
+        );
+        // The guest gives the task what its display holds; the window shows that frame with
+        // the strips beside it filled.
+        let taken = big(3840, wanted.1 as i32, 262);
+        assert_eq!(sizing.guest_updated(&taken), None);
+        assert_eq!(sizing.limit_grown(now), None);
+        // The display grew to 4096, as the next window to open asked: the limit is the
+        // display's new size, and the task is asked for the whole window.
+        let grown = Task {
+            max_width: 4096,
+            max_height: 4096,
+            ..taken.clone()
+        };
+        assert_eq!(sizing.guest_updated(&grown), None);
+        assert_eq!(
+            sizing.max_client_size(),
+            Some(to_window_size((4096, 4096), sizing.scale()))
+        );
+        assert!(sizing.max_client_size().unwrap().0 >= view.0);
+        assert_eq!(sizing.limit_grown(now), live_resize(wanted.0, wanted.1));
+        // Once, and reconfigured when it has taken the size.
+        assert_eq!(sizing.limit_grown(now), None);
+        let full = Task {
+            max_width: 4096,
+            max_height: 4096,
+            ..big(wanted.0 as i32, wanted.1 as i32, 262)
+        };
+        assert_eq!(sizing.guest_updated(&full), None);
+        assert_eq!(sizing.reconfigure(now + SETTLE), resize(wanted.0, wanted.1));
+    }
+
+    #[test]
+    fn fr4_a_window_the_display_held_nothing_back_from_asks_nothing_when_it_grows() {
+        // A window of its task's own size on the main monitor: the display growing gives it
+        // nothing to ask for, so its size stays exactly as it was.
+        let mut sizing = WindowSizing::new(&big(1186, 1711, 262));
+        let now = Instant::now();
+        sizing.dpi_reported(192);
+        assert_eq!(sizing.view_resized((1186, 1711), now), None);
+        let grown = Task {
+            max_width: 4096,
+            max_height: 4096,
+            ..big(1186, 1711, 262)
+        };
+        assert_eq!(sizing.guest_updated(&grown), None);
+        assert_eq!(sizing.limit_grown(now), None);
+        assert_eq!(sizing.reconfigure(now + SETTLE), None);
+    }
+
+    #[test]
+    fn fr4_a_task_that_keeps_its_density_dragged_across_scales_shows_its_next_frame() {
+        // Clock keeps its density: 812x1320 at 262 dpi, opened on a 125% monitor (120 dpi) and
+        // dragged by its title bar onto the 200% one (192 dpi), where the desktop gives the
+        // window 816x1323. The app goes on drawing 812x1320, which the window does not show, so
+        // the picture froze on the frame from the old monitor until an edge drag resized it.
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        let mut sizing = WindowSizing::with_mode(&big(812, 1320, 262), ScalingMode::System);
+        let now = Instant::now();
+        assert_eq!(sizing.dpi_reported(120), (Some((508, 826)), None));
+        assert_eq!(sizing.view_resized((508, 826), now), None);
+        // What a frame of the task's `size` covers in the window, as the presenter measures it.
+        let in_window =
+            |sizing: &WindowSizing, size, view| window_size_of(size, sizing.scale(), &[view]);
+        let mut follow = FrameFollow::new((508, 826));
+        let frame = in_window(&sizing, (812, 1320), follow.view());
+        assert_eq!(follow.frame_arrived(frame), Arrival::Show);
+
+        // The drag: nothing is asked of the guest until it ends.
+        assert_eq!(sizing.dragging(true, now), None);
+        assert_eq!(sizing.dpi_changed(192), None);
+        assert_eq!(sizing.scale(), (1, 1));
+        follow.scale_changed((816, 1323));
+        assert!(!follow.view_taken((816, 1323)));
+        // The scale changes under the frame on the screen: it is not a size to take.
+        let frame = in_window(&sizing, (812, 1320), follow.view());
+        assert_eq!(frame, (812, 1320));
+        assert_eq!(follow.rescaled(frame), Arrival::Stale);
+        assert_eq!(
+            sizing.view_resized((816, 1323), now),
+            None,
+            "nothing mid-drag"
+        );
+        assert_eq!(follow.frame_arrived(frame), Arrival::Stale);
+        assert!(follow.stretched(), "the last frame stays over the window");
+
+        // The drop asks for the window's size, live, once.
+        let mut requests: Vec<TaskRequest> = sizing.dragging(false, now).into_iter().collect();
+        requests.extend(sizing.settle(now));
+        assert_eq!(requests, vec![live_resize(816, 1323).unwrap()]);
+        assert!(sizing.waiting());
+        // Frames the app drew before it took the size are still not shown, and the window keeps
+        // the size the desktop gave it.
+        assert_eq!(follow.frame_arrived(frame), Arrival::Stale);
+        assert_eq!(sizing.guest_updated(&big(816, 1323, 262)), None);
+        assert!(!sizing.waiting());
+        // The frame that answers it is shown, 1:1, in the window of the same size.
+        let answer = in_window(&sizing, (816, 1323), follow.view());
+        assert_eq!(follow.frame_arrived(answer), Arrival::Show);
+        assert_eq!(follow.shown(), Some((816, 1323)));
+        assert_eq!(follow.view(), (816, 1323));
+        assert!(!follow.stretched());
+        // The task is reconfigured at the size it has, once; the window waits for nothing.
+        assert_eq!(sizing.reconfigure(now + SETTLE), resize(816, 1323));
+        assert_eq!(sizing.reconfigure(now + SETTLE), None);
+        assert_eq!(sizing.tick(now + SETTLE * 2), None);
+    }
+
+    #[test]
+    fn fr4_no_move_across_scales_leaves_every_frame_of_the_task_stale_with_nothing_asked() {
+        // A drag from one monitor scale to another, or there and back to the monitor it began
+        // on, for both ways a task follows its monitor, in both directions, with the desktop's
+        // size where the drag ends a few pixels either side of the task's. However it ends, the
+        // frame the task draws once the guest has answered what the drop asked (or at once,
+        // when nothing was asked) is shown, and the window keeps the size the desktop gave it.
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        let moves: [&[u32]; 10] = [
+            &[120, 192],
+            &[192, 120],
+            &[96, 192],
+            &[192, 96],
+            &[96, 144],
+            &[144, 120],
+            &[192, 96, 192],
+            &[192, 120, 192],
+            &[120, 192, 120],
+            &[96, 144, 96],
+        ];
+        let offsets = [(0, 0), (1, 0), (0, 1), (2, 3), (4, 4), (-1, -2), (-3, 2)];
+        for mode in [ScalingMode::System, ScalingMode::App] {
+            for path in moves {
+                let from = path[0];
+                for (dx, dy) in offsets {
+                    let case = format!("{mode:?} {path:?} dpi, desktop off by {dx},{dy}");
+                    let density_dpi = match mode {
+                        ScalingMode::System => 262,
+                        ScalingMode::App => density_for_dpi(from),
+                    };
+                    let mut sizing = WindowSizing::with_mode(&big(812, 1320, density_dpi), mode);
+                    let now = Instant::now();
+                    let (opened, _) = sizing.dpi_reported(from);
+                    let view = opened.unwrap_or((812, 1320));
+                    if let Some(TaskRequest::Resize { width, height, .. }) =
+                        sizing.view_resized(view, now)
+                    {
+                        sizing.guest_updated(&big(width as i32, height as i32, density_dpi));
+                    }
+                    let in_window = |sizing: &WindowSizing, view| {
+                        window_size_of(sizing.guest_size(), sizing.scale(), &[view])
+                    };
+                    let mut follow = FrameFollow::new(view);
+                    assert_eq!(
+                        follow.frame_arrived(in_window(&sizing, view)),
+                        Arrival::Show,
+                        "{case}"
+                    );
+
+                    assert_eq!(sizing.dragging(true, now), None, "{case}");
+                    let (mut dpi, mut suggested) = (from, view);
+                    for (step, &to) in path[1..].iter().enumerate() {
+                        // The desktop's own rounding is put where the drag ends.
+                        let (dx, dy) = if step + 2 == path.len() {
+                            (dx, dy)
+                        } else {
+                            (0, 0)
+                        };
+                        assert_eq!(sizing.dpi_changed(to), None, "{case}");
+                        let rescaled = rescale(suggested, dpi, to);
+                        suggested = (
+                            (rescaled.0 as i32 + dx).max(1) as u32,
+                            (rescaled.1 as i32 + dy).max(1) as u32,
+                        );
+                        dpi = to;
+                        follow.scale_changed(suggested);
+                        follow.view_taken(suggested);
+                        let old = in_window(&sizing, suggested);
+                        assert_ne!(follow.rescaled(old), Arrival::Keep, "{case}");
+                        assert_eq!(sizing.view_resized(suggested, now), None, "{case}");
+                        assert_ne!(follow.frame_arrived(old), Arrival::Keep, "{case}");
+                    }
+
+                    let mut requests: Vec<TaskRequest> =
+                        sizing.dragging(false, now).into_iter().collect();
+                    requests.extend(sizing.settle(now));
+                    // The guest takes what it was asked.
+                    let (mut size, mut density_now) = (sizing.guest_size(), density_dpi);
+                    for request in &requests {
+                        match *request {
+                            TaskRequest::SetDensity { density_dpi, .. } => {
+                                density_now = density_dpi
+                            }
+                            TaskRequest::Resize { width, height, .. } => size = (width, height),
+                            _ => {}
+                        }
+                    }
+                    if !requests.is_empty() {
+                        let (before, drawn) = (sizing.scale(), sizing.guest_size());
+                        let task = big(size.0 as i32, size.1 as i32, density_now);
+                        assert_eq!(sizing.guest_updated(&task), None, "{case}: no snap");
+                        if sizing.scale() != before {
+                            // The scale changes under the old frame again: not a size to take.
+                            let old = window_size_of(drawn, sizing.scale(), &[suggested]);
+                            assert_ne!(follow.rescaled(old), Arrival::Keep, "{case}");
+                        }
+                    }
+                    assert!(!sizing.waiting(), "{case}: the guest has answered");
+                    assert_eq!(
+                        follow.frame_arrived(in_window(&sizing, suggested)),
+                        Arrival::Show,
+                        "{case}: the task's frame is never left stale with nothing asked"
+                    );
+                    assert_eq!(follow.view(), suggested, "{case}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn fr4_an_app_mode_task_takes_no_density_during_the_drag_and_none_back_on_its_own_scale() {
         let mut sizing = WindowSizing::new(&task(400, 300, 130));
         let now = Instant::now();
@@ -2547,6 +3130,8 @@ mod tests {
         sizing.dpi_reported(96);
         sizing.dragging(true, now);
         assert_eq!(sizing.dpi_changed(192), None);
+        // The desktop gives the window the task's size at its new scale.
+        assert_eq!(sizing.view_resized((806, 605), now), None);
         assert_eq!(sizing.dragging(false, now), None);
         assert_eq!(sizing.settle(now), vec![]);
         assert_eq!(sizing.dpi_changed(120), None);

@@ -34,9 +34,10 @@ fn nfr2_the_vm_grows_when_the_guest_runs_short_up_to_its_maximum() {
     let mut growth = MemoryGrowth::new(3072, 6144);
     // Plenty free: nothing to do.
     assert_eq!(growth.on_pressure(&pressure(2900, 1500, 0.0), start), None);
-    // Short: grows to what it uses (2600 MiB) plus a third again, in whole 128 MiB blocks.
+    // Short, and its tasks stall on memory: grows to what it uses (2600 MiB) plus a third
+    // again, in whole 128 MiB blocks.
     assert_eq!(
-        growth.on_pressure(&pressure(2900, 300, 0.0), start),
+        growth.on_pressure(&pressure(2900, 300, 12.0), start),
         Some(GrowthAction::Resize(3584))
     );
     growth.applied();
@@ -69,8 +70,14 @@ fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its
     );
     growth.applied();
     let t = start + Duration::from_secs(6);
-    assert_eq!(
+    // 2.7% stalled is a guest that reclaim and zram keep up with: it keeps its size.
+    assert!(!matches!(
         growth.on_pressure(&pressure(2483, 509, 2.7), t),
+        Some(GrowthAction::Resize(_))
+    ));
+    // Once its tasks wait on memory, it grows by what it needs, not by half its size.
+    assert_eq!(
+        growth.on_pressure(&pressure(2483, 509, 12.0), t),
         Some(GrowthAction::Resize(3072))
     );
     growth.applied();
@@ -80,6 +87,156 @@ fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its
         growth.on_pressure(&pressure(2995, 100, 30.0), t),
         Some(GrowthAction::Resize(3968))
     );
+}
+
+/// The guest of a 1536 MiB VM: 62 MiB of it the kernel keeps for itself from boot.
+const BOOT_TOTAL_MB: u64 = 1536 - 62;
+
+#[test]
+fn nfr2_a_boot_burst_that_reclaim_and_zram_absorb_does_not_grow_the_vm() {
+    use dsa_host_core::memory::{GrowthAction, MemoryGrowth};
+    // dev.39 on the owner's PC, no app open (check-dev39/snap/host/dsa-hostd.log): the VM
+    // started at 1536 MiB and grew three times in the first 45 s, on reports of 435 MiB
+    // available with 0.0% stalled, 257 MiB with 3.4% and 385 MiB with 2.5%. Ten minutes later
+    // Android used 487 MiB, and the 1536 MiB added kept 24 MiB of page structures for the rest
+    // of the run. Not one of those reports had tasks waiting on memory long enough to matter.
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    let reports = [(435, 0.0), (257, 3.4), (385, 2.5), (300, 4.9), (420, 0.6)];
+    let mut t = start;
+    let mut said = Vec::new();
+    for _ in 0..12 {
+        for (available, stall) in reports {
+            match growth.on_pressure(&pressure(BOOT_TOTAL_MB, available, stall), t) {
+                None => {}
+                Some(GrowthAction::Wait(line)) => said.push(line),
+                other => panic!("{available} MiB available, {stall}% stalled: {other:?}"),
+            }
+            t += Duration::from_secs(2);
+        }
+    }
+    assert_eq!(growth.current_mb(), 1536, "the VM keeps its start size");
+    // It says why it does not grow, with the numbers, once for the stretch rather than at
+    // every report.
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("435 MiB available"), "{}", said[0]);
+    assert!(said[0].contains("0.0% stalled"), "{}", said[0]);
+    assert!(said[0].contains("stays at 1536 MiB"), "{}", said[0]);
+}
+
+#[test]
+fn nfr2_a_vm_held_at_its_size_says_so_once_a_stretch_and_every_five_minutes_while_it_lasts() {
+    use dsa_host_core::memory::{GrowthAction, MemoryGrowth};
+    let start = Instant::now();
+    let at = |s: u64| start + Duration::from_secs(s);
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    let short = || pressure(BOOT_TOTAL_MB, 450, 1.0);
+    let calm = || pressure(BOOT_TOTAL_MB, 700, 0.0);
+    let waits = |action: Option<GrowthAction>| matches!(action, Some(GrowthAction::Wait(_)));
+    assert!(waits(growth.on_pressure(&short(), at(0))));
+    assert!(!waits(growth.on_pressure(&short(), at(2))));
+    // A new stretch within the minute is not said again; one after it is.
+    assert!(!waits(growth.on_pressure(&calm(), at(10))));
+    assert!(!waits(growth.on_pressure(&short(), at(20))));
+    assert!(!waits(growth.on_pressure(&calm(), at(40))));
+    assert!(waits(growth.on_pressure(&short(), at(70))));
+    // A stretch that lasts is said again every five minutes.
+    let mut said = 0;
+    for s in (72..=670).step_by(2) {
+        said += usize::from(waits(growth.on_pressure(&short(), at(s))));
+    }
+    assert_eq!(said, 2, "at 370 s and 670 s");
+}
+
+#[test]
+fn nfr2_the_vm_grows_at_once_when_the_guests_tasks_stall_on_memory() {
+    use dsa_host_core::memory::{GrowthAction, GrowthReason, MemoryGrowth};
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    // The same 435 MiB available, but tasks waited on memory 12% of the last 10 s: what it
+    // uses (1039 MiB) plus 768 MiB of headroom is under the least step, 512 MiB.
+    assert_eq!(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 435, 12.0), start),
+        Some(GrowthAction::Resize(2048))
+    );
+    assert_eq!(growth.last_reason(), Some(GrowthReason::Stalled));
+    assert!(GrowthReason::Stalled.to_string().contains("10%"));
+}
+
+#[test]
+fn nfr2_the_vm_grows_at_once_when_the_guest_is_nearly_out_of_memory() {
+    use dsa_host_core::memory::{GrowthAction, GrowthReason, MemoryGrowth};
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    // Under 128 MiB available (a sixteenth of the guest, at least 128 MiB) with nothing stalled
+    // yet: an app that is allocating fast gets the memory before lmkd ends anything.
+    assert_eq!(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 100, 0.0), start),
+        Some(GrowthAction::Resize(2176))
+    );
+    assert_eq!(
+        growth.last_reason(),
+        Some(GrowthReason::NearlyOut { floor_mb: 128 })
+    );
+    // On a larger guest the floor is a sixteenth of it.
+    let mut large = MemoryGrowth::new(4096, 29042);
+    assert!(matches!(
+        large.on_pressure(&pressure(4000, 240, 0.0), start),
+        Some(GrowthAction::Resize(_))
+    ));
+    assert_eq!(
+        large.last_reason(),
+        Some(GrowthReason::NearlyOut { floor_mb: 250 })
+    );
+}
+
+#[test]
+fn nfr2_the_vm_grows_when_the_guest_stays_short_and_stalled_for_30_seconds() {
+    use dsa_host_core::memory::{GrowthAction, GrowthReason, MemoryGrowth};
+    let start = Instant::now();
+    let at = |s: u64| start + Duration::from_secs(s);
+    let mut growth = MemoryGrowth::new(1536, 29042);
+    let strained = || pressure(BOOT_TOTAL_MB, 400, 6.0);
+    let resized = |action: Option<GrowthAction>| matches!(action, Some(GrowthAction::Resize(_)));
+    // Short with 6% stalled, as the guest reports it every 2 s while it is short.
+    for s in (0..30).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // A report that finds it not short starts the count again.
+    assert!(!resized(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 700, 0.0), at(30))
+    ));
+    for s in (32..62).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // So does a report under 5% stalled.
+    assert!(!resized(
+        growth.on_pressure(&pressure(BOOT_TOTAL_MB, 400, 4.0), at(62))
+    ));
+    for s in (64..90).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // And a silence of more than 10 s, in which the guest said nothing of itself.
+    for s in (102..132).step_by(2) {
+        assert!(!resized(growth.on_pressure(&strained(), at(s))), "{s} s");
+    }
+    // 30 s on end short and stalled: it grows, by what it uses plus headroom (1074 + 768 MiB,
+    // the least step 512 MiB).
+    assert_eq!(
+        growth.on_pressure(&strained(), at(132)),
+        Some(GrowthAction::Resize(2048))
+    );
+    assert_eq!(
+        growth.last_reason(),
+        Some(GrowthReason::Sustained { secs: 30 })
+    );
+    growth.applied();
+    // The next growth needs its own 30 s.
+    let grown = || pressure(2048 - 62, 450, 6.0);
+    for s in (138..162).step_by(2) {
+        assert!(!resized(growth.on_pressure(&grown(), at(s))), "{s} s");
+    }
+    assert!(resized(growth.on_pressure(&grown(), at(168))));
 }
 
 #[test]
@@ -356,6 +513,9 @@ fn report() -> control::GuestMemory {
         free_reported_kb: 2000 * MIB,
         reported_total_kb: 9000 * MIB,
         refaulted_total_kb: 300 * MIB,
+        swap_cached_kb: 6 * MIB,
+        memmap_kb: 75 * MIB,
+        memmap_boot_kb: 64 * MIB,
     }
 }
 
@@ -586,13 +746,69 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
          before compression)",
         "Google Play services: 51 MiB (15 resident, 36 compressed in zram) in 2 processes",
         "kernel and everything else 358 MiB",
-        "unreclaimable slab 60, kernel stacks 10, page tables 20, vmalloc 30, per-CPU 2",
-        "zram store 30, unaccounted (drivers, GPU and DMA buffers) 206 MiB",
-        "reserved by the kernel at boot 104 MiB of 4200 MiB given",
+        "unreclaimable slab 60, page tables 20, vmalloc 30 (kernel stacks 10 of it), per-CPU 2",
+        "zram store 30, page structures of the mapped disks and of added memory 75, swap cache 6, \
+         unaccounted (drivers, GPU and DMA buffers) 135 MiB",
+        "reserved by the kernel at boot 104 MiB of 4200 MiB given (code, page structures, \
+         swiotlb, pstore; the page structures made at boot 64 MiB)",
         "system",
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");
     }
+}
+
+#[test]
+fn nfr1_unaccounted_memory_leaves_out_what_the_kernel_names_elsewhere() {
+    // 358 MiB besides the page cache, buffers, app memory and reclaimable slab.
+    let guest = GuestMemory::from_control(report());
+    assert_eq!(guest.other_kb(), 358 * MIB);
+    // The guest kernel allocates thread stacks with vmalloc (VMAP_STACK), so VmallocUsed has
+    // KernelStack in it already: taking both away took the stacks twice. The page structures
+    // of the mapped disks and of added memory, and the swap cache, are named on lines of their
+    // own: 358 - (60 slab + 20 page tables + 30 vmalloc + 2 per-CPU + 30 zram) - 75 - 6 = 135.
+    assert_eq!(guest.unaccounted_kb(), 135 * MIB);
+
+    // A guest that does not send the page structures or the swap cache (an older agent or a
+    // kernel before 6.11): only the stacks are no longer taken twice.
+    let mut older = report();
+    older.swap_cached_kb = 0;
+    older.memmap_kb = 0;
+    older.memmap_boot_kb = 0;
+    let older = GuestMemory::from_control(older);
+    assert_eq!(older.unaccounted_kb(), 216 * MIB);
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: older,
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    assert!(text.contains("zram store 30, unaccounted"), "{text}");
+    assert!(!text.contains("page structures made at boot"), "{text}");
+
+    // A kernel whose stacks are not in vmalloc would show more stack than vmalloc: the
+    // larger of the two is what both hold, never less than the stacks.
+    let mut separate = report();
+    separate.kernel_stack_kb = 40 * MIB;
+    separate.vmalloc_used_kb = 30 * MIB;
+    assert_eq!(
+        GuestMemory::from_control(separate).unaccounted_kb(),
+        125 * MIB
+    );
+
+    // The parts cross the local API and the JSON unchanged.
+    let snapshot = snapshot();
+    let back = snapshot_from_wire(snapshot_to_wire(&snapshot));
+    let guest = &back.guest.as_ref().unwrap().memory;
+    assert_eq!(guest.swap_cached_kb, 6 * MIB);
+    assert_eq!(guest.kernel.memmap_kb, 75 * MIB);
+    assert_eq!(guest.kernel.memmap_boot_kb, 64 * MIB);
+    let json = dsa_host_core::memory::snapshot_json(&snapshot);
+    assert_eq!(json["guest"]["swap_cached_kb"], 6 * MIB);
+    assert_eq!(json["guest"]["kernel"]["memmap_kb"], 75 * MIB);
+    assert_eq!(json["guest"]["kernel"]["memmap_boot_kb"], 64 * MIB);
+    assert_eq!(json["guest"]["kernel"]["unaccounted_kb"], 135 * MIB);
 }
 
 #[test]
@@ -1165,6 +1381,55 @@ fn nfr2_the_window_managers_committed_memory_is_broken_down_by_owner() {
 }
 
 #[test]
+fn nfr1_the_gpu_counters_are_logged_beside_the_private_commit() {
+    // Both diagnoses left open whether GPU-only allocations sit outside the private totals: on
+    // an integrated GPU they are system memory either way. The line puts the GPU's own count of
+    // each process beside its private commit, so one log answers it.
+    use dsa_host_core::memory::{gpu_process_memory_line, GpuMemoryOf, GpuProcessMemory};
+    let line = gpu_process_memory_line(&[
+        GpuMemoryOf {
+            name: "window manager",
+            pid: 10,
+            private_kb: Some(53 * MIB),
+            gpu: Some(GpuProcessMemory {
+                shared_kb: 45 * MIB,
+                dedicated_kb: 0,
+            }),
+        },
+        GpuMemoryOf {
+            name: "graphics renderer",
+            pid: 20,
+            private_kb: Some(307 * MIB),
+            gpu: Some(GpuProcessMemory {
+                shared_kb: 112 * MIB,
+                dedicated_kb: 3 * MIB,
+            }),
+        },
+    ]);
+    assert_eq!(
+        line,
+        "GPU memory beside the private commit (the GPU's own counters; private commit may leave \
+         GPU-only memory out): window manager pid 10: private 53 MiB, GPU shared 45 MiB, GPU \
+         dedicated 0 MiB; graphics renderer pid 20: private 307 MiB, GPU shared 112 MiB, GPU \
+         dedicated 3 MiB"
+    );
+    // What could not be read shows as ?, and no process says so.
+    let unknown = gpu_process_memory_line(&[GpuMemoryOf {
+        name: "graphics renderer",
+        pid: 20,
+        private_kb: None,
+        gpu: None,
+    }]);
+    assert!(
+        unknown.ends_with(
+            "graphics renderer pid 20: private ? MiB, GPU shared ? MiB, GPU dedicated ? MiB"
+        ),
+        "{unknown}"
+    );
+    assert!(gpu_process_memory_line(&[]).ends_with(": no process"));
+}
+
+#[test]
 fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
     use dsa_host_core::renderer::{renderer_owners_line, Allocations, RendererOwners};
     let at = |mib: u64, count: u32| Allocations {
@@ -1186,6 +1451,47 @@ fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
          MiB)"
     );
     assert!(renderer_owners_line(&RendererOwners::default()).ends_with("(none holds any)"));
+}
+
+#[test]
+fn nfr1_the_renderers_idle_memory_is_logged_by_owner() {
+    use dsa_host_core::memory::FloorMemory;
+    use dsa_host_core::renderer::{renderer_memory_line, RendererOwners};
+    let floor = FloorMemory {
+        private_kb: Some(84 * MIB),
+        walked_private_kb: 70 * MIB,
+        process_heap_kb: 30 * MIB,
+        other_heaps: 3,
+        gpu_mapped_kb: 20 * MIB,
+        stacks_kb: 2 * MIB,
+        stacks: 17,
+        direct_kb: 18 * MIB,
+        largest_private_kb: vec![16 * MIB, 5 * MIB / 2],
+        module_data_kb: 14 * MIB,
+        largest_modules: vec![
+            ("igvk64.dll".into(), 11 * MIB),
+            ("gfxstream_backend.dll".into(), 3 * MIB / 2),
+        ],
+    };
+    let line = renderer_memory_line(None, &floor, 0, 0);
+    assert_eq!(
+        line,
+        "graphics renderer committed memory by owner, idle, with no guest process and no task \
+         window: private 84 MiB (70 found in private pages); default heap 30; 3 other heaps \
+         among what was allocated directly; GPU-mapped 20; thread stacks 2 in 17; allocated \
+         directly 18 (largest allocations 16.0, 2.5 MiB); module data 14 (igvk64.dll 11.0, \
+         gfxstream_backend.dll 1.5 MiB)"
+    );
+    // With guests or windows the same breakdown follows whose the GPU memory is.
+    let busy = renderer_memory_line(Some(&RendererOwners::default()), &floor, 4, 1);
+    assert!(busy.starts_with("graphics renderer by owner: "), "{busy}");
+    assert!(
+        busy.contains("; graphics renderer committed memory by owner, with 4 guest processes and 1 task windows: private 84 MiB"),
+        "{busy}"
+    );
+    let unknown = renderer_memory_line(None, &FloorMemory::default(), 0, 0);
+    assert!(unknown.contains("private ? MiB"), "{unknown}");
+    assert!(unknown.contains("(largest allocations none MiB); module data 0 (none MiB)"));
 }
 
 #[test]
@@ -1323,9 +1629,11 @@ fn nfr1_the_renderers_largest_guest_devices_are_named_and_their_imports_split() 
 fn nfr2_memory_plan_matches_windows_sizing() {
     use dsa_host_core::memory::{growth_max_mb, memory_plan, start_mb, GrowthCeiling::*};
     const GIB: u64 = 1024;
-    // The VM starts at 2 GiB whatever the limit, and grows to the computer less what it keeps.
-    for limit in [0, 1024, 2048, 4096, 8192] {
-        assert_eq!(start_mb(limit), 2048, "limit {limit}");
+    // The VM starts at 1.5 GiB whatever the limit, and grows to the computer less what it
+    // keeps. A limit below the least a VM is given (2 GiB) is that least, so even then the VM
+    // can grow by half a gibibyte past its start.
+    for limit in [0, 1024, 1536, 2048, 4096, 8192] {
+        assert_eq!(start_mb(limit), 1536, "limit {limit}");
     }
     let table: [(u32, u64, Option<u64>); 15] = [
         (0, 8 * GIB, Some(6144)),
@@ -1352,8 +1660,9 @@ fn nfr2_memory_plan_matches_windows_sizing() {
         );
         // A maximum that is not above the start is no growth.
         let plan = memory_plan(None, limit, Some(total), HostLessReserve);
-        assert_eq!(plan.start_mb, 2048);
-        assert_eq!(plan.max_mb, expected.filter(|max| *max > 2048));
+        assert_eq!(plan.start_mb, 1536);
+        assert_eq!(plan.max_mb, expected.filter(|max| *max > 1536));
+        assert!(plan.max_mb.is_some(), "limit {limit}, total {total}");
     }
     // A fixed size in the configuration never grows, whatever the limit.
     let plan = memory_plan(Some(4096), 8192, Some(32 * GIB), HostLessReserve);
@@ -1368,13 +1677,13 @@ fn nfr2_half_host_ceiling_matches_macos_sizing() {
         (plan.start_mb, plan.max_mb)
     };
     // No limit: the default start, growing to half the computer's memory.
-    assert_eq!(plan(0, 16384), (2048, Some(8192)));
-    assert_eq!(plan(0, 65536), (2048, Some(32768)));
-    assert_eq!(plan(0, 8192), (2048, Some(4096)));
+    assert_eq!(plan(0, 16384), (1536, Some(8192)));
+    assert_eq!(plan(0, 65536), (1536, Some(32768)));
+    assert_eq!(plan(0, 8192), (1536, Some(4096)));
     // A limit is how far it grows, within what the computer has, even above half of it.
-    assert_eq!(plan(6144, 32768), (2048, Some(6144)));
-    assert_eq!(plan(24576, 32768), (2048, Some(24576)));
-    assert_eq!(plan(2048, 32768), (2048, None));
+    assert_eq!(plan(6144, 32768), (1536, Some(6144)));
+    assert_eq!(plan(24576, 32768), (1536, Some(24576)));
+    assert_eq!(plan(2048, 32768), (1536, Some(2048)));
     let fixed = memory_plan(Some(4096), 0, Some(65536), HalfHost);
     assert_eq!((fixed.start_mb, fixed.max_mb), (4096, None));
 }
@@ -1386,7 +1695,7 @@ fn nfr2_unreadable_memory_keeps_the_start_size() {
         assert_eq!(growth_max_mb(0, None, ceiling), None);
         assert_eq!(growth_max_mb(8192, None, ceiling), None);
         let plan = memory_plan(None, 8192, None, ceiling);
-        assert_eq!((plan.start_mb, plan.max_mb), (2048, None));
+        assert_eq!((plan.start_mb, plan.max_mb), (1536, None));
     }
 }
 

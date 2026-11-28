@@ -1845,8 +1845,8 @@ msgstr "Android s'arrête puis redémarre.\n\nSes fenêtres d'applications se fe
 msgid "Alternative stores"
 msgstr "Magasins alternatifs"
 
-msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
-msgstr "DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Un magasin se supprime depuis la liste des apps."
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there."
+msgstr "DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Les magasins installés apparaissent dans la liste des apps comme toute autre app, et vous les désinstallez depuis cette liste."
 
 msgid "Installed, version {0}"
 msgstr "Installé, version {0}"

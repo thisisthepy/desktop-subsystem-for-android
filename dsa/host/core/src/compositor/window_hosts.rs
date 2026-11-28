@@ -33,6 +33,10 @@ use crate::tasks::{AppInfo, AppSettingsPage, Bounds, TaskRequest};
 /// a test; the host's own launch passes it too.
 pub const PACKAGE_ARGUMENT: &str = "--package";
 
+/// The package of Android's own screens, run by the system (uid 1000). Its name has one part,
+/// unlike an app's.
+pub const SYSTEM_PACKAGE: &str = "android";
+
 /// The value that follows `flag` in `args`, if any.
 pub fn argument(args: &[String], flag: &str) -> Option<String> {
     args.iter()
@@ -52,7 +56,14 @@ pub fn package_argument(args: &[String]) -> Option<Option<String>> {
 /// letter followed by letters, digits and underscores. Only such a name becomes a file name
 /// for an app's window host, so a name whose first part Windows reserves for a device
 /// (`con`, `nul`, `com1` and the like) is refused too.
+///
+/// Android's own package, [`SYSTEM_PACKAGE`], is the one name of a single part: its screens
+/// (the version easter egg, the chooser, a crash dialog in a task of its own) are tasks like
+/// any app's, so they get a window host and a window too.
 pub fn is_valid_package(name: &str) -> bool {
+    if name == SYSTEM_PACKAGE {
+        return true;
+    }
     const DEVICES: [&str; 4] = ["con", "prn", "aux", "nul"];
     let parts: Vec<&str> = name.split('.').collect();
     let first = parts[0].to_ascii_lowercase();
@@ -2005,6 +2016,29 @@ mod tests {
             [HostAction::Start { .. }]
         ));
         assert_eq!(hosts.start_failed(CLOCK), vec![2]);
+    }
+
+    #[test]
+    fn fr3_androids_own_package_starts_a_window_host_under_its_name() {
+        // Task 144 on build 1.0.1-dev.12, the version easter egg: the guest names the app
+        // "Android 시스템" before the task, and the window host starts with that name.
+        let now = Instant::now();
+        let mut hosts = WindowHosts::new();
+        assert!(is_valid_package(SYSTEM_PACKAGE));
+        let mut system = info(SYSTEM_PACKAGE);
+        system.label = "Android 시스템".into();
+        hosts.app(&system, now);
+        let actions = hosts.change(&open(144, SYSTEM_PACKAGE), now);
+        match &actions[..] {
+            [HostAction::Start {
+                package,
+                app: Some(app),
+            }] => {
+                assert_eq!(package, SYSTEM_PACKAGE);
+                assert_eq!(app.label, "Android 시스템");
+            }
+            other => panic!("expected the window host to start, got {other:?}"),
+        }
     }
 
     #[test]

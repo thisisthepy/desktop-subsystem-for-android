@@ -259,4 +259,41 @@ public interface GuestMemoryOrBuilder extends
    * @return The refaultedTotalKb.
    */
   long getRefaultedTotalKb();
+
+  /**
+   * <pre>
+   * The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+   * holds, kept until one of them is written to. Cached leaves them out; those a process maps
+   * are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 swap_cached_kb = 30;</code>
+   * @return The swapCachedKb.
+   */
+  long getSwapCachedKb();
+
+  /**
+   * <pre>
+   * The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+   * times the page size): those of the persistent memory the guest maps directly (the disks
+   * it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+   * /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+   * </pre>
+   *
+   * <code>uint64 memmap_kb = 31;</code>
+   * @return The memmapKb.
+   */
+  long getMemmapKb();
+
+  /**
+   * <pre>
+   * The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+   * it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+   * say.
+   * </pre>
+   *
+   * <code>uint64 memmap_boot_kb = 32;</code>
+   * @return The memmapBootKb.
+   */
+  long getMemmapBootKb();
 }

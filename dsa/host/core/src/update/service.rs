@@ -37,7 +37,7 @@ use crate::session::BackgroundRequest;
 use crate::session::{BootProblem, Session, SessionState, StopReason};
 use crate::settings::SettingsStore;
 use crate::tasks::{AppSettingsPage, TaskRequest, TaskRequestError, TaskWatch};
-use crate::widgets::{WidgetError, WidgetProvider, WidgetSize};
+use crate::widgets::{WidgetError, WidgetGallery, WidgetPreview, WidgetProvider, WidgetSize};
 use std::sync::mpsc::Receiver;
 
 /// The latest news about the image, shared by every user's Android: in words for `dsa status`
@@ -1281,6 +1281,12 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
         UserAndroid::widget_providers(&*self.session)
+    }
+    fn widget_gallery(&self, lazy_previews: bool) -> Result<WidgetGallery, WidgetError> {
+        UserAndroid::widget_gallery(&*self.session, lazy_previews)
+    }
+    fn widget_previews(&self, providers: &[String]) -> Result<Vec<WidgetPreview>, WidgetError> {
+        UserAndroid::widget_previews(&*self.session, providers)
     }
     fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
         UserAndroid::add_widget(&*self.session, provider)

@@ -78,9 +78,12 @@ logged, in case nothing else changes.
 
 When the agent restarts, it reports every task again and the host reopens their windows,
 which have no frame yet. SurfaceFlinger presents only when something changes, so a still app
-would leave its window on the host's splash. So a task reported again with the bounds it had,
-whose frame was sent before, is sent again at once and once more 1.5 s later
-(`resendAfterReport`), the second for a window the host reopens after the first arrived.
+would leave its window on the host's splash. So the host asks for the frame of each window it
+opens without one (`RequestTaskFrame`), once, and again after a second while none arrives, at
+most three times. The hwcomposer posts the last frame it composed for the task to the task's
+host display again at once (`lastPostedTarget`), and asks SurfaceFlinger for a new one. A
+report with the bounds the task had (a new title, the focus) asks for no frame
+(`reportAsksForFrame`), so it costs no frame of the whole display.
 
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that
@@ -166,7 +169,13 @@ So the hwcomposer copies them up (`src/cpu_upload.*`, with the rules in
   green. A failure is logged at its first, then once in 600 with its count. A layer whose
   buffer changed holds a new picture and is copied; a buffer seen again is copied only when
   a fingerprint of every eighth row of its planes changed. A buffer the GPU draws is never
-  copied. The bytes copied each second are logged at debug level.
+  copied. The bytes copied each second (the planes' packed size, through the shared graphics
+  memory or the stream) are logged at debug level.
+- A YUV buffer whose planes hold no picture (a luma row of zeros over chroma rows of zeros,
+  which no encoder makes and the host shows as solid green) is not copied up, and its layer
+  keeps its last picture. Planes packed into the graphics memory the host shares are checked
+  again once the host has read them: if they changed meanwhile, the ColorBuffer may hold
+  something else, and the layer keeps its last picture too. The debug line counts both.
 - A YUV buffer gets a YUV ColorBuffer from a host that lists
   `ANDROID_EMU_dsa_yuv_color_buffers` (`dsa/graphics/patches/0019-*.patch`), and its planes
   go up packed as the host's image lays them out. The host's compositor samples RGB images
@@ -179,7 +188,7 @@ The guest Vulkan driver does the same in the other processes that sample such a 
 
 The display's size and density come from the kernel command line. `make-image.py` writes
 these defaults into `image.json`, and the host replaces the width and height with a square as
-long as the user's longest monitor when it starts the VM, and the density with the density of
+long as the user's longest monitor, in guest pixels, when it starts the VM, and the density with the density of
 a window on the user's main monitor (196 at a scale of 150%). SurfaceFlinger, and so every
 app, starts at that same density (`androidboot.lcd_density`, which the host sets beside it):
 
@@ -197,6 +206,15 @@ chooses the rate while Android runs: the user's fastest monitor, at most 60 Hz w
 host's battery saver is on or while the user drags a window to a new size. It sends that rate to the agent (`DisplayRefresh`), which holds
 the framework's refresh rate range at it, and SurfaceFlinger then sets the matching
 configuration, whose period the vsync clock takes from its next tick.
+
+The display can grow while Android runs. When a task's window opens and the monitors
+connected then need a larger display, the host sends the size (`DisplaySize`). The hwcomposer
+grows each side to it, never shrinks one, and takes no side past 16384 (`grownDisplaySize`).
+It keeps the density and then reports the display connected again (`onHotplug`), which
+SurfaceFlinger takes as a reconnection of the same display: it reads the configurations again
+and remakes its display device at the new size, and the display manager and the window
+manager follow. A hwcomposer that restarts starts at the boot size and is told the last size
+again when it subscribes to the control daemon.
 
 A window cannot be larger than this display. A task's ColorBuffers follow the task's own
 size in steps (`taskBufferSize`), so a large display costs nothing per window. Only the client

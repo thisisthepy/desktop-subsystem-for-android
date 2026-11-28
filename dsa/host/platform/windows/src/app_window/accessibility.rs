@@ -83,8 +83,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use dsa_host_core::accessibility::{
-    from_screen, to_screen, ActionRequest, Announcement, Changes, ClientDemand, Demand,
-    DemandReason, GuestAccessibility, Node, NodeAction, PresenceChange, Tree, TreeError,
+    focus_trace_line, from_screen, to_screen, wall_millis, AccessibilityTarget, ActionRequest,
+    Announcement, Changes, ClientDemand, Demand, DemandReason, GuestAccessibility, Node,
+    NodeAction, PresenceChange, Tree, TreeError,
 };
 #[cfg(test)]
 use dsa_host_core::compositor::caption::{CaptionButton, CaptionLayout};
@@ -1749,6 +1750,7 @@ impl AccessibilityWindow {
         Some(EventTarget {
             shared: self.shared.clone()?,
             root: self.root.clone()?,
+            logger: self.logger.clone(),
         })
     }
 }
@@ -1756,6 +1758,7 @@ impl AccessibilityWindow {
 /// Where a window raises its events, taken from its tree so no borrow of it is held while UI
 /// Automation calls back into the window.
 pub struct EventTarget {
+    logger: Option<Arc<CompositorLogger>>,
     shared: Arc<Shared>,
     root: IRawElementProviderSimple,
 }
@@ -1808,7 +1811,23 @@ impl EventTarget {
             unsafe { GetForegroundWindow() as isize == hwnd }
         };
         for (changes, before) in pending {
-            raise(&shared, &root, epoch, &changes, &before, foreground);
+            let focus = raise(&shared, &root, epoch, &changes, &before, foreground);
+            if focus.is_some() {
+                let (focused, accessibility_focused) = {
+                    let state = shared.lock();
+                    (state.tree.focused(), state.tree.accessibility_focused())
+                };
+                note(
+                    self.logger.as_deref(),
+                    &focus_trace_line(
+                        AccessibilityTarget::Task(shared.task_id),
+                        focused,
+                        accessibility_focused,
+                        "the window raised UI Automation's focus event",
+                        wall_millis(),
+                    ),
+                );
+            }
         }
     }
 }
@@ -1846,7 +1865,31 @@ fn names_of(tree: &Tree) -> Vec<(u32, String)> {
     names
 }
 
-/// Raises the events of one batch of changes.
+/// What a batch raises first: the structure of a replaced tree, so the node a client is sent
+/// to is there, then the focus, so a screen reader starts speaking before the property and
+/// text events of the same batch, then the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RaiseStep {
+    Structure,
+    Focus,
+    Rest,
+}
+
+/// The order [`raise`] raises a batch's events in.
+fn raise_order(changes: &Changes, foreground: bool) -> Vec<RaiseStep> {
+    let mut steps = Vec::new();
+    if changes.replaced || changes.roots_changed {
+        steps.push(RaiseStep::Structure);
+    }
+    if changes.focus.is_some() && foreground {
+        steps.push(RaiseStep::Focus);
+    }
+    steps.push(RaiseStep::Rest);
+    steps
+}
+
+/// Raises the events of one batch of changes, in [`raise_order`]. The node whose focus event
+/// it raised, if any.
 fn raise(
     shared: &Arc<Shared>,
     root: &IRawElementProviderSimple,
@@ -1854,10 +1897,12 @@ fn raise(
     changes: &Changes,
     before: &[(u32, String)],
     foreground: bool,
-) {
+) -> Option<u32> {
+    let mut raised = None;
     // SAFETY: UI Automation's event calls, with providers of this window.
     unsafe {
-        if changes.replaced || changes.roots_changed {
+        let steps = raise_order(changes, foreground);
+        if steps.contains(&RaiseStep::Structure) {
             let _ = UiaRaiseStructureChangedEvent(
                 root,
                 StructureChangeType_ChildrenInvalidated,
@@ -1865,12 +1910,18 @@ fn raise(
                 0,
             );
         }
-        let Some(epoch) = epoch else {
-            return;
-        };
+        let epoch = epoch?;
         let simple = |id: u32| -> Option<IRawElementProviderSimple> {
             node_of(shared, epoch, id).cast().ok()
         };
+        if steps.contains(&RaiseStep::Focus) {
+            if let Some(focus) = changes.focus {
+                if let Some(provider) = simple(focus) {
+                    let _ = UiaRaiseAutomationEvent(&provider, UIA_AutomationFocusChangedEventId);
+                    raised = Some(focus);
+                }
+            }
+        }
         if !changes.replaced {
             for id in &changes.children_changed {
                 if let Some(provider) = simple(*id) {
@@ -1977,12 +2028,8 @@ fn raise(
         }
         // Text, live regions, and windows that opened.
         patterns::raise_node_events(shared, epoch, changes);
-        if let (Some(focus), true) = (changes.focus, foreground) {
-            if let Some(provider) = simple(focus) {
-                let _ = UiaRaiseAutomationEvent(&provider, UIA_AutomationFocusChangedEventId);
-            }
-        }
     }
+    raised
 }
 
 /// Raises the event of a change to the title bar's `kind` button: an added child is raised on
@@ -2891,6 +2938,32 @@ mod tests {
         assert_eq!(window.demand.asked(Instant::now(), false, false), None);
         // It never said a screen reader listens.
         assert!(android.accessibility_listening.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr18_the_focus_event_is_raised_before_the_rest_of_its_batch() {
+        let moved = Changes {
+            focus: Some(4),
+            changed: vec![Node::default()],
+            children_changed: vec![1],
+            ..Changes::default()
+        };
+        assert_eq!(
+            raise_order(&moved, true),
+            vec![RaiseStep::Focus, RaiseStep::Rest]
+        );
+        // A new tree's structure first, so the focused node is there when a client asks.
+        let replaced = Changes {
+            replaced: true,
+            focus: Some(4),
+            ..Changes::default()
+        };
+        assert_eq!(
+            raise_order(&replaced, true),
+            vec![RaiseStep::Structure, RaiseStep::Focus, RaiseStep::Rest]
+        );
+        // A window in the background takes no focus.
+        assert_eq!(raise_order(&moved, false), vec![RaiseStep::Rest]);
     }
 
     #[test]

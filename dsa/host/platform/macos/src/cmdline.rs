@@ -52,11 +52,14 @@ pub fn for_virtualization_framework(image: &str, extra: &str, pstore: bool) -> S
         PAGE_REPORTING.to_string(),
         boot_devices(),
     ];
-    // What the guest kernel sets aside at boot, kept as small as on every host.
+    // What the guest kernel sets aside at boot, kept as small as on every host. The framework
+    // runs guests of the Mac's own architecture.
     words.extend(
-        dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE
-            .split_whitespace()
-            .map(str::to_string),
+        dsa_host_core::memory::guest_boot_memory_cmdline(
+            dsa_host_core::image_files::GuestArch::HOST,
+        )
+        .split_whitespace()
+        .map(str::to_string),
     );
     if pstore {
         words.extend(

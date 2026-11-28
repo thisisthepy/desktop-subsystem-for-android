@@ -290,6 +290,20 @@ public interface TaskUpdatedOrBuilder extends
 
   /**
    * <pre>
+   * Whether the guest can give this task a new density without relaunching its activity, even
+   * though the activity does not say it handles one: the guest's framework has the change that
+   * lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+   * an app the user set to System (forced) scaling another monitor's density only when this
+   * is set, and scales its window as for System otherwise. False on an image without it.
+   * </pre>
+   *
+   * <code>bool forced_density_available = 29;</code>
+   * @return The forcedDensityAvailable.
+   */
+  boolean getForcedDensityAvailable();
+
+  /**
+   * <pre>
    * Which kind of full screen the task's app asks for, if any. The host shows the task's
    * window on its whole monitor or keeps it inside its window, as the user's setting for that
    * kind of request says.

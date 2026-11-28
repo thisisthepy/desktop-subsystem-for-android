@@ -7,10 +7,11 @@ service dsa_channeld /vendor/bin/dsa-channeld
     # daemon reads the name of a caller that says it is the agent. uhid: /dev/uinput, where the
     # daemon makes the host's game controllers gamepads.
     group system readproc uhid
-    # SYS_NICE and SYS_PTRACE: after something wakes an app that no window shows, the daemon
-    # pages its anonymous memory back to zram (process_madvise with MADV_PAGEOUT). The kernel
-    # asks SYS_NICE of a caller that advises another process, and SYS_PTRACE to read the
-    # address space of another user's process.
+    # SYS_NICE and SYS_PTRACE: after something wakes an app that no window shows, or one of the
+    # system's resident services (the extension services, the media provider, the network
+    # stack), the daemon pages its anonymous memory back to zram (process_madvise with
+    # MADV_PAGEOUT). The kernel asks SYS_NICE of a caller that advises another process, and
+    # SYS_PTRACE to read the address space of another user's process.
     capabilities SYS_NICE SYS_PTRACE
     stdio_to_kmsg
     # Every pointer event passes through here on its way to the agent; it must not wait
@@ -76,8 +77,9 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
 # (fstab.dsa), so the host keeps disk space for it instead of memory. dsa-channeld sets this
 # only after no app has been open for vendor.dsa.memory.writeback_after seconds, at most every
 # ten minutes, and gives it vendor.dsa.memory.writeback_pages, the 4 KiB pages this run may
-# write: what is left of the day's budget, and at most 32 MiB, so init is busy for a fraction
-# of a second. zram counts the budget down as it writes and stops at zero, and it is set back
+# write: what is left of the boot's budget (512 MiB, the backing file's size, which is made new
+# each boot) and of the day's across boots (2 GiB), and at most 32 MiB, so init is busy for a
+# fraction of a second. zram counts the budget down as it writes and stops at zero, and it is set back
 # to zero afterwards, so nothing else writes. Only pages untouched for
 # vendor.dsa.memory.writeback_age seconds are marked idle (zram keeps when each page was last
 # read or written, and compressing one again with zstd is not a use). Incompressible pages go
@@ -96,21 +98,25 @@ on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
 
 # The working set trim: dsa-channeld sets this on the first look that finds page cache grown
 # past the guest's working set (an app closed, or files were read), while the guest is not
-# under memory pressure, whether or not the host is short. vendor.dsa.memory.trim_size says
+# under memory pressure, whether or not the host is short. When what the last trim took is
+# being read back, with apps open or none, the next waits a minute, twice as long each time
+# it happens again (up to ten minutes). vendor.dsa.memory.trim_size says
 # how many MiB: all of the excess at once. The kernel takes them from the
-# root cgroup, which every process's memory is charged under, coldest pages first, so the hot
-# pages of running apps and system_server stay. "swappiness=30" takes mostly page cache and a
-# little anonymous memory, the coldest of it, into zram: pages no process has touched since
-# the last trims, such as a background service's heap. The hot pages of the shown app stay on
-# the active list and are not taken. With "swappiness=0" the trim took files only, so the open
-# app's own working files went first while cold heap stayed resident. The root's file is
+# root cgroup, which every process's memory is charged under, coldest pages first.
+# vendor.dsa.memory.trim_swappiness says how: 0 while a window is shown, so the trim takes page
+# cache only, and 30 while none is, so it also takes a little of the coldest anonymous memory
+# into zram, such as a background service's heap. At 30 with a window shown the trim took the
+# shown app's own heap too (YouTube playing: the apps' memory 315 -> 133 MiB in one trim, back
+# within 20 s), because the guest has no memory cgroup per app to leave out. The shown app's
+# working files are spared by dsa-channeld instead: what of a trim is read back raises the
+# working set target and makes the next trim wait. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
 # open it. The pages it frees are scattered among pages in use. On a host that takes back only
 # whole free blocks (androidboot.dsa.memory_compaction=on), compaction then gathers them and they
 # go back to the host at once rather than whenever background compaction gets to them; a host
 # that takes back every free page gets them as they are, without moving any memory.
 on property:vendor.dsa.memory.trim=1
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=${vendor.dsa.memory.trim_swappiness:-0}"
 
 on property:vendor.dsa.memory.trim=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1
@@ -261,8 +267,13 @@ service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
 # the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
 # root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
 # read (channeld.cil), and in the readproc group, which lets it see every process under /proc.
-# Only while developer mode is on, when the shell asks: `setprop debug.dsa.memory_report 1`
-# (0 and then 1 again for another report). The memory measurement in CI asks for one.
+# It also lists what the processes that read and wrote the most did (/proc/<pid>/io, which root
+# reads for another user's process with dac_read_search and sys_ptrace, read checks only).
+# While developer mode is on, the shell may ask: `setprop debug.dsa.memory_report 1` (0 and then
+# 1 again for another report); the memory measurement in CI asks for one. The host's diagnostics
+# (`dsa memory snapshot`, `dsa logs collect`) ask too, in developer mode or not: dsa-channeld
+# sets vendor.dsa.memory.report to the time as a collection starts, which only it may set, and
+# takes the report out of the kernel's log at the collection's end.
 service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
     user root
     group root readproc
@@ -272,4 +283,7 @@ service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
     stdio_to_kmsg
 
 on property:debug.dsa.memory_report=1 && property:vendor.dsa.adb=1
+    start dsa_memory_report
+
+on property:vendor.dsa.memory.report=*
     start dsa_memory_report

@@ -23,4 +23,10 @@ void dsa_gfx_memory_process_ended(void);
 void dsa_gfx_memory_process_identified(uint64_t puid, uint32_t pid, const char* name);
 void dsa_gfx_memory_process_forget(uint64_t puid);
 
+/* The process's heaps (dsa_gfx_heap_trim.cpp): gives the free memory they keep committed back
+ * to the system, as far as each allocator can without moving anything. */
+void dsa_gfx_compact_heaps(void);
+/* The process's private committed bytes, or 0 where the system does not say. */
+uint64_t dsa_gfx_private_bytes(void);
+
 #endif /* DSA_GFX_MEMORY_H */

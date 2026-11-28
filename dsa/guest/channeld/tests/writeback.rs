@@ -60,9 +60,11 @@ fn nfr1_zram_writes_back_only_after_no_app_has_been_in_use_for_a_while() {
 #[test]
 fn nfr1_zram_writes_back_at_most_once_a_gap_and_a_run_at_a_time() {
     let policy = WritebackPolicy::default();
-    // 32 MiB a run, 512 MiB a day, ten minutes apart: init stays busy a fraction of a second.
+    // 32 MiB a run, ten minutes apart: init stays busy a fraction of a second. 512 MiB a boot,
+    // the size of the boot's backing file, and 2 GiB a day however often Android starts.
     assert_eq!(policy.run_pages, 32 * MIB_PAGES);
-    assert_eq!(policy.daily_pages, 512 * MIB_PAGES);
+    assert_eq!(policy.boot_pages, 512 * MIB_PAGES);
+    assert_eq!(policy.daily_pages, 2048 * MIB_PAGES);
     assert_eq!(policy.gap, secs(600));
     assert_eq!(policy.idle_after, secs(600));
     assert_eq!(policy.age, secs(1800));
@@ -84,7 +86,7 @@ fn nfr1_zram_writes_back_at_most_once_a_gap_and_a_run_at_a_time() {
 }
 
 #[test]
-fn nfr1_zram_writes_back_no_more_than_the_days_budget() {
+fn nfr1_zram_writes_back_no_more_than_the_boots_budget() {
     let policy = WritebackPolicy {
         idle_after: Duration::ZERO,
         gap: Duration::ZERO,
@@ -98,12 +100,61 @@ fn nfr1_zram_writes_back_no_more_than_the_days_budget() {
         written += pages;
         writeback.wrote(pages);
         now += secs(1);
-        assert!(written <= policy.daily_pages, "{written} pages");
+        assert!(written <= policy.boot_pages, "{written} pages");
     }
-    assert_eq!(written, policy.daily_pages);
+    assert_eq!(written, policy.boot_pages);
     assert_eq!(writeback.left_pages(), 0);
-    // The last run of the day gets only what is left.
-    let mut nearly = Writeback::new(
+    assert_eq!(writeback.boot_left_pages(), 0);
+    assert_eq!(
+        writeback.day_left_pages(),
+        policy.daily_pages - policy.boot_pages
+    );
+    // A new day does not give this boot more: its backing file is the one it filled.
+    assert_eq!(writeback.decide(now, TODAY + 1, 0, &zram(150)), None);
+    // The last run of the boot gets only what is left.
+    let mut nearly = Writeback::new(policy, TODAY, None).with_boot_written(policy.boot_pages - 10);
+    assert_eq!(nearly.decide(now, TODAY, 0, &zram(150)), Some(10));
+}
+
+#[test]
+fn nfr1_each_boot_gets_its_own_zram_writeback_budget() {
+    // The owner's PC, 1.0.1-dev.37: earlier boots that day had spent the day's 512 MiB, so the
+    // boot measured wrote nothing ("0 MiB left today"), though their backing files, and all they
+    // wrote, were deleted with them.
+    let policy = WritebackPolicy {
+        idle_after: Duration::ZERO,
+        ..WritebackPolicy::default()
+    };
+    let earlier = Day {
+        day: TODAY,
+        pages: 512 * MIB_PAGES,
+    };
+    let mut booted = Writeback::new(policy, TODAY, Day::parse(&earlier.to_property()));
+    assert_eq!(booted.boot_left_pages(), policy.boot_pages);
+    assert_eq!(booted.left_pages(), policy.boot_pages);
+    assert_eq!(
+        booted.decide(secs(0), TODAY, 0, &zram(150)),
+        Some(policy.run_pages)
+    );
+    // What it writes counts against both.
+    assert_eq!(
+        booted.wrote(policy.run_pages),
+        Day {
+            day: TODAY,
+            pages: 512 * MIB_PAGES + policy.run_pages
+        }
+    );
+    assert_eq!(
+        booted.boot_left_pages(),
+        policy.boot_pages - policy.run_pages
+    );
+    // A daemon started again within the boot counts what zram's backing device already took
+    // (bd_stat), so the boot's budget is not given twice.
+    let restarted =
+        Writeback::new(policy, TODAY, Some(earlier)).with_boot_written(policy.boot_pages);
+    assert_eq!(restarted.left_pages(), 0);
+    // The day's cap still bounds what many boots write in one day.
+    let mut many = Writeback::new(
         policy,
         TODAY,
         Some(Day {
@@ -111,10 +162,16 @@ fn nfr1_zram_writes_back_no_more_than_the_days_budget() {
             pages: policy.daily_pages - 10,
         }),
     );
-    assert_eq!(nearly.decide(now, TODAY, 0, &zram(150)), Some(10));
-    // The next day has a budget again.
+    assert_eq!(many.decide(secs(0), TODAY, 0, &zram(150)), Some(10));
+    let spent = Day {
+        day: TODAY,
+        pages: policy.daily_pages,
+    };
+    let mut spent = Writeback::new(policy, TODAY, Some(spent));
+    assert_eq!(spent.decide(secs(0), TODAY, 0, &zram(150)), None);
+    // The next day has its budget again, up to what is left of the boot's.
     assert_eq!(
-        writeback.decide(now, TODAY + 1, 0, &zram(150)),
+        spent.decide(secs(1), TODAY + 1, 0, &zram(150)),
         Some(policy.run_pages)
     );
 }
@@ -137,7 +194,7 @@ fn nfr1_a_restart_of_android_keeps_the_days_budget_spent() {
         pages: policy.daily_pages,
     };
     let mut fresh = Writeback::new(policy, TODAY, Some(yesterday));
-    assert_eq!(fresh.left_pages(), policy.daily_pages);
+    assert_eq!(fresh.day_left_pages(), policy.daily_pages);
     assert_eq!(
         fresh.decide(secs(0), TODAY, 0, &zram(150)),
         Some(policy.run_pages)
@@ -224,8 +281,10 @@ fn nfr1_zrams_statistics_are_read_for_what_a_run_wrote() {
         backing_before: before,
         backing_after: after,
         took: Duration::from_millis(640),
-        left_pages: 480 * MIB_PAGES,
-        daily_pages: 512 * MIB_PAGES,
+        boot_left_pages: 480 * MIB_PAGES,
+        boot_pages: 512 * MIB_PAGES,
+        left_pages: 1504 * MIB_PAGES,
+        daily_pages: 2048 * MIB_PAGES,
     };
     assert_eq!(run.written_pages(), 8192);
     // The boot check reads these numbers back from the guest's log.
@@ -233,6 +292,6 @@ fn nfr1_zrams_statistics_are_read_for_what_a_run_wrote() {
         run.line(),
         "zram writeback: wrote 32768 KiB of cold pages to the backing file in 640 ms; zram store \
          163840 -> 153600 KiB (holding 491520 -> 458752 KiB, 512 -> 0 incompressible pages), \
-         32000 KiB on the disk; 480 of today's 512 MiB left"
+         32000 KiB on the disk; 480 of this boot's 512 MiB and 1504 of today's 2048 MiB left"
     );
 }

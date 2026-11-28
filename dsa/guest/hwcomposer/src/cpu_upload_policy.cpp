@@ -4,6 +4,7 @@
 #include "cpu_upload_policy.h"
 
 #include <atomic>
+#include <cstdio>
 
 #include "dsa_shared_color_buffer.h"
 
@@ -187,6 +188,30 @@ bool UploadFailureLog::shouldLog(uint32_t* count) {
     ++mCount;
     *count = mCount;
     return mCount == 1 || (mEvery > 0 && mCount % mEvery == 0);
+}
+
+bool UploadTally::uploaded(uint64_t nowNs, const dsa::UploadLayout& layout, std::string* line) {
+    dsa::UploadRate::Report report;
+    if (!mRate.add(nowNs, layout.packedSize(), &report)) {
+        return false;
+    }
+    char text[256];
+    const int written = std::snprintf(
+        text, sizeof(text),
+        "copied %llu KiB that a CPU wrote up to the host in %u uploads over %llu ms",
+        static_cast<unsigned long long>(report.bytes / 1024), report.uploads,
+        static_cast<unsigned long long>(report.windowNs / 1000000));
+    if ((mNoPicture != 0 || mChanged != 0) && written > 0 &&
+        static_cast<size_t>(written) < sizeof(text)) {
+        std::snprintf(text + written, sizeof(text) - static_cast<size_t>(written),
+                      "; kept from the host: %u that held no picture (zeros), %u that changed "
+                      "before the host read them",
+                      mNoPicture, mChanged);
+    }
+    *line = text;
+    mNoPicture = 0;
+    mChanged = 0;
+    return true;
 }
 
 }  // namespace dsa::hwc

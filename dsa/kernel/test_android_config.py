@@ -27,7 +27,8 @@ def fragment_lines(path):
 class AndroidKernelConfigTests(unittest.TestCase):
     def test_nfr5_the_debug_fragment_has_the_memory_checks_and_only_an_opt_in_merges_it(self):
         debug = fragment_lines(DEBUG_CONFIG)
-        for option in ["CONFIG_DEBUG_VM=y", "CONFIG_KFENCE=y", "CONFIG_PAGE_OWNER=y", "CONFIG_DEBUG_LIST=y"]:
+        for option in ["CONFIG_DEBUG_VM=y", "CONFIG_KFENCE=y", "CONFIG_PAGE_OWNER=y", "CONFIG_DEBUG_LIST=y",
+                       "CONFIG_KASAN=y", "CONFIG_KASAN_GENERIC=y", "CONFIG_KASAN_VMALLOC=y"]:
             self.assertIn(option, debug)
         # The shipped kernel's fragments carry none of it.
         for shipped in [CONFIG, ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
@@ -297,6 +298,30 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for option in ["CONFIG_EROFS_FS=y", "CONFIG_F2FS_FS=y"]:
             self.assertIn(option, lines)
 
+    def test_nfr1_kernel_features_android_never_asks_for_are_left_out(self):
+        # Built in by config-wsl on both architectures, resident for the VM's life, and never
+        # used: bionic has no System V IPC or message queues, the guest never hibernates or
+        # kexecs, loads no IMA policy, starts SELinux and not AppArmor, filters with legacy
+        # iptables, has no VXLAN, AF_XDP, CD-ROM or SCSI generic users, and maps no hugetlbfs.
+        lines = fragment_lines(CONFIG)
+        for option in ["SYSVIPC", "POSIX_MQUEUE", "DEVMEM", "HIBERNATION", "KEXEC_FILE", "IMA",
+                       "SECURITY_APPARMOR", "NF_TABLES", "VXLAN", "XDP_SOCKETS", "BLK_DEV_SR",
+                       "CHR_DEV_SG", "HUGETLBFS"]:
+            self.assertIn(f"# CONFIG_{option} is not set", lines)
+        # What Android does use from the same areas stays: wake locks need suspend (not
+        # hibernation), netd needs the legacy tables, and SELinux stays first among the LSMs.
+        for option in ["CONFIG_PM_WAKELOCKS=y", "CONFIG_IP_NF_IPTABLES_LEGACY=y",
+                       "CONFIG_IP6_NF_IPTABLES_LEGACY=y", "CONFIG_IP_NF_NAT=y",
+                       "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
+            self.assertIn(option, lines)
+        self.assertNotIn("# CONFIG_SUSPEND is not set", lines)
+        self.assertNotIn("# CONFIG_TRANSPARENT_HUGEPAGE is not set", lines)
+        # Every option named here is one both architectures have, so the merged configuration
+        # of each keeps the line; the debug fragment decides none of them.
+        debug = DEBUG_CONFIG.read_text()
+        for option in ["SYSVIPC", "HIBERNATION", "KEXEC_FILE", "HUGETLBFS", "NF_TABLES"]:
+            self.assertNotIn(f"CONFIG_{option}", debug)
+
     def test_nfr1_the_kernel_is_sized_for_a_small_vm_not_any_machine(self):
         # Processor and node counts bound static cpumasks and per-node arrays in every slab
         # cache; config-wsl's 512 CPUs and 1024 nodes cost memory a 4-processor VM never uses.
@@ -322,6 +347,26 @@ class AndroidKernelConfigTests(unittest.TestCase):
         default = re.search(r"fn default_processors\(\) -> u32 \{\s*(\d+)", core)
         self.assertIsNotNone(default)
         self.assertLessEqual(int(default.group(1)), 64)
+
+    def test_nfr1_debugfs_creates_no_files_in_the_shipped_kernel(self):
+        # dev.39 with no app open held 2961 debugfs inodes (1904 KiB of debugfs_inode_cache,
+        # kernel-memory-report.txt) and a dentry for each, pinned for the VM's life: blk-mq's
+        # files for each of the 64 loop devices, binder's file for each process, and more. A
+        # user build mounts debugfs only while it boots (init-debug.rc) and reads nothing from
+        # it. With no access, debugfs_create_*() makes nothing and the file system is not
+        # registered; "disallow mount" would still make every file.
+        lines = fragment_lines(CONFIG)
+        self.assertIn("CONFIG_DEBUG_FS_ALLOW_NONE=y", lines)
+        self.assertIn("# CONFIG_DEBUG_FS_ALLOW_ALL is not set", lines)
+        self.assertNotIn("# CONFIG_DEBUG_FS is not set", lines)
+        for shipped in [ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
+            self.assertNotIn("DEBUG_FS_ALLOW", shipped.read_text(), shipped.name)
+        # Android's tracing reads tracefs at /sys/kernel/tracing, which does not need debugfs.
+        self.assertNotIn("# CONFIG_FTRACE is not set", lines)
+        # The debug kernel reads /sys/kernel/debug/page_owner, so it turns debugfs back on.
+        debug = fragment_lines(DEBUG_CONFIG)
+        self.assertIn("CONFIG_DEBUG_FS_ALLOW_ALL=y", debug)
+        self.assertIn("# CONFIG_DEBUG_FS_ALLOW_NONE is not set", debug)
 
     def test_nfr1_allocation_profiling_is_opt_in_and_the_report_can_read_it(self):
         profile = fragment_lines(PROFILE_CONFIG)
@@ -534,6 +579,64 @@ class AndroidKernelConfigTests(unittest.TestCase):
                     if not line.startswith(("diff --git ", "--- a/", "+++ b/"))]
             self.assertEqual(sum(1 for line in body if line[:1] in (" ", "-")), old, hunks[at])
             self.assertEqual(sum(1 for line in body if line[:1] in (" ", "+")), new, hunks[at])
+
+    def test_nfr1_a_persistent_memory_region_maps_only_the_disk_image_it_holds(self):
+        # Hyper-V sizes every persistent memory device of a VM like the largest one, so the
+        # 370 MiB add-on disk sat in a 2422 MiB region and the guest kept page structs for all
+        # of it (32 MiB for nothing). On a read-only region the pmem driver maps only the disk
+        # image the region's GPT describes, and says in the boot log what it mapped.
+        patch = (PATCHES / "pmem-disk-image-size.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("drivers/nvdimm/pmem.c", patch)
+        self.assertIn("+static u64 pmem_disk_image_bytes(struct nd_namespace_common *ndns,", patch)
+        self.assertIn("+\t\t     test_bit(ND_REGION_READONLY, &nd_region->flags);", patch)
+        self.assertIn("-\t\tpmem->pgmap.range.end = res->end;\n"
+                      "+\t\tpmem->pgmap.range.end = res->start + pmem->size - 1;", patch)
+        # The size comes only from a GPT header whose checksum holds and whose disk ends inside
+        # the region; the mapping can only shrink, and stays a whole number of sections.
+        self.assertIn("+\tif ((crc32_le(~0U, sector, header_size) ^ ~0U) != crc)", patch)
+        self.assertIn("+\tif (alternate < 2 || alternate >= namespace_bytes / SECTOR_SIZE)", patch)
+        self.assertIn("+\t\tu64 mapped = min_t(u64, ALIGN(image_bytes, memremap_compat_align()),", patch)
+        self.assertIn("+\tselect CRC32", patch)
+        # What the PC check reads from the console log.
+        self.assertIn('"maps %llu MiB of its %llu MiB region: the disk image its GPT describes\\n"', patch)
+        self.assertIn('"maps all %llu MiB of its region: no GPT tells the disk image\'s size\\n"', patch)
+        # It reads the read-only flag pmem-dax.patch adds, so it applies after it.
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("pmem-dax.patch"), names.index("pmem-disk-image-size.patch"))
+        self.assert_hunks_count_their_lines("pmem-disk-image-size.patch")
+
+    def assert_hunks_count_their_lines(self, name):
+        text = (PATCHES / name).read_text().replace("\r\n", "\n")
+        hunks = re.split(r"(?m)^(@@ -\d+,(\d+) \+\d+,(\d+) @@.*)$", text)
+        self.assertGreater(len(hunks), 1, name)
+        for at in range(1, len(hunks), 4):
+            old, new = int(hunks[at + 1]), int(hunks[at + 2])
+            body = [line for line in hunks[at + 3].strip("\n").split("\n")
+                    if not line.startswith(("diff --git ", "--- a/", "+++ b/"))]
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "-")), old,
+                             f"{name}: {hunks[at]}")
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "+")), new,
+                             f"{name}: {hunks[at]}")
+
+    def test_nfr1_the_network_adapter_keeps_a_desktop_sized_receive_buffer(self):
+        # hv_netvsc's receive buffer is guest memory (vmalloc) for as long as the adapter
+        # exists. Upstream's 16 MiB is a server's; a desktop VM behind the host's NAT keeps 4.
+        patch = (PATCHES / "hv-netvsc-desktop-buffers.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("-#define NETVSC_RECEIVE_BUFFER_DEFAULT\t\t(1024 * 1024 * 16)\n", patch)
+        self.assertIn("+#define NETVSC_RECEIVE_BUFFER_DEFAULT\t\t(1024 * 1024 * 4)\n", patch)
+        # The command line can give a new adapter another size (hv_netvsc.recv_buffer_kb), so
+        # throughput can be compared without another kernel; it stays within the host's limits.
+        self.assertIn("+module_param(recv_buffer_kb, uint, 0444);", patch)
+        self.assertIn("+\t\tdev_info->recv_sections = netvsc_default_rx_sections();", patch)
+        self.assertIn("+\treturn clamp_t(u64, sections, NETVSC_MIN_RX_SECTIONS,", patch)
+        # The boot log says what the adapter holds, for the measurement.
+        self.assertIn('+\tnetdev_info(ndev, "receive buffer %u KiB (%u sections of %u bytes), '
+                      'send buffer %u KiB (%u sections of %u bytes), ring %u KiB each way for '
+                      'each channel\\n",', patch)
+        # The send buffer keeps upstream's 1 MiB: the patch does not touch it.
+        self.assertNotIn("NETVSC_SEND_BUFFER_DEFAULT\t\t(1024 * 1024 *", patch)
+        self.assertIn("CONFIG_HYPERV_NET=y", fragment_lines(CONFIG))
+        self.assert_hunks_count_their_lines("hv-netvsc-desktop-buffers.patch")
 
     def test_fr1_binder_device_nodes_are_created_for_android_init(self):
         config = CONFIG.read_text()
@@ -986,6 +1089,29 @@ class AndroidKernelConfigTests(unittest.TestCase):
             for other in others.splitlines():
                 if re.match(rf"^(# )?{name}[= ]", other):
                     self.assertEqual(other, line, name)
+
+    def test_pr4_a_cpu_written_gralloc_buffer_keeps_its_data_through_a_memory_reclaim(self):
+        # gralloc's buffers are vkms dumb buffers, shmem GEM objects a CPU writes through a
+        # PFN mapping, which never marks a page dirty. minigbm unmaps a buffer at every unlock,
+        # so between the video decoder's write and the hwcomposer's copy up no mapping holds
+        # the pages, and upstream puts them clean: the working set trim's memory.reclaim then
+        # dropped them as holes, and the hwcomposer read zeros (green) where the picture was.
+        self.assertIn("CONFIG_DRM_VKMS=y", CONFIG.read_text())
+        patch = (PATCHES / "drm-shmem-mapped-pages-put-dirty.patch").read_text()
+        self.assertIn("+++ b/drivers/gpu/drm/drm_gem_shmem_helper.c", patch)
+        mmap = patch[patch.index("drm_gem_shmem_mmap(struct drm_gem_shmem_object"):]
+        # Set under the reservation lock: the flags are bitfields beside map_wc and others.
+        locked = mmap[:mmap.index(" \tdma_resv_unlock(shmem->base.resv);")]
+        self.assertIn(" \tret = drm_gem_shmem_get_pages_locked(shmem);", locked)
+        self.assertIn("+\t\tshmem->pages_mark_dirty_on_put = true;", locked)
+        self.assertIn("+\t\tshmem->pages_mark_accessed_on_put = true;", locked)
+        # The kernel's own mapping (vmap) writes the pages without dirtying them too.
+        vmap = patch[patch.index("drm_gem_shmem_vmap_locked(struct drm_gem_shmem_object"):
+                     patch.index("drm_gem_shmem_mmap(struct drm_gem_shmem_object")]
+        self.assertIn("+\t\tshmem->pages_mark_dirty_on_put = true;", vmap)
+        # The patch only adds lines: the put itself is upstream's, which honours the flags.
+        self.assertFalse([line for line in patch.splitlines()
+                          if line.startswith("-") and not line.startswith("---")])
 
     def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.

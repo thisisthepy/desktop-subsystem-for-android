@@ -11,7 +11,7 @@ const MIB: u64 = 1024 * 1024;
 #[test]
 fn pr7_the_graphics_region_is_256_mib_unless_set_and_0_turns_it_off() {
     assert_eq!(data_bytes(None), Some(DEFAULT_DATA_BYTES));
-    assert_eq!(DEFAULT_DATA_BYTES, 256 * MIB);
+    assert_eq!(DEFAULT_DATA_BYTES, 512 * MIB);
     assert_eq!(data_bytes(Some(0)), None);
     assert_eq!(data_bytes(Some(512)), Some(512 * MIB));
     // Whole 2 MiB, which HCS maps memory in.

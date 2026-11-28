@@ -60,6 +60,43 @@ interface MemorySource {
 
     /** What free page reporting has handed back to the host, from DSA's kernel; null when unreadable. */
     fun pageReporting(): PageReporting? = null
+
+    /** The text of /proc/vmstat; null when unreadable. */
+    fun vmstat(): String? = null
+
+    /** The kernel's page size in KiB, which /proc/vmstat counts in. */
+    fun pageSizeKb(): Long = 4
+}
+
+/**
+ * The page structures (64 bytes for every page) the kernel made, in KiB, from /proc/vmstat:
+ * [afterBootKb] after boot (`nr_memmap_pages`), for the persistent memory the guest maps in
+ * place and for memory hot-added while it ran, which /proc/meminfo counts in no line, and
+ * [atBootKb] at boot (`nr_memmap_boot_pages`), part of what the kernel reserved before
+ * MemTotal.
+ */
+data class MemoryMap(val afterBootKb: Long, val atBootKb: Long) {
+    companion object {
+        /**
+         * Reads the two counts from [vmstat], in pages of [pageSizeKb]. Null when neither line
+         * is there (a kernel before Linux 6.11).
+         */
+        fun parse(vmstat: String, pageSizeKb: Long): MemoryMap? {
+            var after: Long? = null
+            var boot: Long? = null
+            for (line in vmstat.lineSequence()) {
+                val fields = line.trim().split(' ', '\t').filter { it.isNotEmpty() }
+                if (fields.size != 2) continue
+                val pages = fields[1].toLongOrNull() ?: continue
+                when (fields[0]) {
+                    "nr_memmap_pages" -> after = pages
+                    "nr_memmap_boot_pages" -> boot = pages
+                }
+            }
+            if (after == null && boot == null) return null
+            return MemoryMap(afterBootKb = (after ?: 0) * pageSizeKb, atBootKb = (boot ?: 0) * pageSizeKb)
+        }
+    }
 }
 
 /**
@@ -81,6 +118,7 @@ data class MemInfo(
     val slabReclaimableKb: Long = 0,
     val swapTotalKb: Long = 0,
     val swapFreeKb: Long = 0,
+    val swapCachedKb: Long = 0,
     val slabUnreclaimableKb: Long = 0,
     val kernelStackKb: Long = 0,
     val pageTablesKb: Long = 0,
@@ -114,6 +152,7 @@ data class MemInfo(
                 slabReclaimableKb = v("SReclaimable"),
                 swapTotalKb = v("SwapTotal"),
                 swapFreeKb = v("SwapFree"),
+                swapCachedKb = v("SwapCached"),
                 slabUnreclaimableKb = v("SUnreclaim"),
                 kernelStackKb = v("KernelStack"),
                 pageTablesKb = v("PageTables"),
@@ -152,6 +191,7 @@ fun guestMemory(
     processes: List<ProcessPss>,
     memOnlineKb: Long? = null,
     pageReporting: PageReporting? = null,
+    memoryMap: MemoryMap? = null,
 ): GuestMemory {
     val builder = GuestMemory.newBuilder()
         .setMemTotalKb(meminfo.memTotalKb)
@@ -179,6 +219,9 @@ fun guestMemory(
         .setFreeReportedKb(pageReporting?.freeReportedKb ?: 0)
         .setReportedTotalKb(pageReporting?.reportedTotalKb ?: 0)
         .setRefaultedTotalKb(pageReporting?.refaultedTotalKb ?: 0)
+        .setSwapCachedKb(meminfo.swapCachedKb)
+        .setMemmapKb(memoryMap?.afterBootKb ?: 0)
+        .setMemmapBootKb(memoryMap?.atBootKb ?: 0)
     // Every process of Google Play services, not only those among the largest: together they
     // are what Google Play costs.
     val googlePlay = processes.filter { it.googlePlay }
@@ -256,6 +299,11 @@ class MemoryReporter(
         } catch (e: Exception) {
             null
         }
+        val memoryMap = try {
+            source.vmstat()?.let { MemoryMap.parse(it, source.pageSizeKb()) }
+        } catch (e: Exception) {
+            null
+        }
         val processes = try {
             source.processes()
         } catch (e: Exception) {
@@ -263,7 +311,7 @@ class MemoryReporter(
             emptyList()
         }
         val frame = Envelope.newBuilder()
-            .setGuestMemory(guestMemory(meminfo, zram, processes, memOnline, pageReporting))
+            .setGuestMemory(guestMemory(meminfo, zram, processes, memOnline, pageReporting, memoryMap))
             .build()
         send(frame.toByteArray())
     }

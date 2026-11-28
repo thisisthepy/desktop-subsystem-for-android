@@ -24,11 +24,15 @@
  * And the trim: a thread that, once a second, lets go of what nothing uses any more without
  * waiting for the guest's next call (the color buffers the guest closed whose close delay has
  * passed, the Vulkan objects of destroyed color buffers, whose GPU work has finished, and the
- * staging buffer once no copy used it for a while). */
+ * staging buffer once no copy used it for a while), and, a moment after a guest's device went
+ * away, what that device left in the renderer's command pool and heaps. */
 
+#include "dsa_allocation_note.h"
+#include "dsa_device_gone_trim.h"
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_memory.h"
 #include "dsa_graphics_memory.h"
+#include "dsa_stencil_format.h"
 
 #include <algorithm>
 #include <atomic>
@@ -51,6 +55,9 @@
 #include "vulkan/VkCommonOperations.h"
 #include "vulkan/VulkanDispatch.h"
 
+/* The embedder's log (dsa_gfx_backend.cpp). */
+void dsa_gfx_log_line(char severity, const char* message);
+
 namespace {
 
 using gfxstream::FrameBuffer;
@@ -68,6 +75,11 @@ struct Allocation {
     uint64_t bytes = 0;
     Kind kind = Kind::DeviceLocal;
     Import import = Import::Nothing;
+    /* The host memory type, what the memory is dedicated to, and why it is what it is, for the
+     * list of a guest's allocations (dsa_allocation_note.h). */
+    uint32_t memory_type = 0;
+    dsa::Dedicated dedicated = dsa::Dedicated::Nothing;
+    dsa::AllocationWhy why = dsa::AllocationWhy::RendererOwn;
 };
 
 /* Who a guest process is, as it said on its process pipe. */
@@ -132,6 +144,23 @@ Import imported(const VkMemoryAllocateInfo* info) {
     return Import::Nothing;
 }
 
+/* What the allocation `info` describes is dedicated to: an image, a buffer, or nothing. */
+dsa::Dedicated dedicated_to(const VkMemoryAllocateInfo* info) {
+    for (auto* next = static_cast<const VkBaseInStructure*>(info->pNext); next;
+         next = next->pNext) {
+        if (next->sType == VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO) {
+            const auto* dedicated = reinterpret_cast<const VkMemoryDedicatedAllocateInfo*>(next);
+            if (dedicated->image != VK_NULL_HANDLE) {
+                return dsa::Dedicated::Image;
+            }
+            if (dedicated->buffer != VK_NULL_HANDLE) {
+                return dsa::Dedicated::Buffer;
+            }
+        }
+    }
+    return dsa::Dedicated::Nothing;
+}
+
 /* The guest process the calling render thread serves, or 0 (the renderer's own threads). */
 uint64_t calling_process() {
     gfxstream::RenderThreadInfo* info = gfxstream::RenderThreadInfo::get();
@@ -148,6 +177,8 @@ VKAPI_ATTR VkResult VKAPI_CALL counted_allocate(VkDevice device,
                                                 const VkMemoryAllocateInfo* info,
                                                 const VkAllocationCallbacks* callbacks,
                                                 VkDeviceMemory* memory) {
+    /* Taken whatever happens, so a note never reaches a later allocation on this thread. */
+    const dsa::AllocationWhy why = dsa::takeAllocationNote();
     const DeviceEntries entries = entries_of(device);
     if (!entries.allocate) {
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -159,6 +190,9 @@ VKAPI_ATTR VkResult VKAPI_CALL counted_allocate(VkDevice device,
     Allocation allocation;
     allocation.bytes = info->allocationSize;
     allocation.import = imported(info);
+    allocation.memory_type = info->memoryTypeIndex;
+    allocation.dedicated = dedicated_to(info);
+    allocation.why = why;
     const uint64_t process = calling_process();
     std::lock_guard<std::mutex> lock(s_mutex);
     if (!s_counting) {
@@ -204,10 +238,18 @@ void forget_device(VkDevice device) {
     s_device_process.erase(device);
 }
 
+/* Guest devices that went away, for the trim of what they left behind (dsa_device_gone_trim.h). */
+std::mutex s_gone_mutex;
+dsa::DeviceGoneTrim s_gone;
+
 VKAPI_ATTR void VKAPI_CALL counted_destroy_through_decoder(VkDevice device,
                                                            const VkAllocationCallbacks* callbacks) {
     forget_device(device);
     s_decoder_destroy(device, callbacks);
+    /* Only a guest's device is destroyed through the decoder. The trim thread gives back what
+     * it left once no other device has gone for a moment; nothing waits for it here. */
+    std::lock_guard<std::mutex> lock(s_gone_mutex);
+    s_gone.deviceGone(dsa::DeviceGoneTrim::Clock::now());
 }
 
 VKAPI_ATTR void VKAPI_CALL counted_destroy_through_instance(VkDevice device,
@@ -258,6 +300,46 @@ constexpr std::chrono::seconds kTrimInterval{1};
  * writes uses it every frame and keeps it; a screenshot makes it again in a millisecond. */
 constexpr std::chrono::seconds kStagingIdle{5};
 
+/* Once guest devices went away and no other has gone for a moment: the renderer's command pool
+ * gives back what its command buffers grew to, and the heaps their freed blocks. The working
+ * set is left alone, since windows may be open. The log line says how much private memory it
+ * gave back, which is how to tell on a computer whether the trim is worth its cost. */
+void trim_after_devices_gone() {
+    unsigned gone = 0;
+    {
+        std::lock_guard<std::mutex> lock(s_gone_mutex);
+        if (!s_gone.due(dsa::DeviceGoneTrim::Clock::now())) {
+            return;
+        }
+        gone = s_gone.takeGone();
+    }
+    const auto started = std::chrono::steady_clock::now();
+    const uint64_t before = dsa_gfx_private_bytes();
+    if (VkEmulation* emu = emulation()) {
+        emu->trimCommandPool();
+    }
+    dsa_gfx_compact_heaps();
+    const uint64_t after = dsa_gfx_private_bytes();
+    const double took_ms = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+    char line[320];
+    if (before != 0 && after != 0) {
+        std::snprintf(line, sizeof(line),
+                      "%u guest Vulkan device(s) went away: the renderer trimmed its command pool "
+                      "and compacted its heaps in %.1f ms; private memory %.1f -> %.1f MiB "
+                      "(%.1f MiB given back)",
+                      gone, took_ms, before / 1048576.0, after / 1048576.0,
+                      (static_cast<double>(before) - static_cast<double>(after)) / 1048576.0);
+    } else {
+        std::snprintf(line, sizeof(line),
+                      "%u guest Vulkan device(s) went away: the renderer trimmed its command pool "
+                      "and compacted its heaps in %.1f ms",
+                      gone, took_ms);
+    }
+    dsa_gfx_log_line('N', line);
+}
+
 void trim_run() {
     std::unique_lock<std::mutex> lock(s_trim_mutex);
     while (!s_trim_wake.wait_for(lock, kTrimInterval, [] { return s_trim_stop; })) {
@@ -287,6 +369,9 @@ void trim_run() {
          * still held it: once the guest kernel says it let go, the pages are zeroed and given
          * back here, rather than when the next allocation looks (dsa_graphics_memory.h). */
         dsa::graphicsMemory().reclaim();
+        /* What a guest's device that went away left behind, while windows may still be open:
+         * before, the heaps were compacted only once no task window was left. */
+        trim_after_devices_gone();
         lock.lock();
     }
 }
@@ -313,6 +398,25 @@ void stop_trim() {
     }
 }
 
+/* Says once which depth-stencil buffer an app's window surface gets on this GPU
+ * (dsa_stencil_format.h): the guest's ANGLE takes a stencil-only one where the GPU renders to
+ * VK_FORMAT_S8_UINT, which the guest sees as the renderer's device reports it. */
+void say_window_stencil(VulkanDispatch* ivk, VkPhysicalDevice physical) {
+    if (!ivk || !ivk->vkGetPhysicalDeviceFormatProperties || physical == VK_NULL_HANDLE) {
+        return;
+    }
+    const auto renders = [&](VkFormat format) {
+        VkFormatProperties properties = {};
+        ivk->vkGetPhysicalDeviceFormatProperties(physical, format, &properties);
+        return (properties.optimalTilingFeatures &
+                VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
+    };
+    const std::string note = dsa::windowStencilNote(renders(VK_FORMAT_S8_UINT),
+                                                    renders(VK_FORMAT_D24_UNORM_S8_UINT),
+                                                    renders(VK_FORMAT_D32_SFLOAT_S8_UINT));
+    dsa_gfx_log_line('N', note.c_str());
+}
+
 }  // namespace
 
 void dsa_gfx_memory_install(void) {
@@ -324,6 +428,7 @@ void dsa_gfx_memory_install(void) {
     if (ivk && ivk->vkGetPhysicalDeviceMemoryProperties) {
         ivk->vkGetPhysicalDeviceMemoryProperties(emu->getPhysicalDevice(), &s_types);
     }
+    say_window_stencil(ivk, emu->getPhysicalDevice());
     wrap_destroy(gfxstream::vk::vkDispatch(), counted_destroy_through_decoder, &s_decoder_destroy);
     wrap_destroy(ivk, counted_destroy_through_instance, &s_instance_destroy);
     {
@@ -588,6 +693,78 @@ extern "C" DSA_GFX_EXPORT size_t dsa_gfx_describe_color_buffers(char* out, size_
                           ago(b.createdUs).c_str(), ago(b.lastPostUs).c_str());
             text += line;
             text += role + "\t" + creator + "\t" + held + "\n";
+        }
+    }
+    if (out && capacity > 0) {
+        const size_t n = std::min(capacity - 1, text.size());
+        std::memcpy(out, text.data(), n);
+        out[n] = '\0';
+    }
+    return text.size() + 1;
+}
+
+extern "C" DSA_GFX_EXPORT size_t dsa_gfx_describe_guest_allocations(char* out, size_t capacity) {
+    VkEmulation* emu = emulation();
+    const VkDevice own = emu ? emu->getDevice() : VK_NULL_HANDLE;
+    struct Line {
+        VkDevice device;
+        uint64_t device_bytes;
+        Allocation allocation;
+    };
+    std::vector<Line> lines;
+    std::string text;
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        if (!s_counting) {
+            return 0;
+        }
+        std::map<VkDevice, uint64_t> held;
+        for (const auto& [key, allocation] : s_live) {
+            if (key.first != own) {
+                held[key.first] += allocation.bytes;
+            }
+        }
+        uint64_t total = 0;
+        for (const auto& [key, allocation] : s_live) {
+            if (key.first == own) {
+                continue;
+            }
+            lines.push_back({key.first, held[key.first], allocation});
+            total += allocation.bytes;
+        }
+        /* The devices that hold the most first, each device's largest first. */
+        std::sort(lines.begin(), lines.end(), [](const Line& a, const Line& b) {
+            if (a.device_bytes != b.device_bytes) return a.device_bytes > b.device_bytes;
+            if (a.device != b.device) return a.device < b.device;
+            return a.allocation.bytes > b.allocation.bytes;
+        });
+        char line[160];
+        std::snprintf(line, sizeof(line),
+                      "# %zu allocations on %zu guest devices, %.1f MiB. Each line is one "
+                      "vkAllocateMemory on a guest process's device.\n",
+                      lines.size(), held.size(), total / 1048576.0);
+        text += line;
+        text += "device\tprocess\tkind\tbytes\tmemory_type\ttype_flags\tdedicated\twhy\n";
+        for (const Line& entry : lines) {
+            const auto process = s_device_process.find(entry.device);
+            const std::string label = process != s_device_process.end()
+                                          ? process_label_locked(process->second)
+                                          : std::string("?");
+            const char* kind = entry.allocation.kind == Kind::DeviceLocal   ? "GPU-only"
+                               : entry.allocation.kind == Kind::HostVisible ? "CPU-mapped"
+                               : entry.allocation.import == Import::Grant   ? "imported grant"
+                                                                            : "imported";
+            dsa::AllocationRecord record;
+            record.bytes = entry.allocation.bytes;
+            record.memoryType = entry.allocation.memory_type;
+            record.typeFlags = entry.allocation.memory_type < s_types.memoryTypeCount
+                                   ? s_types.memoryTypes[entry.allocation.memory_type].propertyFlags
+                                   : 0;
+            record.dedicated = entry.allocation.dedicated;
+            record.why = entry.allocation.why;
+            std::snprintf(line, sizeof(line), "%p\t", static_cast<void*>(entry.device));
+            text += line;
+            text += label + "\t" + kind + "\t" + dsa::allocationColumns(record) + "\n";
         }
     }
     if (out && capacity > 0) {

@@ -1,0 +1,167 @@
+Subject: ActivityRecord: give a task marked for forced system scaling a new density without a relaunch
+
+DSA gives a task the density of the host monitor its window is on. Android relaunches an
+activity whose configuration changes in a way its manifest's configChanges does not declare, and
+most apps do not declare density: such an app restarts when its window moves to a monitor of
+another scale, so it loses what the user was doing and shows its starting window again. DSA
+therefore keeps such an app at the density it started at and scales its window (system scaling).
+A user may set an app to forced system scaling instead, to have it drawn sharp at the new
+monitor's density without the restart.
+
+A task gets a mark (Task.mDsaForcedDensity), which the window manager's shell command
+"dsa-forced-density <TASK_ID> true|false" sets and takes away; the DSA agent, which holds
+MANAGE_ACTIVITY_TASKS, sets it for the task of an app the user set to forced system scaling.
+Without arguments the command prints "supported", which is how the agent tells an image with this
+change from one without it. When the density of a marked task's activity changes,
+shouldRelaunchLocked treats the changes a change of density brings (density, screen size,
+smallest screen size and screen layout) as handled by the activity, so it is not relaunched: it
+keeps its state, and its resources and windows take the new density. Its onConfigurationChanged
+is not called, since the app's process (the published framework.jar) calls it only for changes the
+manifest declares. Any other change still relaunches the activity, and nothing changes for an
+unmarked task: no task is marked unless the user sets its app to forced system scaling.
+
+Applies to frameworks/base at 45034f0663f960d9ee5fb0a101a4732b71f6e2f4 (Android 16).
+---
+diff --git a/services/core/java/com/android/server/wm/ActivityRecord.java b/services/core/java/com/android/server/wm/ActivityRecord.java
+--- a/services/core/java/com/android/server/wm/ActivityRecord.java
++++ b/services/core/java/com/android/server/wm/ActivityRecord.java
+@@ -8701,9 +8701,55 @@ final class ActivityRecord extends WindowToken {
+         configChanged |= mAppCompatController.getDisplayCompatModePolicy()
+                 .getDisplayCompatModeConfigMask();
+ 
++        // DSA: a task marked for forced system scaling takes a new density without a relaunch.
++        configChanged |= dsaForcedDensityMask(changes);
++
+         return (changes & (~configChanged)) != 0;
+     }
+ 
++    // DSA: what a change of density alone changes in an activity's configuration. The same
++    // pixels at another density are another size in dp, so the screen's size, its smallest
++    // width and the screen layout's size class change with the density.
++    static final int DSA_DENSITY_CHANGES = ActivityInfo.CONFIG_DENSITY | CONFIG_SCREEN_SIZE
++            | CONFIG_SMALLEST_SCREEN_SIZE | CONFIG_SCREEN_LAYOUT;
++
++    /**
++     * DSA: the changes shouldRelaunchLocked treats as handled by this activity although its
++     * manifest does not say so: those of a change of density ({@link #DSA_DENSITY_CHANGES}),
++     * when the density changes and the activity's task is marked for forced system scaling
++     * (Task.mDsaForcedDensity). The activity is then not relaunched: it keeps its state and
++     * shows no starting window, and its resources and windows take the new density. Its
++     * onConfigurationChanged is not called, since the app's own process (the published
++     * framework.jar) calls it only for changes the manifest declares, so a view that keeps a
++     * size it read at the old density keeps it until the app reads it again. That is why the
++     * user picks this per app. Any other change in the same configuration still relaunches the
++     * activity, and so does every change for an unmarked task.
++     */
++    private int dsaForcedDensityMask(int changes) {
++        return dsaForcedDensityMask(changes, dsaForcedDensity());
++    }
++
++    /** DSA: {@link #dsaForcedDensityMask(int)} for a task that is marked or not. */
++    static int dsaForcedDensityMask(int changes, boolean forced) {
++        if (!forced || (changes & ActivityInfo.CONFIG_DENSITY) == 0) {
++            return 0;
++        }
++        return DSA_DENSITY_CHANGES;
++    }
++
++    /** DSA: whether this activity's task, or the root task it is in, is marked. */
++    private boolean dsaForcedDensity() {
++        final Task leaf = task;
++        if (leaf == null) {
++            return false;
++        }
++        if (leaf.mDsaForcedDensity) {
++            return true;
++        }
++        final Task root = leaf.getRootTask();
++        return root != null && root.mDsaForcedDensity;
++    }
++
+     /**
+      * Returns true if the configuration change is solely due to the UI mode switching into or out
+      * of UI_MODE_TYPE_VR_HEADSET.
+diff --git a/services/core/java/com/android/server/wm/Task.java b/services/core/java/com/android/server/wm/Task.java
+--- a/services/core/java/com/android/server/wm/Task.java
++++ b/services/core/java/com/android/server/wm/Task.java
+@@ -489,6 +489,14 @@ class Task extends TaskFragment {
+      */
+     boolean mReparentLeafTaskIfRelaunch;
+ 
++    /**
++     * DSA: set while a change of density alone does not relaunch this task's activities
++     * (ActivityRecord.dsaForcedDensityMask). The DSA agent sets it through the window manager's
++     * shell command dsa-forced-density, for the task of an app the user set to forced system
++     * scaling. It ends with the task.
++     */
++    boolean mDsaForcedDensity;
++
+     /**
+      * Set to affect whether recents should be able to trim this task or not. It's set to true by
+      * default.
+diff --git a/services/core/java/com/android/server/wm/WindowManagerShellCommand.java b/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
+--- a/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
++++ b/services/core/java/com/android/server/wm/WindowManagerShellCommand.java
+@@ -162,6 +162,9 @@ public class WindowManagerShellCommand extends ShellCommand {
+                     return runSetDisplayWindowingMode(pw);
+                 case "get-display-windowing-mode":
+                     return runGetDisplayWindowingMode(pw);
++                // DSA: whether a change of density alone relaunches a task's activities.
++                case "dsa-forced-density":
++                    return runDsaForcedDensity(pw);
+                 case "shell":
+                     return runWmShellCommand(pw);
+                 default:
+@@ -1506,6 +1509,52 @@ public class WindowManagerShellCommand extends ShellCommand {
+         return 0;
+     }
+ 
++    /**
++     * DSA: marks a task so that a change of density alone does not relaunch its activities
++     * (ActivityRecord.dsaForcedDensityMask), or takes the mark away.
++     *
++     *     dsa-forced-density                         prints "supported"
++     *     dsa-forced-density <TASK_ID> true|false
++     *
++     * The DSA agent marks the task of an app the user set to forced system scaling before it
++     * gives the task the density of the monitor its window moved to, and takes the mark away
++     * when the user picks another scaling. Without arguments the command only answers, which
++     * tells the agent this framework has the change: one without it answers "Unknown command".
++     * The mark is a field of the task, so it ends with the task. The caller needs
++     * MANAGE_ACTIVITY_TASKS, as for any other change to a task's configuration.
++     */
++    private int runDsaForcedDensity(PrintWriter pw) {
++        mInternal.mContext.enforceCallingOrSelfPermission(
++                android.Manifest.permission.MANAGE_ACTIVITY_TASKS, "dsa-forced-density");
++        final String taskArg = getNextArg();
++        if (taskArg == null) {
++            pw.println("supported");
++            return 0;
++        }
++        final String valueArg = getNextArg();
++        final int taskId;
++        try {
++            taskId = Integer.parseInt(taskArg);
++        } catch (NumberFormatException e) {
++            getErrPrintWriter().println("Error: bad task id " + taskArg);
++            return -1;
++        }
++        if (!"true".equals(valueArg) && !"false".equals(valueArg)) {
++            getErrPrintWriter().println("Error: expected true or false, not " + valueArg);
++            return -1;
++        }
++        synchronized (mInternal.mGlobalLock) {
++            final Task task = mInternal.mRoot.anyTaskForId(taskId,
++                    RootWindowContainer.MATCH_ATTACHED_TASK_ONLY);
++            if (task == null) {
++                getErrPrintWriter().println("Error: no task " + taskId);
++                return -1;
++            }
++            task.mDsaForcedDensity = "true".equals(valueArg);
++        }
++        return 0;
++    }
++
+     private int runWmShellCommand(PrintWriter pw) {
+         final String[] args = peekRemainingArgs();
+         ArrayList<String> sbArgs = new ArrayList<>();

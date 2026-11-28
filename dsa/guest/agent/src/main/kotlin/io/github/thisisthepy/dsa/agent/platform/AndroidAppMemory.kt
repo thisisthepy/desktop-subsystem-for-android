@@ -35,6 +35,30 @@ class AndroidAppMemory(private val context: Context) : AppMemoryPort {
 
     override fun trimDone(): String = get("$TRIM.done")
 
+    /**
+     * Asks the activity manager's dsa-hidden-trim shell command, which DSA's framework adds, to
+     * answer. A framework without that change answers "Unknown command", which [serviceShell]
+     * turns into a failure.
+     */
+    override fun hiddenTrimSupported(): Boolean = try {
+        serviceShell(ACTIVITY_SERVICE, HIDDEN_TRIM_COMMAND) == "supported"
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Sets the apps the host hides through the activity manager's dsa-hidden-trim shell command
+     * (`cmd activity dsa-hidden-trim hidden [PACKAGE...]`), which needs the
+     * MANAGE_ACTIVITY_TASKS permission the agent holds. The trim script, which runs as the
+     * shell, then sends them their trims with `cmd activity dsa-hidden-trim send`.
+     */
+    override fun setHiddenApps(packages: Set<String>): Boolean = try {
+        serviceShell(ACTIVITY_SERVICE, HIDDEN_TRIM_COMMAND, "hidden", *packages.sorted().toTypedArray())
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     override fun requestCompile(value: String) = set(COMPILE, value)
 
     override fun compileDone(): String = get("$COMPILE.done")
@@ -103,5 +127,10 @@ class AndroidAppMemory(private val context: Context) : AppMemoryPort {
         const val PREFERENCES = "compiled-apps"
         const val NAMESPACE = "activity_manager"
         const val USE_COMPACTION = "use_compaction"
+
+        // Context.ACTIVITY_SERVICE, the activity manager's binder, and the shell command DSA's
+        // framework adds to it.
+        const val ACTIVITY_SERVICE = "activity"
+        const val HIDDEN_TRIM_COMMAND = "dsa-hidden-trim"
     }
 }

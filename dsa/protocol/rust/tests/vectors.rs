@@ -8,19 +8,21 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use dsa_protocol::control::DisplaySize;
 use dsa_protocol::control::{
     envelope::Body, AccessibilityAction, AccessibilityActionResult, AccessibilityAnnouncement,
     AccessibilityListening, AccessibilityNode, AccessibilityTree, AccessibilityWatch,
     AgentConnected, ApkChunk, AppInfo, AuthChallenge, AuthProof, CancelInstall, ClipboardImage,
-    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope, FileAction, FileChunk,
-    FileProgress, GuestBoot, GuestMemory, GuestNotification, Hello, HelloAccepted, HelloRejected,
-    ImeCommit, ImeComposition, ImeCursor, ImeEditor, ImeInputKind, ImeSetComposingRegion,
-    ImeSetSelection, InstallApk, InstallPart, InstallProgress, InstallResult, InstallStatus,
-    KeyAction, KeyEvent, LaunchApp, LinkHandling, NodeAction, NodeRange, NotificationClicked,
-    NotificationDismissed, NotificationRemoved, OpenFile, OpenLink, PackageState, PointerAction,
-    PointerEvent, PointerTool, PowerHint, PowerHintKind, PowerState, ProcessMemory, QueryPackage,
-    Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity,
-    TaskFrames, TaskRemoved, TaskUpdated,
+    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope,
+    FileAction, FileChunk, FileProgress, GuestBoot, GuestMemory, GuestNotification, Hello,
+    HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, ImeEditor, ImeInputKind,
+    ImeSetComposingRegion, ImeSetSelection, InstallApk, InstallPart, InstallProgress,
+    InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp, LinkHandling, NodeAction,
+    NodeRange, NotificationClicked, NotificationDismissed, NotificationRemoved, OpenFile, OpenLink,
+    PackageState, PointerAction, PointerEvent, PointerTool, PowerHint, PowerHintKind, PowerState,
+    ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory, RequestTaskFrame,
+    ResizeTask, Role, ScreenState, SetOverlayDensity, SetTaskDensity, TaskFrames, TaskRemoved,
+    TaskUpdated,
 };
 use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, ReconfigureWidget, RemoveWidget, ResizeWidget, WidgetAdded,
@@ -171,6 +173,14 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             })),
         ),
         (
+            "task_updated_forced_density",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 42,
+                forced_density_available: true,
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
             "resize_task",
             wrap(Body::ResizeTask(ResizeTask {
                 task_id: 42,
@@ -185,6 +195,42 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 task_id: 42,
                 density_dpi: 240,
                 recreate: false,
+                forced: false,
+            })),
+        ),
+        (
+            "set_task_density_forced",
+            wrap(Body::SetTaskDensity(SetTaskDensity {
+                task_id: 42,
+                density_dpi: 240,
+                recreate: false,
+                forced: true,
+            })),
+        ),
+        (
+            "set_overlay_density",
+            wrap(Body::SetOverlayDensity(SetOverlayDensity {
+                overlay_id: 0x4000_0001,
+                density_dpi: 262,
+            })),
+        ),
+        (
+            "set_overlay_density_back",
+            wrap(Body::SetOverlayDensity(SetOverlayDensity {
+                overlay_id: 0x4000_0001,
+                density_dpi: 0,
+            })),
+        ),
+        (
+            "task_updated_overlay_density",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 0x4000_0001,
+                overlay: Some(dsa_protocol::control::OverlayWindow {
+                    window_type: 2038,
+                    density_dpi: 262,
+                    ..dsa_protocol::control::OverlayWindow::default()
+                }),
+                ..TaskUpdated::default()
             })),
         ),
         (
@@ -219,6 +265,7 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                     window_type: 2038,
                     focusable: false,
                     touchable: true,
+                    density_dpi: 0,
                 }),
                 ..TaskUpdated::default()
             })),
@@ -370,6 +417,17 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "close_task",
             wrap(Body::CloseTask(CloseTask { task_id: 42 })),
+        ),
+        (
+            "request_task_frame",
+            wrap(Body::RequestTaskFrame(RequestTaskFrame { task_id: 42 })),
+        ),
+        (
+            "display_size",
+            wrap(Body::DisplaySize(DisplaySize {
+                width: 4096,
+                height: 4096,
+            })),
         ),
         (
             "launch_app",
@@ -941,6 +999,7 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             "list_widget_providers",
             wrap(Body::ListWidgetProviders(ListWidgetProviders {
                 request_id: 7,
+                lazy_previews: false,
             })),
         ),
         (
@@ -949,6 +1008,7 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 request_id: 7,
                 providers: vec![clock_provider()],
                 complete: true,
+                app_icons: Vec::new(),
             })),
         ),
         (

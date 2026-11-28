@@ -7,6 +7,7 @@
 #include <string>
 
 #include "ExtendedRenderControl.h"
+#include "dsa_compose_guard.h"
 #include "dsa_graphics_memory.h"
 #include "dsa_graphics_memory_device.h"
 #include "dsa_shared_color_buffer.h"
@@ -103,6 +104,7 @@ void HostRenderer::adopt(ConnectionPtr connection) {
     mConnection = std::move(connection);
     ++mGeneration;
     mHostYuv = -1;
+    mHostGuardsTargets = -1;
     // Until the new host says it composes YUV layers, SurfaceFlinger draws them.
     setHostComposesYuv(false);
 }
@@ -122,6 +124,21 @@ bool HostRenderer::hostHasYuv() {
         HWC_LOGI("the host renderer %s video layers itself", composes ? "composes" : "does not compose");
     }
     return mHostYuv == 1;
+}
+
+bool HostRenderer::hostGuardsComposeTargets() {
+    if (mHostGuardsTargets < 0 && connected()) {
+        ExtendedRCEncoderContext* rc = mConnection->encoder.get();
+        mHostGuardsTargets =
+            rc->queryHostExtensions().find(DSA_COMPOSE_GUARD_EXTENSION) != std::string::npos ? 1
+                                                                                             : 0;
+        HWC_LOGI("the host renderer %s; each task's frames are composed into %s",
+                 mHostGuardsTargets ? "waits for a window's copy before composing into its buffer"
+                                    : "does not wait for a window's copy before composing",
+                 mHostGuardsTargets ? "one ColorBuffer while its window keeps up"
+                                    : "two ColorBuffers in turn");
+    }
+    return mHostGuardsTargets == 1;
 }
 
 bool HostRenderer::uploadColorBuffer(uint32_t colorBuffer, const dsa::UploadLayout& layout,
@@ -280,15 +297,22 @@ void HostRenderer::destroyDisplay(uint32_t displayId) {
     }
 }
 
-bool HostRenderer::compose(const std::vector<uint8_t>& request) {
+ComposeResult HostRenderer::compose(const std::vector<uint8_t>& request) {
     if (!connected()) {
-        return false;
+        return ComposeResult::Failed;
     }
     ExtendedRCEncoderContext* rc = mConnection->encoder.get();
-    // The host answers whether it composed: 1 when it did, 0 or -1 when it did not.
+    // The host answers whether it composed: 1 when it did, 0 or -1 when it did not, and
+    // DSA_COMPOSE_TARGET_BUSY when the target's last frame was still being copied.
     const int result = rc->rcComposeWithoutPost(rc, static_cast<uint32_t>(request.size()),
                                                const_cast<uint8_t*>(request.data()));
-    return result > 0 && connected();
+    if (!connected()) {
+        return ComposeResult::Failed;
+    }
+    if (result == DSA_COMPOSE_TARGET_BUSY) {
+        return ComposeResult::TargetBusy;
+    }
+    return result > 0 ? ComposeResult::Composed : ComposeResult::Failed;
 }
 
 void HostRenderer::post(uint32_t displayId, uint32_t colorBuffer) {

@@ -124,9 +124,13 @@ fn nfr2_memory_growth_sets_the_virtio_mem_request() {
     let (base, max) = launcher.memory_range_mb().unwrap();
     let mut growth = MemoryGrowth::new(base, max);
     let start = Instant::now();
-    // Short of memory: grow to what the guest uses plus 768 MiB of headroom, and at least
-    // 512 MiB, here 512 MiB of the virtio-mem region.
-    let Some(GrowthAction::Resize(mb)) = growth.on_pressure(&pressure(1900, 200), start) else {
+    // Short of memory with its tasks waiting on it: grow to what the guest uses plus 768 MiB of
+    // headroom, and at least 512 MiB, here 512 MiB of the virtio-mem region.
+    let stalled = GuestPressure {
+        stall_percent: 12.0,
+        ..pressure(1900, 200)
+    };
+    let Some(GrowthAction::Resize(mb)) = growth.on_pressure(&stalled, start) else {
         panic!("a guest short of memory did not grow");
     };
     assert_eq!(mb, 2560);

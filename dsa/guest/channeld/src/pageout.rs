@@ -17,10 +17,15 @@
 //! [`VISIBLE_APP_ADJ`]), and otherwise one at perceptible importance or lower
 //! (`oom_score_adj` [`PERCEPTIBLE_APP_ADJ`] and up). Google Play services' processes, which
 //! other apps and the system bind and so often sit just above perceptible without anything to
-//! show, are taken from [`VISIBLE_APP_ADJ`] up. Each process is paged out at most every
-//! [`PageoutPolicy::min_interval`], only after it has grown by [`PageoutPolicy::min_growth_kb`]
-//! since the last time, and one process at most per look, so the daemon never competes with
-//! the apps for the CPU.
+//! show, are taken from [`VISIBLE_APP_ADJ`] up. The system's resident services (the extension
+//! services, the media provider and the network stack, [`is_resident_service`]) are taken at
+//! any importance: the system keeps them bound or persistent, and they show nothing. Each
+//! process is paged out at most every [`PageoutPolicy::min_interval`] (a resident service every
+//! [`PageoutPolicy::resident_min_interval`]), only after it has grown by
+//! [`PageoutPolicy::min_growth_kb`] since the last time, and one process at most per look, so
+//! the daemon never competes with the apps for the CPU. A process that reads back all a
+//! pageout took at its next wake waits twice as long for the next, up to
+//! [`PageoutPolicy::max_interval`]: those are the pages it touches on every wake.
 //!
 //! Never a process that is exiting (state `X` or `Z`, or no address space left): paging out
 //! the memory of a process the kernel is tearing down raced with its exit, and the kernel then
@@ -101,6 +106,31 @@ pub fn is_google_play(name: &str) -> bool {
         || base.starts_with("com.google.process.")
 }
 
+/// The network stack's user (`AID_NETWORK_STACK`): its process is a resident service
+/// ([`is_resident_service`]) that runs under this system user rather than an app's.
+pub const NETWORK_STACK_UID: u32 = 1073;
+
+/// The process names, before any `:`, of the system's resident services: the extension services
+/// (notification assistant, text classifier, autofill suggestions), the media provider (the
+/// shared storage's file system and database) and the network stack. The system keeps them
+/// running for good, bound or persistent, so they sit at an importance (`oom_score_adj` 100,
+/// -700 and -800 on the owner's PC) that no other process is paged out at. They have no window
+/// and nothing to draw, and between the system's calls they sleep like Google Play services.
+const RESIDENT_SERVICES: &[&str] = &[
+    "android.ext.services",
+    "com.google.android.ext.services",
+    "com.android.providers.media.module",
+    "com.google.android.providers.media.module",
+    "com.android.networkstack.process",
+];
+
+/// Whether a process of this name is one of the system's resident services, paged out after
+/// it wakes whatever its importance.
+pub fn is_resident_service(name: &str) -> bool {
+    let base = name.split(':').next().unwrap_or("");
+    RESIDENT_SERVICES.contains(&base)
+}
+
 /// Whether a process of this name runs the code of one of `packages` (those with a task
 /// window open): Android names an app's processes after its package, its other processes
 /// `<package>:<name>` or `<package>.<name>`.
@@ -119,6 +149,9 @@ pub fn eligible(sample: &ProcessSample, windows: &BTreeSet<String>) -> bool {
     if sample.exiting {
         return false;
     }
+    if is_resident_service(&sample.name) {
+        return !has_window(&sample.name, windows);
+    }
     if sample.uid % PER_USER_RANGE < FIRST_APPLICATION_UID {
         return false;
     }
@@ -135,11 +168,24 @@ pub struct PageoutPolicy {
     pub quiet: Duration,
     /// The least time between two pageouts of one process.
     pub min_interval: Duration,
+    /// The same for a resident service ([`is_resident_service`]). The system calls on them for
+    /// the apps in use (a file opened in shared storage, a text selection, a network change), so
+    /// what one pageout takes may be wanted again soon; five minutes keeps a busy one from being
+    /// paged out and read back every half minute.
+    pub resident_min_interval: Duration,
     /// How much its resident anonymous memory must have grown since the last pageout, in KiB:
     /// below it the wake brought too little back to be worth a pageout.
     pub min_growth_kb: u64,
     /// The most processes paged out at one look.
     pub per_look: usize,
+    /// The longest a process's wait between two pageouts grows to. A process that reads back
+    /// all a pageout took (nine tenths or more of it) at its next wake touches those pages on
+    /// every wake: paging them out again only makes it read them from zram once more. So its
+    /// wait doubles each time, from `min_interval` (or `resident_min_interval`) up to this, and
+    /// goes back to the start after a pageout of which less comes back. On the owner's PC
+    /// (1.0.1-dev.39) Google Play services was paged out from 9 to 6 MiB after six of its wakes
+    /// in ten minutes, and read the same 3 MiB back each time.
+    pub max_interval: Duration,
 }
 
 impl Default for PageoutPolicy {
@@ -147,8 +193,10 @@ impl Default for PageoutPolicy {
         PageoutPolicy {
             quiet: QUIET_AFTER_WAKE,
             min_interval: Duration::from_secs(30),
+            resident_min_interval: Duration::from_secs(5 * 60),
             min_growth_kb: 2 * 1024,
             per_look: 1,
+            max_interval: Duration::from_secs(16 * 60),
         }
     }
 }
@@ -164,6 +212,15 @@ struct Tracked {
     /// Its resident anonymous memory just after the last pageout, in KiB.
     rss_after_kb: u64,
     last_pageout: Option<Duration>,
+    /// Its resident anonymous memory when the last pageout was chosen, in KiB.
+    rss_before_kb: u64,
+    /// What the last pageout took, in KiB ([`Pageout::paged`]); 0 until it is known.
+    took_kb: u64,
+    /// Nearly all the last pageout took has come back, and its wait has doubled for it.
+    came_back: bool,
+    /// Its wait between two pageouts now, once it has grown past the policy's
+    /// ([`PageoutPolicy::max_interval`]).
+    interval: Option<Duration>,
 }
 
 /// Decides, at each look, which quiet process to page out.
@@ -171,6 +228,8 @@ struct Tracked {
 pub struct Pageout {
     policy: PageoutPolicy,
     tracked: BTreeMap<i32, Tracked>,
+    /// The resident services are left alone: the policy refused a pageout of one.
+    residents_stopped: bool,
 }
 
 impl Pageout {
@@ -178,7 +237,15 @@ impl Pageout {
         Pageout {
             policy,
             tracked: BTreeMap::new(),
+            residents_stopped: false,
         }
+    }
+
+    /// Leaves the resident services ([`is_resident_service`]) alone from now on: the kernel or
+    /// the policy refused to page one out. They run under other users and SELinux domains than
+    /// the apps, so a refusal for them says nothing about the apps, which go on being paged out.
+    pub fn stop_resident_services(&mut self) {
+        self.residents_stopped = true;
     }
 
     /// Takes in a look at `now` (any monotonic clock) at the processes in `samples`, with
@@ -207,25 +274,54 @@ impl Pageout {
                 woke: true,
                 rss_after_kb: 0,
                 last_pageout: None,
+                rss_before_kb: 0,
+                took_kb: 0,
+                came_back: false,
+                interval: None,
             });
             if sample.cpu_ticks != tracked.cpu_ticks {
                 tracked.cpu_ticks = sample.cpu_ticks;
                 tracked.last_active = now;
                 tracked.woke = true;
             }
+            let resident = is_resident_service(&sample.name);
+            let base_interval = if resident {
+                self.policy.resident_min_interval
+            } else {
+                self.policy.min_interval
+            };
+            let grown_kb = sample.rss_anon_kb.saturating_sub(tracked.rss_after_kb);
+            if !tracked.came_back
+                && tracked.took_kb > 0
+                && grown_kb.saturating_mul(10) >= tracked.took_kb.saturating_mul(9)
+            {
+                // It read back (nearly) all the last pageout took: the next one waits longer.
+                tracked.came_back = true;
+                tracked.interval = Some(
+                    tracked
+                        .interval
+                        .unwrap_or(base_interval)
+                        .saturating_mul(2)
+                        .min(self.policy.max_interval)
+                        .max(base_interval),
+                );
+            }
             if !tracked.woke || !eligible(sample, windows) {
+                continue;
+            }
+            if resident && self.residents_stopped {
                 continue;
             }
             if now.saturating_sub(tracked.last_active) < self.policy.quiet {
                 continue;
             }
+            let min_interval = tracked.interval.unwrap_or(base_interval);
             if tracked
                 .last_pageout
-                .is_some_and(|at| now.saturating_sub(at) < self.policy.min_interval)
+                .is_some_and(|at| now.saturating_sub(at) < min_interval)
             {
                 continue;
             }
-            let grown_kb = sample.rss_anon_kb.saturating_sub(tracked.rss_after_kb);
             if grown_kb < self.policy.min_growth_kb {
                 // The wake brought little back: nothing to do until the next one.
                 tracked.woke = false;
@@ -244,19 +340,44 @@ impl Pageout {
         due.truncate(self.policy.per_look);
         for target in &due {
             if let Some(tracked) = self.tracked.get_mut(&target.pid) {
+                if tracked.took_kb > 0 && !tracked.came_back {
+                    // Less of the last pageout came back than it took: it lasted, and the wait
+                    // starts over.
+                    tracked.interval = None;
+                }
                 tracked.woke = false;
                 tracked.last_pageout = Some(now);
+                tracked.rss_before_kb = tracked.rss_after_kb.saturating_add(target.grown_kb);
+                tracked.took_kb = 0;
+                tracked.came_back = false;
             }
         }
         due
     }
 
     /// The process `pid` was paged out and keeps `rss_anon_kb` resident: the next pageout waits
-    /// until it has grown past that again.
+    /// until it has grown past that again, and longer if it reads all of it back
+    /// ([`PageoutPolicy::max_interval`]).
     pub fn paged(&mut self, pid: i32, rss_anon_kb: u64) {
         if let Some(tracked) = self.tracked.get_mut(&pid) {
+            tracked.took_kb = tracked.rss_before_kb.saturating_sub(rss_anon_kb);
             tracked.rss_after_kb = rss_anon_kb;
         }
+    }
+
+    /// How long `pid` now waits between two pageouts, for the log: longer than the policy's
+    /// while it keeps reading back all a pageout takes. `None` for a process not tracked.
+    pub fn interval(&self, pid: i32) -> Option<Duration> {
+        let tracked = self.tracked.get(&pid)?;
+        Some(
+            tracked
+                .interval
+                .unwrap_or(if is_resident_service(&tracked.name) {
+                    self.policy.resident_min_interval
+                } else {
+                    self.policy.min_interval
+                }),
+        )
     }
 }
 
@@ -282,6 +403,10 @@ pub fn skip_reason(target: &Target, now: &Recheck) -> Option<String> {
         ));
     }
     let adj = now.oom_score_adj;
+    if is_resident_service(&target.name) {
+        // Taken at any importance: it is the system's, with nothing on screen.
+        return None;
+    }
     if adj < VISIBLE_APP_ADJ || (!target.google_play && adj < PERCEPTIBLE_APP_ADJ) {
         return Some(format!(
             "{} became more important (oom_score_adj {adj})",
@@ -394,7 +519,7 @@ pub mod system {
 
     use super::{anonymous_ranges, cpu_ticks, is_exiting, skip_reason, ProcessSample, Recheck};
     use super::{Status, Target};
-    use super::{FIRST_APPLICATION_UID, PER_USER_RANGE};
+    use super::{FIRST_APPLICATION_UID, NETWORK_STACK_UID, PER_USER_RANGE};
 
     /// The system call numbers, the same on every architecture since Linux 5.1.
     const SYS_PIDFD_OPEN: libc::c_long = 434;
@@ -403,8 +528,9 @@ pub mod system {
     /// The most ranges one `process_madvise` takes (`UIO_MAXIOV`).
     const MOST_RANGES: usize = 1024;
 
-    /// The app processes now. A process is an app's when the folder its `/proc` entry is owned
-    /// by an app's UID, which the daemon reads without opening anything; only those are read.
+    /// The app processes now, and the network stack's. A process is an app's when the folder its
+    /// `/proc` entry is owned by an app's UID, which the daemon reads without opening anything;
+    /// only those, and the ones owned by the network stack's user, are read.
     pub fn samples() -> std::io::Result<Vec<ProcessSample>> {
         let mut samples = Vec::new();
         for entry in std::fs::read_dir("/proc")?.flatten() {
@@ -415,7 +541,9 @@ pub mod system {
             let Ok(metadata) = entry.metadata() else {
                 continue;
             };
-            if metadata.uid() % PER_USER_RANGE < FIRST_APPLICATION_UID {
+            if metadata.uid() % PER_USER_RANGE < FIRST_APPLICATION_UID
+                && metadata.uid() != NETWORK_STACK_UID
+            {
                 continue;
             }
             let dir = entry.path();

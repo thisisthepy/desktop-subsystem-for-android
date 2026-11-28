@@ -54,7 +54,20 @@ enum class WriteResult {
     NotCopied,
     // The unlock failed, so the writes may not have reached the buffer.
     NotUnlocked,
+    // The picture has a part its decoder never wrote (holdsNoPicture): zeros, solid green.
+    NotDecoded,
 };
+
+// The luma rows holdsNoPicture looks at: every eighth, and the last.
+constexpr uint32_t kBlankRowStep = 8;
+
+// Whether the `width` by `height` NV12 picture in `nv12` has a part its decoder never wrote: a
+// luma row of zeros over a chroma row of zeros, among every kBlankRowStep-th row and the last.
+// No encoder makes such a row (luma 0 with Cb and Cr 0 lies outside every colour range; black
+// is chroma 128), but it is what a decoder's surface holds before a picture is decoded into
+// it, and it shows as solid green. False for a picture shorter than its size, which the copy
+// refuses on its own.
+bool holdsNoPicture(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride);
 
 // The size of a buffer the allocator gave.
 struct BufferSize {
@@ -69,7 +82,8 @@ using UnlockPlanes = std::function<bool()>;
 
 // Writes the `width` by `height` NV12 picture in `nv12` into a buffer of `buffer`'s size,
 // every sample of it (past the picture, the picture's edge). A buffer that was locked is
-// always unlocked.
+// always unlocked. A picture with a part never decoded is not written at all (NotDecoded), so
+// the buffer goes back and the surface keeps showing the last good picture.
 WriteResult writePicture(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride,
                          const BufferSize& buffer, const LockPlanes& lock, const UnlockPlanes& unlock);
 

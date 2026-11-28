@@ -51,7 +51,7 @@ class SharedColorBufferDropPatchTests(unittest.TestCase):
                 self.assertTrue(line[:1] in (" ", "+", "-"), repr(line))
 
     def test_fr4_the_fetch_applies_0044_after_0043(self):
-        self.assertIn(" 0043 0044;", read(HOST / "fetch.sh"))
+        self.assertIn(" 0043 0044 ", read(HOST / "fetch.sh"))
         self.assertIn('-Filter "0044-*.patch"', read(HOST / "fetch.ps1"))
 
 

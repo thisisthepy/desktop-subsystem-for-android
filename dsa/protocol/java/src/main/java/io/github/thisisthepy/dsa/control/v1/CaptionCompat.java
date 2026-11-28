@@ -13,6 +13,14 @@ package io.github.thisisthepy.dsa.control.v1;
  * before. It counts when a task starts: a task that runs already keeps what it started
  * with, because an app may read its insets once per screen. The host sends it when it
  * connects and whenever the list changes.
+ * keep_focus: the apps the user set to keep game focus. While a task of one of these
+ * packages stays resumed (its window is visible), its app is not told that it lost the focus
+ * to another app's window: no onTopResumedActivityChanged(false) and no
+ * onWindowFocusChanged(false), so a game that pauses on either keeps running. Keys and IME
+ * text still go only to the window that has the focus. The agent gives the list to the
+ * framework (the window manager's shell command dsa-keep-focus), where it counts at once; an
+ * image whose framework lacks that change ignores it. Empty, the default, keeps every app as
+ * before.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.CaptionCompat}
@@ -24,6 +32,7 @@ public  final class CaptionCompat extends
     CaptionCompatOrBuilder {
   private CaptionCompat() {
     belowTitleBar_ = com.google.protobuf.GeneratedMessageLite.emptyProtobufList();
+    keepFocus_ = com.google.protobuf.GeneratedMessageLite.emptyProtobufList();
   }
   public static final int BELOW_TITLE_BAR_FIELD_NUMBER = 1;
   private com.google.protobuf.Internal.ProtobufList<java.lang.String> belowTitleBar_;
@@ -118,6 +127,99 @@ public  final class CaptionCompat extends
     belowTitleBar_.add(value.toStringUtf8());
   }
 
+  public static final int KEEP_FOCUS_FIELD_NUMBER = 2;
+  private com.google.protobuf.Internal.ProtobufList<java.lang.String> keepFocus_;
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @return A list containing the keepFocus.
+   */
+  @java.lang.Override
+  public java.util.List<java.lang.String> getKeepFocusList() {
+    return keepFocus_;
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @return The count of keepFocus.
+   */
+  @java.lang.Override
+  public int getKeepFocusCount() {
+    return keepFocus_.size();
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param index The index of the element to return.
+   * @return The keepFocus at the given index.
+   */
+  @java.lang.Override
+  public java.lang.String getKeepFocus(int index) {
+    return keepFocus_.get(index);
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param index The index of the value to return.
+   * @return The bytes of the keepFocus at the given index.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getKeepFocusBytes(int index) {
+    return com.google.protobuf.ByteString.copyFromUtf8(
+        keepFocus_.get(index));
+  }
+  private void ensureKeepFocusIsMutable() {
+    com.google.protobuf.Internal.ProtobufList<java.lang.String> tmp =
+        keepFocus_;  if (!tmp.isModifiable()) {
+      keepFocus_ =
+          com.google.protobuf.GeneratedMessageLite.mutableCopy(tmp);
+     }
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param index The index to set the value at.
+   * @param value The keepFocus to set.
+   */
+  private void setKeepFocus(
+      int index, java.lang.String value) {
+    java.lang.Class<?> valueClass = value.getClass();
+  ensureKeepFocusIsMutable();
+    keepFocus_.set(index, value);
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param value The keepFocus to add.
+   */
+  private void addKeepFocus(
+      java.lang.String value) {
+    java.lang.Class<?> valueClass = value.getClass();
+  ensureKeepFocusIsMutable();
+    keepFocus_.add(value);
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param values The keepFocus to add.
+   */
+  private void addAllKeepFocus(
+      java.lang.Iterable<java.lang.String> values) {
+    ensureKeepFocusIsMutable();
+    com.google.protobuf.AbstractMessageLite.addAll(
+        values, keepFocus_);
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   */
+  private void clearKeepFocus() {
+    keepFocus_ = com.google.protobuf.GeneratedMessageLite.emptyProtobufList();
+  }
+  /**
+   * <code>repeated string keep_focus = 2;</code>
+   * @param value The bytes of the keepFocus to add.
+   */
+  private void addKeepFocusBytes(
+      com.google.protobuf.ByteString value) {
+    checkByteStringIsUtf8(value);
+    ensureKeepFocusIsMutable();
+    keepFocus_.add(value.toStringUtf8());
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.CaptionCompat parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -209,6 +311,14 @@ public  final class CaptionCompat extends
    * before. It counts when a task starts: a task that runs already keeps what it started
    * with, because an app may read its insets once per screen. The host sends it when it
    * connects and whenever the list changes.
+   * keep_focus: the apps the user set to keep game focus. While a task of one of these
+   * packages stays resumed (its window is visible), its app is not told that it lost the focus
+   * to another app's window: no onTopResumedActivityChanged(false) and no
+   * onWindowFocusChanged(false), so a game that pauses on either keeps running. Keys and IME
+   * text still go only to the window that has the focus. The agent gives the list to the
+   * framework (the window manager's shell command dsa-keep-focus), where it counts at once; an
+   * image whose framework lacks that change ignores it. Empty, the default, keeps every app as
+   * before.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.CaptionCompat}
@@ -316,6 +426,98 @@ public  final class CaptionCompat extends
       return this;
     }
 
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @return A list containing the keepFocus.
+     */
+    @java.lang.Override
+    public java.util.List<java.lang.String>
+        getKeepFocusList() {
+      return java.util.Collections.unmodifiableList(
+          instance.getKeepFocusList());
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @return The count of keepFocus.
+     */
+    @java.lang.Override
+    public int getKeepFocusCount() {
+      return instance.getKeepFocusCount();
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @param index The index of the element to return.
+     * @return The keepFocus at the given index.
+     */
+    @java.lang.Override
+    public java.lang.String getKeepFocus(int index) {
+      return instance.getKeepFocus(index);
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @param index The index of the value to return.
+     * @return The bytes of the keepFocus at the given index.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getKeepFocusBytes(int index) {
+      return instance.getKeepFocusBytes(index);
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @param index The index to set the value at.
+     * @param value The keepFocus to set.
+     * @return This builder for chaining.
+     */
+    public Builder setKeepFocus(
+        int index, java.lang.String value) {
+      copyOnWrite();
+      instance.setKeepFocus(index, value);
+      return this;
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @param value The keepFocus to add.
+     * @return This builder for chaining.
+     */
+    public Builder addKeepFocus(
+        java.lang.String value) {
+      copyOnWrite();
+      instance.addKeepFocus(value);
+      return this;
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @param values The keepFocus to add.
+     * @return This builder for chaining.
+     */
+    public Builder addAllKeepFocus(
+        java.lang.Iterable<java.lang.String> values) {
+      copyOnWrite();
+      instance.addAllKeepFocus(values);
+      return this;
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearKeepFocus() {
+      copyOnWrite();
+      instance.clearKeepFocus();
+      return this;
+    }
+    /**
+     * <code>repeated string keep_focus = 2;</code>
+     * @param value The bytes of the keepFocus to add.
+     * @return This builder for chaining.
+     */
+    public Builder addKeepFocusBytes(
+        com.google.protobuf.ByteString value) {
+      copyOnWrite();
+      instance.addKeepFocusBytes(value);
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.CaptionCompat)
   }
   @java.lang.Override
@@ -333,9 +535,11 @@ public  final class CaptionCompat extends
       case BUILD_MESSAGE_INFO: {
           java.lang.Object[] objects = new java.lang.Object[] {
             "belowTitleBar_",
+            "keepFocus_",
           };
           java.lang.String info =
-              "\u0000\u0001\u0000\u0000\u0001\u0001\u0001\u0000\u0001\u0000\u0001\u021a";
+              "\u0000\u0002\u0000\u0000\u0001\u0002\u0002\u0000\u0002\u0000\u0001\u021a\u0002\u021a" +
+              "";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

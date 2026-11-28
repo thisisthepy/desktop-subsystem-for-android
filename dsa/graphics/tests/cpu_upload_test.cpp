@@ -7,6 +7,8 @@
 #include "dsa_cpu_upload.h"
 #include "dsa_shared_color_buffer.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -254,6 +256,58 @@ static void pr4_the_bytes_copied_are_reported_once_a_second() {
     EXPECT(report.bytes == 100 && report.uploads == 2);
 }
 
+// A 1080x1920 NV12 Short as the hwcomposer packs it: luma, then the CbCr rows.
+static std::vector<uint8_t> packedShort(const dsa::UploadLayout& layout, uint8_t luma, uint8_t chroma) {
+    std::vector<uint8_t> packed(layout.packedSize(), chroma);
+    const size_t lumaBytes = size_t(layout.planes[0].rowBytes) * layout.planes[0].rows;
+    std::fill(packed.begin(), packed.begin() + static_cast<std::ptrdiff_t>(lumaBytes), luma);
+    return packed;
+}
+
+// fr26: planes that reach the hwcomposer as zeros (luma 0 over chroma 0, solid green) are not
+// sent to the host. Black, in limited range (16, 128) and full range (0, 128), is a picture.
+static void fr26_a_packed_picture_no_one_wrote_is_not_sent() {
+    const dsa::UploadLayout layout = dsa::uploadLayout(kNv12, 1080, 1920, true);
+    EXPECT(layout.kind == dsa::UploadKind::Yuv420TwoPlane);
+    EXPECT(dsa::packedHoldsNoPicture(packedShort(layout, 0, 0).data(), layout));
+    EXPECT(!dsa::packedHoldsNoPicture(packedShort(layout, 16, 128).data(), layout));
+    EXPECT(!dsa::packedHoldsNoPicture(packedShort(layout, 0, 128).data(), layout));
+    // Only its last rows never written (a band of green along the bottom) is caught too.
+    std::vector<uint8_t> band = packedShort(layout, 90, 120);
+    const size_t lumaRow = layout.planes[0].rowBytes;
+    const size_t lumaBytes = lumaRow * layout.planes[0].rows;
+    std::fill(band.begin() + static_cast<std::ptrdiff_t>(lumaRow * 1900),
+              band.begin() + static_cast<std::ptrdiff_t>(lumaBytes), 0);
+    std::fill(band.begin() + static_cast<std::ptrdiff_t>(lumaBytes + lumaRow * 950), band.end(), 0);
+    EXPECT(dsa::packedHoldsNoPicture(band.data(), layout));
+    // A picture whose chroma alone is zero in a few rows still has luma there: not caught here
+    // (the fingerprint check after the copy is what sees a picture change under the host).
+    EXPECT(!dsa::packedHoldsNoPicture(packedShort(layout, 90, 0).data(), layout));
+    // Three planes, and RGB, which may well be transparent black.
+    const dsa::UploadLayout yv12 = dsa::uploadLayout(kYv12, 64, 32, true);
+    std::vector<uint8_t> zeros(yv12.packedSize(), 0);
+    EXPECT(dsa::packedHoldsNoPicture(zeros.data(), yv12));
+    const dsa::UploadLayout rgba = dsa::uploadLayout(dsa::uploadFourcc('A', 'B', '2', '4'), 64, 32, true);
+    std::vector<uint8_t> clear(rgba.packedSize(), 0);
+    EXPECT(!dsa::packedHoldsNoPicture(clear.data(), rgba));
+}
+
+// fr26: the fingerprint of the packed planes is the buffer's own, so the hwcomposer can tell
+// whether what it packed for the host is still there once the host has read it.
+static void fr26_packed_planes_keep_the_buffers_fingerprint_until_they_change() {
+    Yv12 b = makeYv12(64, 32);
+    const dsa::UploadLayout layout = dsa::uploadLayout(kYv12, 64, 32, true);
+    std::vector<uint8_t> packed(layout.packedSize(), 0);
+    EXPECT(dsa::packPlanes(b.bytes.data(), b.bytes.size(), b.planes, 3, layout, packed.data()));
+    const uint64_t print = dsa::fingerprint(b.bytes.data(), b.bytes.size(), b.planes, 3, layout);
+    EXPECT(print != 0);
+    EXPECT(dsa::packedFingerprint(packed.data(), layout) == print);
+    // Zeroed under the reader (a scrub of the shared memory it was packed into): it differs.
+    std::fill(packed.begin() + static_cast<std::ptrdiff_t>(64 * 32), packed.end(), 0);
+    EXPECT(dsa::packedFingerprint(packed.data(), layout) != print);
+    EXPECT(dsa::packedFingerprint(nullptr, layout) == 0);
+}
+
 int main() {
     pr4_only_a_buffer_the_cpu_writes_and_the_gpu_does_not_draw_is_copied_up();
     pr4_yuv_planes_go_up_as_the_hosts_image_lays_them_out();
@@ -264,6 +318,8 @@ int main() {
     pr4_a_picture_is_copied_once_and_again_only_when_it_changes();
     fr26_a_buffer_never_copied_up_is_not_shown();
     pr4_the_bytes_copied_are_reported_once_a_second();
+    fr26_a_packed_picture_no_one_wrote_is_not_sent();
+    fr26_packed_planes_keep_the_buffers_fingerprint_until_they_change();
     if (failures) {
         std::fprintf(stderr, "%d expectation(s) failed\n", failures);
         return 1;

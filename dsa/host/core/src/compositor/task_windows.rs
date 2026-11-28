@@ -10,14 +10,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use super::caption::{reported_tone, CaptionBand, CaptionTone};
+use super::frame_requests::FrameRequests;
+use super::resize_queue::DrawnFrames;
 use super::window_mode::WindowMode;
+use super::window_monitor::ClosedSize;
 use super::window_sizing::{
-    density_for_dpi, scale_between, to_task_length, to_window_rect, to_window_size, Scale,
+    density_for_dpi, rescale, scale_between, to_task_length, to_window_rect, to_window_size, Scale,
     ScalingMode, WindowSizing, BASE_DENSITY, DENSITY_AT_BASE_DPI, SETTLE,
 };
 use crate::app_windows::{
-    below_title_bar_packages, full_screen_place, AppWindowSettings, FullScreenDefaults,
-    FullScreenPlace,
+    below_title_bar_packages, full_screen_place, keep_focus_packages, AppWindowSettings,
+    DpiScaling, FullScreenDefaults, FullScreenPlace,
 };
 use crate::tasks::{Bounds, Task, TaskEvent, TaskOrientation, TaskRequest};
 
@@ -143,16 +146,82 @@ struct Overlay {
     window: bool,
     /// The DPI of the monitor its window reported; 0 until it has.
     dpi: u32,
+    /// The density its app's process draws it at, when that is not the guest display's: the
+    /// density the app's task was given without a relaunch, for an app set to System (forced)
+    /// scaling ([`TaskWindows::overlay_density`]). 0 when it is drawn at the display's.
+    drawn_at: u32,
+    /// The density the guest was last asked to draw this window alone at
+    /// ([`TaskRequest::SetOverlayDensity`], 0 for its app's own); `None` until it was asked
+    /// anything, when the guest's report says what it has.
+    asked: Option<u32>,
+    /// Whether the user is dragging the window now: it is asked for no density until the drag
+    /// ends, so a drag across monitors asks once, for the monitor it ends on.
+    dragged: bool,
+}
+
+/// The density the window manager asks the guest to draw one app overlay window at, when the
+/// app draws at `drawn_at` (the density of its task, for an app set to System (forced) scaling;
+/// 0 for any other) and the window is on a monitor of `dpi` (0 while the window has not said).
+/// That monitor's density when it differs from the app's, so the overlay is drawn sharp there
+/// instead of stretched; 0, the app's own, when it is the same or the app is not forced. An app
+/// that is not forced draws its overlays at the display's density, and its windows are never
+/// asked anything.
+pub fn overlay_density_wanted(drawn_at: u32, dpi: u32) -> u32 {
+    if drawn_at == 0 || dpi == 0 {
+        return 0;
+    }
+    let monitor = density_for_dpi(dpi);
+    if monitor == drawn_at {
+        0
+    } else {
+        monitor
+    }
 }
 
 impl Overlay {
-    /// How large the window shows each of the overlay's pixels: the overlay is drawn at the
-    /// guest display's density, and shown the size it would be at its monitor's.
+    /// The density the overlay is drawn at: the one the guest says the app took for this window
+    /// alone, else the one its app's process draws at, else the guest display's, which the
+    /// guest reports for it.
+    fn density(&self) -> u32 {
+        let own = self.task.overlay.map_or(0, |overlay| overlay.density_dpi);
+        if own != 0 {
+            own
+        } else if self.drawn_at != 0 {
+            self.drawn_at
+        } else {
+            self.task.density_dpi
+        }
+    }
+
+    /// The density this window alone is to be drawn at ([`overlay_density_wanted`]), when the
+    /// guest is to be asked for it now: it differs from what the guest was last asked, or, if
+    /// it was never asked, from what the guest says the window has. `None` while the window is
+    /// dragged, has no window, or has what it should.
+    fn density_request(&self) -> Option<u32> {
+        if !self.window || self.dragged {
+            return None;
+        }
+        let wanted = overlay_density_wanted(self.drawn_at, self.dpi);
+        let has = self
+            .asked
+            .unwrap_or_else(|| self.task.overlay.map_or(0, |overlay| overlay.density_dpi));
+        (wanted != has).then_some(wanted)
+    }
+
+    /// How large the window shows each of the overlay's pixels: the overlay is drawn at its
+    /// density ([`Self::density`]), and shown the size it would be at its monitor's.
+    ///
+    /// An app given a density of its own without a relaunch lays out its overlays at that
+    /// density too, as its process has it, while the guest reports them at the display's.
+    /// Taken at the display's, the floating lyrics of FLO, set to System (forced) scaling on a
+    /// 125% monitor beside a 200% main one, were drawn at 164 dpi and shown as if at 262: 0.61
+    /// of their size beside FLO's window.
     fn scale(&self) -> Scale {
-        if self.dpi == 0 || self.task.density_dpi == 0 {
+        let density = self.density();
+        if self.dpi == 0 || density == 0 {
             return (1, 1);
         }
-        scale_between(density_for_dpi(self.dpi), self.task.density_dpi)
+        scale_between(density_for_dpi(self.dpi), density)
     }
 
     /// The window's client size: the overlay's size at its scale.
@@ -313,7 +382,11 @@ fn caption_changes(previous: Option<&Task>, task: &Task, scale: Scale) -> Vec<Wi
 }
 
 fn open(task: &Task) -> WindowChange {
-    let (width, height) = window_size(&task.bounds);
+    open_at(task, window_size(&task.bounds))
+}
+
+/// The change that opens `task`'s window with a client area of `(width, height)`.
+fn open_at(task: &Task, (width, height): (u32, u32)) -> WindowChange {
     WindowChange::Open {
         task_id: task.task_id,
         package_name: task.package_name.clone(),
@@ -366,10 +439,15 @@ pub fn start_size(task: &Task, app: Option<&AppWindowSettings>) -> Option<(u32, 
     (wanted != current).then_some(wanted)
 }
 
-/// A task whose window waits for the guest to give it its start size.
+/// A task whose window waits for the guest to give it its start size, and the density of the
+/// monitor the window opens on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingOpen {
     size: (u32, u32),
+    /// The density the task is to draw at when its window opens: that of the monitor the
+    /// window opens on, for a task that follows its monitor and draws at another. `None`
+    /// when the task keeps the density it has.
+    density: Option<u32>,
     /// When the guest was asked for it; `None` until it is.
     asked: Option<Instant>,
 }
@@ -392,15 +470,28 @@ pub struct TaskWindows {
     /// Whether the user's window settings were read yet. Until then nothing is known of which
     /// apps start below the title bar, and the guest is told nothing.
     app_windows_known: bool,
-    /// The apps the guest was last told start below the title bar; `None` when it must be
-    /// told again.
-    told_below_title_bar: Option<Vec<String>>,
+    /// The apps the guest was last told start below the title bar, and those it was told keep
+    /// their focus; `None` when it must be told again.
+    told_below_title_bar: Option<(Vec<String>, Vec<String>)>,
     /// Where every app without its own choice shows its full screen.
     fullscreen_defaults: FullScreenDefaults,
     /// Whether each task was last told to keep a clear full screen request inside its window.
     told_full_screen: BTreeMap<i32, bool>,
     /// Tasks whose window opens once the guest has given them their start size.
     pending: BTreeMap<i32, PendingOpen>,
+    /// The DPI of the monitor each app's next window opens on, by package, as the platform
+    /// found it before the window opened ([`TaskWindows::set_opening_dpi`]). An app missing
+    /// here opens at its task's size, and takes its monitor's once its window says which.
+    opening_dpi: BTreeMap<String, u32>,
+    /// The size each app's last window closed at, by package, as the platform remembered it
+    /// ([`TaskWindows::set_closed_size`]): the size its next window opens at.
+    closed_sizes: BTreeMap<String, ClosedSize>,
+    /// The windows that closed since the platform last took them
+    /// ([`TaskWindows::take_closed_sizes`]), each with its app and the size it closed at.
+    just_closed: Vec<(String, ClosedSize)>,
+    /// Requests made while a window opened, which go with the next
+    /// [`TaskWindows::reconfigures`].
+    queued: Vec<TaskRequest>,
     /// The mode and resizability each window was last told.
     told_modes: BTreeMap<i32, (WindowMode, bool)>,
     /// Where the guest last said the cursor of each task's focused editor is, in the task's
@@ -415,8 +506,14 @@ pub struct TaskWindows {
     notes: Vec<String>,
     /// The app overlay windows the guest reported. They are kept apart from the tasks: none
     /// of what the host asks of a task (a size, a density, a title bar, an end) is ever asked
-    /// of an overlay, whose app alone moves, sizes and removes it.
+    /// of an overlay, whose app alone moves, sizes and removes it. The one thing asked of an
+    /// overlay of an app set to System (forced) scaling is the density of the monitor its
+    /// window is on ([`Self::overlay_density_requests`]).
     overlays: BTreeMap<i32, Overlay>,
+    /// The windows that have no frame yet, and when each asks the guest for one.
+    frame_requests: FrameRequests,
+    /// Where the frames that reached a window are reported; `None` until the platform says.
+    drawn: Option<DrawnFrames>,
 }
 
 /// `size` as `WxH`, or "none" when there is no limit.
@@ -477,6 +574,35 @@ impl TaskWindows {
         std::mem::take(&mut self.notes)
     }
 
+    /// The windows that closed since this was last asked, each with its app and the size it
+    /// closed at, for the platform to remember
+    /// ([`super::window_monitor::remember_closed_size`]) and give back with
+    /// [`TaskWindows::set_closed_size`] when the app opens again.
+    pub fn take_closed_sizes(&mut self) -> Vec<(String, ClosedSize)> {
+        std::mem::take(&mut self.just_closed)
+    }
+
+    /// Notes the size the window of `task_id` closes at, while it has one: its task's size,
+    /// at the density the task draws at.
+    fn note_closed(&mut self, task_id: i32) {
+        if !self.has_window(task_id) || self.is_overlay(task_id) {
+            return;
+        }
+        let Some(task) = self.tasks.get(&task_id) else {
+            return;
+        };
+        let closed = ClosedSize {
+            size: (task.bounds.width(), task.bounds.height()),
+            density: task.density_dpi,
+        };
+        if !closed.usable() {
+            return;
+        }
+        let package = task.package_name.clone();
+        self.closed_sizes.insert(package.clone(), closed);
+        self.just_closed.push((package, closed));
+    }
+
     /// Whether the task has a window now.
     pub fn has_window(&self, task_id: i32) -> bool {
         self.has_overlay_window(task_id)
@@ -512,6 +638,13 @@ impl TaskWindows {
                 .as_ref()
                 .filter(|_| had_window && shows)
                 .map_or(0, |overlay| overlay.dpi),
+            drawn_at: self.overlay_density(&task.package_name),
+            // What the guest was asked for this window holds while the window lives.
+            asked: previous.as_ref().and_then(|overlay| overlay.asked),
+            dragged: previous
+                .as_ref()
+                .filter(|_| had_window && shows)
+                .is_some_and(|overlay| overlay.dragged),
         };
         self.overlays.insert(task_id, now.clone());
         match (previous.filter(|_| had_window), shows) {
@@ -552,6 +685,74 @@ impl TaskWindows {
             return Some(Vec::new());
         }
         Some(overlay.size_changes())
+    }
+
+    /// The density `package`'s process draws its overlays at, when that is not the guest
+    /// display's; 0 when it is.
+    ///
+    /// The guest gives a task of an app set to System (forced) scaling the density of its
+    /// window's monitor without relaunching the app, and the app's process then draws at that
+    /// density, its overlays included, wherever they are on the desktop. So that is the
+    /// density of the app's first task, in task ID order, whose density goes out forced. An
+    /// app of any other choice, or with no such task, draws its overlays at the display's.
+    fn overlay_density(&self, package: &str) -> u32 {
+        self.tasks
+            .values()
+            .filter(|task| task.package_name == package && task.density_dpi != 0)
+            .find(|task| self.forced_of(task))
+            .map_or(0, |task| task.density_dpi)
+    }
+
+    /// What the guest is to be asked of the overlays' own densities now, each once
+    /// ([`Overlay::density_request`]).
+    ///
+    /// An app set to System (forced) scaling draws its overlays at its task's density, wherever
+    /// they are, so on a monitor of another density the window shows the overlay stretched:
+    /// FLO's floating lyrics, drawn at 164 dpi beside FLO's window on a 125% monitor, were 1.6
+    /// times larger on the 200% main monitor, the right size but blurred. The guest is asked to
+    /// draw that window alone at its monitor's density, and at its app's again once it is back
+    /// on a monitor of the task's density. Until the guest says the app took it
+    /// ([`crate::tasks::OverlayWindow::density_dpi`]), the window goes on scaling the overlay
+    /// from the density it is drawn at, so its size never jumps; then it shows it 1:1.
+    fn overlay_density_requests(&mut self) -> Vec<TaskRequest> {
+        let mut requests = Vec::new();
+        for (task_id, overlay) in &mut self.overlays {
+            if let Some(density_dpi) = overlay.density_request() {
+                overlay.asked = Some(density_dpi);
+                requests.push(TaskRequest::SetOverlayDensity {
+                    overlay_id: *task_id,
+                    density_dpi,
+                });
+            }
+        }
+        requests
+    }
+
+    /// The overlays whose app draws them at another density now: its task was given another
+    /// (its window went to a monitor of another scale), it ended, or the user chose another
+    /// way for the app to follow a monitor. Returns what their windows must hear: their size
+    /// and scale at the new density.
+    fn redraw_overlays(&mut self) -> Vec<WindowChange> {
+        let drawn: Vec<(i32, u32)> = self
+            .overlays
+            .iter()
+            .map(|(task_id, overlay)| (*task_id, self.overlay_density(&overlay.task.package_name)))
+            .collect();
+        let mut changes = Vec::new();
+        for (task_id, drawn_at) in drawn {
+            let Some(overlay) = self.overlays.get_mut(&task_id) else {
+                continue;
+            };
+            if overlay.drawn_at == drawn_at {
+                continue;
+            }
+            let before = (overlay.window_size(), overlay.scale());
+            overlay.drawn_at = drawn_at;
+            if overlay.window && before != (overlay.window_size(), overlay.scale()) {
+                changes.extend(overlay.size_changes());
+            }
+        }
+        changes
     }
 
     /// The package of the task's root activity, while the task is known.
@@ -601,7 +802,9 @@ impl TaskWindows {
             .map(|app| (app.package_name.clone(), app.clone()))
             .collect();
         self.app_windows_known = true;
-        self.retell_modes()
+        let mut changes = self.retell_modes();
+        changes.extend(self.redraw_overlays());
+        changes
     }
 
     /// Takes where every app without its own choice shows its full screen, which the windows
@@ -628,20 +831,55 @@ impl TaskWindows {
         )
     }
 
-    /// How `task`'s window follows a monitor of another scale: as the user chose for its app,
-    /// else as DSA's built-in list says for it, and as its top activity says it handles a
-    /// change of density.
-    fn scaling_of(&self, task: &Task) -> ScalingMode {
+    /// The user's choice of how `task`'s app follows a monitor of another scale.
+    fn dpi_scaling_of(&self, task: &Task) -> DpiScaling {
         self.app_windows
             .get(&task.package_name)
             .map(|app| app.dpi_scaling)
             .unwrap_or_default()
-            .mode_for(&task.package_name, task.handles_density_change)
+    }
+
+    /// How `task`'s window follows a monitor of another scale: as the user chose for its app,
+    /// else as DSA's built-in list says for it, as its top activity says it handles a change
+    /// of density, and as the guest can give it one without a relaunch.
+    fn scaling_of(&self, task: &Task) -> ScalingMode {
+        self.dpi_scaling_of(task).mode_on(
+            &task.package_name,
+            task.handles_density_change,
+            task.forced_density_available,
+        )
+    }
+
+    /// Whether `task`'s density requests go out forced: its app is set to System (forced)
+    /// scaling and the guest can give it a density without a relaunch.
+    fn forced_of(&self, task: &Task) -> bool {
+        self.dpi_scaling_of(task)
+            .forced_on(&task.package_name, task.forced_density_available)
+    }
+
+    /// Whether the density `task` takes before its window opens goes out forced: its app is
+    /// set to System (forced) scaling and DSA's image carries the framework change for it.
+    ///
+    /// The window decides once, on the task's first report, whether it waits for its
+    /// monitor's density, and that report may not say yet that the guest can give one without
+    /// a relaunch. A window that opened on that report opened on a 125% monitor at the main
+    /// monitor's density, shown scaled, and its task took the monitor's density only later,
+    /// while the window followed the frames the app drew (forced YouTube did exactly this). So
+    /// the opening density of such a task is asked for as an App mode task's is, always
+    /// forced: the agent marks the task first and gives the density only once it is marked, so
+    /// the app is never relaunched for it. A guest that cannot mark it gives no density, and
+    /// the window opens after the wait, scaled, as a System task's.
+    fn opening_forced_of(&self, task: &Task) -> bool {
+        DpiScaling::FORCED_AVAILABLE
+            && self.dpi_scaling_of(task).resolved_for(&task.package_name)
+                == DpiScaling::SystemForced
     }
 
     /// A new record of how `task`'s window follows its task.
     fn sizing_for(&self, task: &Task) -> WindowSizing {
-        WindowSizing::with_mode(task, self.scaling_of(task))
+        let mut sizing = WindowSizing::with_mode(task, self.scaling_of(task));
+        sizing.set_forced(self.forced_of(task));
+        sizing
     }
 
     /// The scale `task_id`'s window shows its task at.
@@ -694,17 +932,135 @@ impl TaskWindows {
         })
     }
 
+    /// The DPI of the monitor `package`'s next window opens on, as the platform found it from
+    /// where the app's last window closed ([`super::window_monitor::opening_monitor`]); `None`
+    /// when it is not known, and the window then takes its monitor's size and density once it
+    /// has opened and said which monitor it is on.
+    ///
+    /// Known before the window opens, the task is given that monitor's density and its size
+    /// there first, and the window opens at that size: its first frame is the app's at the
+    /// size it keeps. Taken only after the window opened, the window showed the app at the
+    /// main monitor's density and size first, then shrank on a monitor of a lower scale while
+    /// the app redrew (FLO's splash screen on a 125% monitor beside a 200% main one).
+    pub fn set_opening_dpi(&mut self, package: &str, dpi: Option<u32>) {
+        match dpi.filter(|dpi| *dpi > 0) {
+            Some(dpi) => {
+                self.opening_dpi.insert(package.to_string(), dpi);
+            }
+            None => {
+                self.opening_dpi.remove(package);
+            }
+        }
+    }
+
+    /// The density `task` is to draw at when its window opens, when that differs from the one
+    /// it has: the density of the monitor the window opens on, for a task that follows its
+    /// monitor. A task that keeps its density is shown scaled instead, and asked for nothing.
+    ///
+    /// A task of an app set to System (forced) scaling takes it as an App mode task does
+    /// ([`Self::opening_forced_of`]), whatever its first report says of the guest.
+    fn opening_density(&self, task: &Task) -> Option<u32> {
+        let dpi = *self.opening_dpi.get(&task.package_name)?;
+        let follows = self.scaling_of(task) == ScalingMode::App || self.opening_forced_of(task);
+        if task.density_dpi == 0 || !follows {
+            return None;
+        }
+        let wanted = density_for_dpi(dpi);
+        (wanted != task.density_dpi).then_some(wanted)
+    }
+
+    /// The size `package`'s last window closed at, as the platform remembered it
+    /// ([`super::window_monitor::remembered_closed_size`]); `None` when nothing is remembered.
+    ///
+    /// Android gives an app's next task the bounds its last window closed at, in the pixels of
+    /// the density its task drew at then, but the new task starts at the main monitor's
+    /// density. A window that closed on a monitor of a lower scale, its task at that monitor's
+    /// density, is opened again from the size it closed at instead of from those pixels read
+    /// at the new density, which made it smaller each time it opened again there.
+    pub fn set_closed_size(&mut self, package: &str, closed: Option<ClosedSize>) {
+        match closed.filter(ClosedSize::usable) {
+            Some(closed) => {
+                self.closed_sizes.insert(package.to_string(), closed);
+            }
+            None => {
+                self.closed_sizes.remove(package);
+            }
+        }
+    }
+
+    /// What a new task's window waits for before it opens: its start size
+    /// ([`start_size`]), and the density of the monitor it opens on with the size there, the
+    /// same size to the eye. `None` when it opens at once, at the size the task has.
+    ///
+    /// When the task is to take another density as it opens, the size it starts from is the
+    /// one its app's last window closed at ([`Self::set_closed_size`]), at the density it was
+    /// taken at: a window that closed on that monitor opens again at the size it closed at.
+    fn opening_for(&self, task: &Task) -> Option<PendingOpen> {
+        let density = self.opening_density(task);
+        let closed = density
+            .and(self.closed_sizes.get(&task.package_name))
+            .copied();
+        // The task as it would be had Android given it the size its window closed at, in the
+        // task's own density: the start size is worked out from it.
+        let reopened = closed.map(|closed| {
+            let mut reopened = task.clone();
+            let (width, height) = rescale(closed.size, closed.density, task.density_dpi);
+            reopened.bounds.right = reopened.bounds.left + width as i32;
+            reopened.bounds.bottom = reopened.bounds.top + height as i32;
+            reopened
+        });
+        let from = reopened.as_ref().unwrap_or(task);
+        let start = start_size(from, self.app_windows.get(&task.package_name));
+        let Some(density) = density else {
+            return start.map(|size| PendingOpen {
+                size,
+                density: None,
+                asked: None,
+            });
+        };
+        let mut size = match (start, closed) {
+            // At the density it closed at, it opens at exactly the size it closed at.
+            (None, Some(closed)) if closed.density == density => closed.size,
+            _ => rescale(
+                start.unwrap_or_else(|| window_size(&from.bounds)),
+                task.density_dpi,
+                density,
+            ),
+        };
+        if let Some(max) = task.max_size() {
+            size = fit_within(size, max);
+        }
+        Some(PendingOpen {
+            size,
+            density: Some(density),
+            asked: None,
+        })
+    }
+
     /// What a window that opens for `task` must do: open, take its caption tone, its mode and
     /// its task's size and limits.
+    ///
+    /// A window whose monitor is known before it opens ([`Self::set_opening_dpi`]) is placed
+    /// there at once: it opens at the size the task has on that monitor, and a task that keeps
+    /// its density is shown at that monitor's scale from its first frame. A density the task
+    /// still has to take there is asked for with the next [`Self::reconfigures`].
     fn open_window(&mut self, task_id: i32) -> Vec<WindowChange> {
         let Some(task) = self.tasks.get(&task_id).cloned() else {
             return Vec::new();
         };
-        let sizing = self.sizing_for(&task);
+        let mut sizing = self.sizing_for(&task);
+        let mut size = window_size(&task.bounds);
+        if let Some(dpi) = self.opening_dpi.get(&task.package_name).copied() {
+            let (opened, request) = sizing.dpi_reported(dpi);
+            if let Some(opened) = opened {
+                size = opened;
+            }
+            self.queued.extend(request);
+        }
         self.sizes.insert(task_id, sizing);
         self.told_sizes.remove(&task_id);
         let mut changes = vec![
-            open(&task),
+            open_at(&task, size),
             WindowChange::CaptionTone {
                 task_id,
                 tone: tone_of(&task),
@@ -737,6 +1093,73 @@ impl TaskWindows {
                 return self.apply(&TaskEvent::Updated(kept));
             }
         }
+        let mut changes = self.apply_event(event);
+        // A task of an app that draws its overlays at its own density may have taken another.
+        changes.extend(self.redraw_overlays());
+        self.track_frames(&changes)
+    }
+
+    /// Where the platform reports each frame that reaches a window
+    /// ([`DrawnFrames::frame_drawn`], [`DrawnFrames::frame_arrived`]): a window that has no
+    /// frame yet asks the guest for one until a frame arrives ([`TaskWindows::reconfigures`]).
+    pub fn watch_frames(&mut self, drawn: DrawnFrames) {
+        self.drawn = Some(drawn);
+    }
+
+    /// Notes which windows open, and so have no frame yet, and which close.
+    fn track_frames(&mut self, changes: &[WindowChange]) -> Vec<WindowChange> {
+        for change in changes {
+            match change {
+                WindowChange::Open { task_id, .. } => self.frame_requests.opened(*task_id),
+                WindowChange::Close { task_id } => self.frame_requests.closed(*task_id),
+                _ => {}
+            }
+        }
+        changes.to_vec()
+    }
+
+    /// The requests that ask the guest for the frame of each window that has none yet: once
+    /// when the window is open and its task's display is known, and again while none arrives,
+    /// a bounded number of times.
+    fn frame_asks(&mut self, now: Instant) -> Vec<TaskRequest> {
+        // A window manager that never says which frames arrived could not tell when to stop.
+        let Some(drawn) = &self.drawn else {
+            return Vec::new();
+        };
+        for task_id in drawn.take_arrived() {
+            self.frame_requests.arrived(task_id);
+        }
+        let known: BTreeSet<i32> = self
+            .tasks
+            .keys()
+            .chain(self.overlays.keys())
+            .copied()
+            .collect();
+        // A task that ended while its window was closing waits for nothing.
+        self.frame_requests
+            .retain(|task_id| known.contains(&task_id));
+        let windows: BTreeSet<i32> = self
+            .displays
+            .keys()
+            .copied()
+            .filter(|task_id| self.has_window(*task_id))
+            .collect();
+        let (ask, given_up) = self
+            .frame_requests
+            .due(now, |task_id| windows.contains(&task_id));
+        for task_id in given_up {
+            self.notes.push(format!(
+                "task {task_id}'s window got no frame after it was asked for {} times; it \
+                 shows the task's next frame when its app draws",
+                super::frame_requests::FRAME_ASKS
+            ));
+        }
+        ask.into_iter()
+            .map(|task_id| TaskRequest::RequestFrame { task_id })
+            .collect()
+    }
+
+    fn apply_event(&mut self, event: &TaskEvent) -> Vec<WindowChange> {
         match event {
             TaskEvent::Updated(task) if task.is_overlay() => self.overlay_updated(task),
             TaskEvent::Removed { task_id } if self.overlays.contains_key(task_id) => {
@@ -757,8 +1180,12 @@ impl TaskWindows {
                 if self.closing.contains(&task.task_id) {
                     return Vec::new();
                 }
-                let wanted = self.pending[&task.task_id].size;
-                if window_size(&task.bounds) != wanted {
+                let wanted = self.pending[&task.task_id];
+                if window_size(&task.bounds) != wanted.size
+                    || wanted
+                        .density
+                        .is_some_and(|density| task.density_dpi != density)
+                {
                     return Vec::new();
                 }
                 // The guest gave the task its start size: the window opens at it, with the
@@ -768,15 +1195,26 @@ impl TaskWindows {
             }
             TaskEvent::Updated(task) if !self.tasks.contains_key(&task.task_id) => {
                 self.tasks.insert(task.task_id, task.clone());
+                if !super::window_hosts::is_valid_package(&task.package_name) {
+                    // No window program can be made for it, so its window would never open:
+                    // said once, when the task first comes.
+                    self.notes.push(format!(
+                        "task {} ({:?}, {:?}) gets no window: {:?} is not a package name a \
+                         window program can be made for",
+                        task.task_id,
+                        task.package_name,
+                        window_title(task),
+                        task.package_name,
+                    ));
+                }
                 if self.closing.contains(&task.task_id) {
                     let sizing = self.sizing_for(task);
                     self.sizes.insert(task.task_id, sizing);
                     return Vec::new();
                 }
-                match start_size(task, self.app_windows.get(&task.package_name)) {
-                    Some(size) => {
-                        self.pending
-                            .insert(task.task_id, PendingOpen { size, asked: None });
+                match self.opening_for(task) {
+                    Some(pending) => {
+                        self.pending.insert(task.task_id, pending);
                         Vec::new()
                     }
                     None => self.open_window(task.task_id),
@@ -785,10 +1223,12 @@ impl TaskWindows {
             TaskEvent::Updated(task) => {
                 let previous = self.tasks.insert(task.task_id, task.clone());
                 let scaling = self.scaling_of(task);
+                let forced = self.forced_of(task);
                 let follow = match self.sizes.get_mut(&task.task_id) {
                     Some(sizing) if previous.is_some() => {
                         // Another activity on top may say otherwise about a change of density.
                         sizing.set_mode(scaling);
+                        sizing.set_forced(forced);
                         let follow = sizing.guest_updated(task);
                         if let Some((asked, given)) = sizing.take_clamped() {
                             self.notes.push(format!(
@@ -868,6 +1308,9 @@ impl TaskWindows {
                 changes
             }
             TaskEvent::Removed { task_id } => {
+                // A window its app closed opens again at the size it closed at, as one the
+                // user closed does.
+                self.note_closed(*task_id);
                 self.displays.remove(task_id);
                 self.sizes.remove(task_id);
                 self.told_sizes.remove(task_id);
@@ -893,7 +1336,13 @@ impl TaskWindows {
             } => {
                 if *display_id == WHOLE_SCREEN_DISPLAY {
                     // Showing it would put the guest's whole screen in a task's window.
-                    self.displays.remove(task_id);
+                    if self.displays.remove(task_id).is_some() || !self.tasks.contains_key(task_id)
+                    {
+                        self.notes.push(format!(
+                            "task {task_id}'s frames on display {display_id} are not shown: that \
+                             display is the guest's whole screen"
+                        ));
+                    }
                     return Vec::new();
                 }
                 // A display carries one task's frames: the task that claimed it last.
@@ -964,6 +1413,7 @@ impl TaskWindows {
         if !self.has_window(task_id) || self.is_overlay(task_id) {
             return None;
         }
+        self.note_closed(task_id);
         self.closing.insert(task_id);
         Some(TaskRequest::Close { task_id })
     }
@@ -973,14 +1423,17 @@ impl TaskWindows {
     /// new window has to be told. Nothing for a task that has no window.
     pub fn reopen(&mut self, task_id: i32) -> Vec<WindowChange> {
         if let Some(overlay) = self.overlays.get_mut(&task_id).filter(|o| o.window) {
-            // The new window says which monitor it is on.
+            // The new window says which monitor it is on, and no drag of the old one goes on.
             overlay.dpi = 0;
-            return overlay.open_changes();
+            overlay.dragged = false;
+            let changes = overlay.open_changes();
+            return self.track_frames(&changes);
         }
         if !self.has_window(task_id) {
             return Vec::new();
         }
-        self.open_window(task_id)
+        let changes = self.open_window(task_id);
+        self.track_frames(&changes)
     }
 
     /// The request to end a task the user closed did not reach the guest, so the task is
@@ -992,7 +1445,8 @@ impl TaskWindows {
         if !self.tasks.contains_key(&task_id) {
             return Vec::new();
         }
-        self.open_window(task_id)
+        let changes = self.open_window(task_id);
+        self.track_frames(&changes)
     }
 
     /// The changes that tell the task's window its task size, limits and scale, when they
@@ -1068,9 +1522,11 @@ impl TaskWindows {
     /// whose app does not say it handles a change of density is never asked for another
     /// unless the user chose the app mode for it (Android then recreates its activity).
     pub fn window_dpi(&mut self, task_id: i32, dpi: u32) -> (Vec<WindowChange>, Vec<TaskRequest>) {
-        // An overlay is never asked for a density: its window shows it at its monitor's scale.
+        // An overlay is asked for no density of the task's kind: its window shows it at its
+        // monitor's scale, and only an overlay of a forced app is drawn at that monitor's
+        // density ([`Self::overlay_density_requests`]).
         if let Some(changes) = self.overlay_dpi(task_id, dpi) {
-            return (changes, Vec::new());
+            return (changes, self.overlay_density_requests());
         }
         if !self.has_window(task_id) {
             return (Vec::new(), Vec::new());
@@ -1125,7 +1581,9 @@ impl TaskWindows {
                 .into_iter()
                 .filter(|change| !matches!(change, WindowChange::Resize { .. }))
                 .collect();
-            return Some((size, Vec::new(), changes));
+            // An overlay of a forced app that opens on a monitor of another density than its
+            // task's (where the user's drag left it) is drawn at that monitor's.
+            return Some((size, self.overlay_density_requests(), changes));
         }
         if !self.has_window(task_id) {
             return None;
@@ -1175,7 +1633,7 @@ impl TaskWindows {
         dpi: u32,
     ) -> (Vec<WindowChange>, Vec<TaskRequest>) {
         if let Some(changes) = self.overlay_dpi(task_id, dpi) {
-            return (changes, Vec::new());
+            return (changes, self.overlay_density_requests());
         }
         if !self.has_window(task_id) {
             return (Vec::new(), Vec::new());
@@ -1205,6 +1663,16 @@ impl TaskWindows {
         active: bool,
         now: Instant,
     ) -> Vec<TaskRequest> {
+        // The user drags an overlay by its app's own drag, which may carry it onto another
+        // monitor: its density is asked for once the drag ends, on the monitor it ends on.
+        if let Some(overlay) = self.overlays.get_mut(&task_id).filter(|o| o.window) {
+            overlay.dragged = active;
+            return if active {
+                Vec::new()
+            } else {
+                self.overlay_density_requests()
+            };
+        }
         if !self.has_window(task_id) {
             return Vec::new();
         }
@@ -1279,7 +1747,7 @@ impl TaskWindows {
         for task_id in rescaled {
             changes.extend(self.task_size_change(task_id));
         }
-        changes
+        self.track_frames(&changes)
     }
 
     /// The requests that reconfigure each task for a size its window gave it live outside a
@@ -1296,26 +1764,33 @@ impl TaskWindows {
                 .filter_map(|task_id| self.recaption(task_id)),
         );
         requests.extend(self.full_screen_requests());
+        requests.append(&mut self.queued);
+        // An overlay of a forced app whose task took another density, or whose app the user
+        // set to another mode, may be drawn at its monitor's density now, or at its app's again.
+        requests.extend(self.overlay_density_requests());
         requests.extend(self.size_reconfigures(now));
+        requests.extend(self.frame_asks(now));
         requests
     }
 
-    /// The request that tells the guest which apps start below the title bar, when the user's
-    /// settings say another list than the guest was last told. The guest settles a task's
-    /// insets when the task starts, so it hears the list before any window asks for it; an
-    /// empty list is told too, since the guest may hold an older one.
+    /// The request that tells the guest which apps start below the title bar and which keep
+    /// their focus while another app's window has it ("keep game focus"), when the user's
+    /// settings say other lists than the guest was last told. The guest settles a task's
+    /// insets when the task starts, so it hears the lists before any window asks for them;
+    /// empty lists are told too, since the guest may hold older ones.
     fn caption_compat(&mut self) -> Option<TaskRequest> {
         if !self.app_windows_known {
             return None;
         }
         let apps: Vec<AppWindowSettings> = self.app_windows.values().cloned().collect();
-        let packages = below_title_bar_packages(&apps);
-        if self.told_below_title_bar.as_ref() == Some(&packages) {
+        let lists = (below_title_bar_packages(&apps), keep_focus_packages(&apps));
+        if self.told_below_title_bar.as_ref() == Some(&lists) {
             return None;
         }
-        self.told_below_title_bar = Some(packages.clone());
+        self.told_below_title_bar = Some(lists.clone());
         Some(TaskRequest::CaptionCompat {
-            below_title_bar: packages,
+            below_title_bar: lists.0,
+            keep_focus: lists.1,
         })
     }
 
@@ -1376,9 +1851,24 @@ impl TaskWindows {
 
     fn size_reconfigures(&mut self, now: Instant) -> Vec<TaskRequest> {
         let mut requests = Vec::new();
+        let forced: BTreeMap<i32, bool> = self
+            .pending
+            .keys()
+            .filter_map(|task_id| {
+                Some((*task_id, self.opening_forced_of(self.tasks.get(task_id)?)))
+            })
+            .collect();
         for (task_id, pending) in &mut self.pending {
             if pending.asked.is_none() && !self.closing.contains(task_id) {
                 pending.asked = Some(now);
+                // The density first: the size is the one the task has at it.
+                if let Some(density) = pending.density {
+                    requests.push(TaskRequest::SetDensity {
+                        task_id: *task_id,
+                        density_dpi: density,
+                        forced: forced.get(task_id).copied().unwrap_or(false),
+                    });
+                }
                 requests.push(TaskRequest::Resize {
                     task_id: *task_id,
                     width: pending.size.0,
@@ -1394,6 +1884,8 @@ impl TaskWindows {
             // A move outside a drag has ended: the task takes its monitor's density at the
             // window's size, after the window has taken the size the desktop gave it.
             requests.extend(sizing.settle(now));
+            // The guest's display grew under a window it was too small for.
+            requests.extend(sizing.limit_grown(now));
             requests.extend(sizing.reconfigure(now));
         }
         requests
@@ -1401,22 +1893,30 @@ impl TaskWindows {
 
     /// Forgets every task, as when the service went away, and closes every window.
     pub fn reset(&mut self) -> Vec<WindowChange> {
-        let changes = self
+        let changes: Vec<WindowChange> = self
             .windows()
             .into_iter()
             .map(|task_id| WindowChange::Close { task_id })
             .collect();
+        // Android keeps the bounds these windows have now for their apps' next tasks.
+        for change in &changes {
+            if let WindowChange::Close { task_id } = change {
+                self.note_closed(*task_id);
+            }
+        }
         self.tasks.clear();
         self.displays.clear();
         self.closing.clear();
         self.sizes.clear();
         self.told_sizes.clear();
         self.pending.clear();
+        self.queued.clear();
         self.told_modes.clear();
         self.cursors.clear();
         self.bands.clear();
         self.told_full_screen.clear();
         self.overlays.clear();
+        self.frame_requests.clear();
         // The service that comes back may have a guest that was never told.
         self.told_below_title_bar = None;
         changes
@@ -1450,6 +1950,8 @@ impl TaskWindows {
         self.cursors.retain(|task_id, _| present.contains(task_id));
         self.bands.retain(|task_id, _| present.contains(task_id));
         self.overlays.retain(|task_id, _| present.contains(task_id));
+        self.frame_requests
+            .retain(|task_id| present.contains(&task_id));
         self.told_full_screen.clear();
         // A new watch may be of an Android that started again and was never told.
         self.told_below_title_bar = None;
@@ -1509,6 +2011,48 @@ mod tests {
             task_id,
             tone: None,
         }
+    }
+
+    /// Task 144 on build 1.0.1-dev.12: the version easter egg Settings opens
+    /// (`android/com.android.internal.app.PlatLogoActivity`), a task of Android's own package.
+    fn system_task() -> Task {
+        Task {
+            package_name: "android".into(),
+            label: "Android 시스템".into(),
+            ..task(144, "", 675, 1199)
+        }
+    }
+
+    #[test]
+    fn fr3_a_task_of_androids_own_package_opens_a_window_with_its_name() {
+        let mut windows = TaskWindows::new();
+        let changes = windows.apply(&TaskEvent::Updated(system_task()));
+        assert_eq!(
+            changes.first(),
+            Some(&WindowChange::Open {
+                task_id: 144,
+                package_name: "android".into(),
+                title: "Android 시스템".into(),
+                width: 675,
+                height: 1199,
+                focused: false,
+            })
+        );
+        assert!(windows.has_window(144));
+        windows.apply(&frames(144, 4));
+        assert_eq!(windows.task_for_display(4), Some(144));
+        assert!(windows.take_notes().is_empty());
+    }
+
+    #[test]
+    fn fr3_a_task_that_gets_no_window_says_why() {
+        let mut windows = TaskWindows::new();
+        let mut bad = task(7, "Odd", 400, 600);
+        bad.package_name = "..\\odd".into();
+        windows.apply(&TaskEvent::Updated(bad));
+        let notes = windows.take_notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("task 7") && notes[0].contains("gets no window"));
     }
 
     #[test]
@@ -1634,6 +2178,7 @@ mod tests {
         let now = Instant::now();
         let compat = |packages: &[&str]| TaskRequest::CaptionCompat {
             below_title_bar: packages.iter().map(|package| package.to_string()).collect(),
+            keep_focus: Vec::new(),
         };
         let app = |package: &str, below: bool| AppWindowSettings {
             package_name: package.into(),
@@ -1672,6 +2217,61 @@ mod tests {
         assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
         windows.reset();
         assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
+    }
+
+    #[test]
+    fn fr44_the_guest_is_told_which_apps_keep_their_focus() {
+        let now = Instant::now();
+        let compat = |keep_focus: &[&str]| TaskRequest::CaptionCompat {
+            below_title_bar: Vec::new(),
+            keep_focus: keep_focus
+                .iter()
+                .map(|package| package.to_string())
+                .collect(),
+        };
+        let app = |package: &str, keep_focus: bool| AppWindowSettings {
+            package_name: package.into(),
+            fixed_size: true,
+            keep_focus,
+            ..AppWindowSettings::default()
+        };
+        let mut windows = TaskWindows::new();
+        assert!(windows.reconfigures(now).is_empty());
+        // Every app off, the default: the guest hears an empty list, so it holds no older one.
+        windows.set_app_windows(&[app("com.ustwo.monumentvalley", false)]);
+        assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
+        // Switched on: told once.
+        windows.set_app_windows(&[
+            app("com.ustwo.monumentvalley", true),
+            app("com.example.notes", false),
+        ]);
+        assert_eq!(
+            windows.reconfigures(now),
+            vec![compat(&["com.ustwo.monumentvalley"])]
+        );
+        assert!(windows.reconfigures(now).is_empty());
+        // Select all, then off again.
+        windows.set_app_windows(&[
+            app("com.ustwo.monumentvalley", true),
+            app("com.example.notes", true),
+        ]);
+        assert_eq!(
+            windows.reconfigures(now),
+            vec![compat(&["com.example.notes", "com.ustwo.monumentvalley"])]
+        );
+        windows.set_app_windows(&[
+            app("com.ustwo.monumentvalley", false),
+            app("com.example.notes", false),
+        ]);
+        assert_eq!(windows.reconfigures(now), vec![compat(&[])]);
+        // An Android that started again hears it again.
+        windows.set_app_windows(&[app("com.ustwo.monumentvalley", true)]);
+        windows.reconfigures(now);
+        windows.sync(&[]);
+        assert_eq!(
+            windows.reconfigures(now),
+            vec![compat(&["com.ustwo.monumentvalley"])]
+        );
     }
 
     #[test]
@@ -2142,7 +2742,8 @@ mod tests {
                 (806, 605),
                 vec![TaskRequest::SetDensity {
                     task_id: 1,
-                    density_dpi: 262
+                    density_dpi: 262,
+                    forced: false,
                 }],
                 vec![]
             ))
@@ -2154,7 +2755,8 @@ mod tests {
             .reconfigures(Instant::now())
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 130
+                density_dpi: 130,
+                forced: false,
             }));
         // Nothing is asked for a window the user closed.
         windows.user_closed(1);
@@ -2267,7 +2869,8 @@ mod tests {
                 }],
                 vec![TaskRequest::SetDensity {
                     task_id: 1,
-                    density_dpi: 196
+                    density_dpi: 196,
+                    forced: false,
                 }]
             )
         );
@@ -2278,7 +2881,8 @@ mod tests {
             .reconfigures(Instant::now())
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 130
+                density_dpi: 130,
+                forced: false,
             }));
     }
 
@@ -2403,7 +3007,7 @@ mod tests {
         assert!(!asks_for_density(&requests));
         assert_eq!(windows.scale(1), (98, 65));
 
-        // Forced works as system until the framework change it needs is made.
+        // Forced works as system on an image that cannot give a density without a relaunch.
         let (mut windows, _) = notes_at_100(false);
         windows.set_app_windows(&[AppWindowSettings {
             package_name: "com.example.app1".into(),
@@ -2458,7 +3062,8 @@ mod tests {
             vec![
                 TaskRequest::SetDensity {
                     task_id: 1,
-                    density_dpi: 262
+                    density_dpi: 262,
+                    forced: false,
                 },
                 TaskRequest::Resize {
                     task_id: 1,
@@ -2483,6 +3088,88 @@ mod tests {
             .any(|change| matches!(change, WindowChange::Resize { .. })));
         assert_eq!(windows.task_size(1), Some((806, 605)));
         assert_eq!(windows.scale(1), (1, 1));
+    }
+
+    /// A window of an app set to System (forced) scaling on a 100% monitor, whose task draws
+    /// at 130 dpi and whose activity does not say it handles a change of density, on a guest
+    /// that can (`available`) or cannot give it one without a relaunch.
+    fn forced_at_100(available: bool) -> (TaskWindows, Task) {
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "com.example.app1".into(),
+            dpi_scaling: DpiScaling::SystemForced,
+            ..AppWindowSettings::default()
+        }]);
+        let mut forced = task(1, "Notes", 400, 300);
+        forced.density_dpi = 130;
+        forced.max_width = 1920;
+        forced.max_height = 1920;
+        forced.forced_density_available = available;
+        windows.apply(&TaskEvent::Updated(forced.clone()));
+        let (changes, requests) = windows.window_dpi(1, 96);
+        assert!(requests.is_empty(), "it starts at its monitor's density");
+        assert!(changes.is_empty());
+        (windows, forced)
+    }
+
+    #[test]
+    fn fr4_a_forced_window_dragged_to_another_scale_behaves_as_an_app_mode_one_without_a_relaunch()
+    {
+        // Dragged from 100% to 200%: the window stays where it is dropped and keeps its size,
+        // shows the last frame scaled, then the task takes the new density, forced, 1:1.
+        let (mut windows, mut forced) = forced_at_100(true);
+        let now = Instant::now();
+        assert_eq!(windows.window_dragging(1, true, now), vec![]);
+        let (changes, requests) = windows.window_dpi(1, 192);
+        assert!(!asks_for_density(&requests), "never during the drag");
+        assert!(!changes
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+        assert_eq!(windows.scale(1), (131, 65));
+        assert_eq!(windows.window_resized(1, (806, 605), now), vec![]);
+        assert_eq!(
+            windows.window_dragging(1, false, now),
+            vec![
+                TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 262,
+                    forced: true,
+                },
+                TaskRequest::Resize {
+                    task_id: 1,
+                    width: 806,
+                    height: 605,
+                    live: true,
+                },
+            ]
+        );
+        assert!(!asks_for_density(&windows.reconfigures(now)), "once");
+        forced.density_dpi = 262;
+        forced.bounds.right = forced.bounds.left + 806;
+        forced.bounds.bottom = forced.bounds.top + 605;
+        let changes = windows.apply(&TaskEvent::Updated(forced));
+        assert!(!changes
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+        assert!(!windows
+            .tick(now + SETTLE * 2)
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+        assert_eq!(windows.task_size(1), Some((806, 605)));
+        assert_eq!(windows.scale(1), (1, 1));
+    }
+
+    #[test]
+    fn fr4_a_forced_window_on_an_image_that_would_relaunch_the_app_is_scaled_as_system() {
+        let (mut windows, _) = forced_at_100(false);
+        let now = Instant::now();
+        windows.window_dragging(1, true, now);
+        windows.window_dpi(1, 192);
+        assert_eq!(windows.window_resized(1, (806, 605), now), vec![]);
+        assert_eq!(windows.window_dragging(1, false, now), vec![]);
+        assert!(!asks_for_density(&windows.reconfigures(now)));
+        assert_eq!(windows.scale(1), (131, 65));
+        assert_eq!(windows.task_size(1), Some((400, 300)));
     }
 
     #[test]
@@ -2538,7 +3225,8 @@ mod tests {
             .reconfigures(Instant::now())
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 262
+                density_dpi: 262,
+                forced: false,
             }));
         youtube_updated(&mut windows, 806, 605, 262);
         assert_eq!(windows.scale(1), (1, 1));
@@ -2682,7 +3370,8 @@ mod tests {
         let requests = windows.reconfigures(now);
         assert!(requests.contains(&TaskRequest::SetDensity {
             task_id: 1,
-            density_dpi: 262
+            density_dpi: 262,
+            forced: false,
         }));
         assert!(requests.contains(&TaskRequest::Resize {
             task_id: 1,
@@ -2733,7 +3422,8 @@ mod tests {
             .reconfigures(now)
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 262
+                density_dpi: 262,
+                forced: false,
             }));
         // Its next activity does not say so either, and the choice still holds.
         notes.density_dpi = 262;
@@ -2745,7 +3435,8 @@ mod tests {
             .reconfigures(now)
             .contains(&TaskRequest::SetDensity {
                 task_id: 1,
-                density_dpi: 130
+                density_dpi: 130,
+                forced: false,
             }));
 
         // Auto and system never give such an app another density.
@@ -2924,6 +3615,7 @@ mod tests {
             vec![
                 TaskRequest::CaptionCompat {
                     below_title_bar: Vec::new(),
+                    keep_focus: Vec::new(),
                 },
                 TaskRequest::Resize {
                     task_id: 1,
@@ -3060,6 +3752,7 @@ mod tests {
             vec![
                 TaskRequest::CaptionCompat {
                     below_title_bar: Vec::new(),
+                    keep_focus: Vec::new(),
                 },
                 TaskRequest::SetFullScreen {
                     task_id: 1,
@@ -3147,6 +3840,7 @@ mod tests {
                 window_type: 2038,
                 focusable: false,
                 touchable: true,
+                ..OverlayWindow::default()
             }),
             ..Task::default()
         }
@@ -3266,6 +3960,375 @@ mod tests {
         assert_eq!(windows.scale(LYRICS), (82, 131));
     }
 
+    /// FLO's task 21, 785 by 937, drawing at `density`, on a guest that can (`available`) or
+    /// cannot give it a density without a relaunch.
+    fn flo_task(density: u32, available: bool) -> Task {
+        Task {
+            task_id: 21,
+            bounds: Bounds {
+                left: 0,
+                top: 0,
+                right: 785,
+                bottom: 937,
+            },
+            package_name: "skplanet.musicmate".into(),
+            label: "FLO".into(),
+            density_dpi: density,
+            max_width: 3840,
+            max_height: 3840,
+            forced_density_available: available,
+            ..Task::default()
+        }
+    }
+
+    /// Task windows with FLO set to `scaling` and its task drawing at `density`, and FLO's
+    /// floating lyrics, 318 by 86 as Android reports them at the display's 262 dpi, in a
+    /// window that opened on a monitor of `dpi`. Returns the size that window opened at.
+    fn flo_lyrics(
+        scaling: DpiScaling,
+        density: u32,
+        available: bool,
+        dpi: u32,
+    ) -> (TaskWindows, (u32, u32)) {
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: scaling,
+            ..AppWindowSettings::default()
+        }]);
+        windows.apply(&TaskEvent::Updated(flo_task(density, available)));
+        windows.apply(&TaskEvent::Updated(lyrics(158, 82, 318, 86)));
+        let (size, _, _) = windows
+            .window_opened(LYRICS, dpi)
+            .expect("an overlay window");
+        (windows, size)
+    }
+
+    /// What the lyrics' window hears of its size and scale.
+    fn lyrics_sizes(changes: Vec<WindowChange>) -> Vec<WindowChange> {
+        changes
+            .into_iter()
+            .filter(|change| {
+                matches!(
+                    change,
+                    WindowChange::Resize {
+                        task_id: LYRICS,
+                        ..
+                    } | WindowChange::TaskSize {
+                        task_id: LYRICS,
+                        ..
+                    }
+                )
+            })
+            .collect()
+    }
+
+    fn lyrics_sized(width: u32, height: u32, scale: Scale) -> Vec<WindowChange> {
+        vec![
+            WindowChange::Resize {
+                task_id: LYRICS,
+                width,
+                height,
+            },
+            WindowChange::TaskSize {
+                task_id: LYRICS,
+                width: 318,
+                height: 86,
+                max: None,
+                min: None,
+                scale,
+            },
+        ]
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_a_forced_app_is_shown_at_the_density_its_task_draws_at() {
+        // FLO in System (forced) on the 125% monitor (120 dpi): its task draws at 164 dpi, 1:1
+        // there, and so does its process draw the lyrics. They are shown 1:1 too, the size they
+        // have beside FLO's window in Android (0.405 of its width), not 164/262 of it.
+        let (windows, size) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        assert_eq!(size, (318, 86));
+        assert_eq!(windows.scale(LYRICS), (1, 1));
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_a_forced_app_on_another_monitor_is_shown_from_its_tasks_density_until_redrawn(
+    ) {
+        // The lyrics moved onto the 200% main monitor (192 dpi) while FLO's window stays on
+        // the 125% one: until FLO draws that window at the monitor's density, its process still
+        // draws them at 164 dpi, so they are shown at 262 over 164, the size they would be drawn
+        // at 262. A move that is no drag of the user's asks for that density at once.
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        let (changes, requests) = windows.window_dpi_changed(LYRICS, 192);
+        assert_eq!(requests, vec![overlay_density(262)]);
+        assert_eq!(changes, lyrics_sized(508, 137, (131, 82)));
+        assert_eq!(windows.scale(LYRICS), (131, 82));
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_an_app_that_is_not_forced_is_shown_at_the_displays_density() {
+        // An app given its monitor's density with a relaunch, and a forced one on a guest that
+        // cannot give it without one: their overlays are drawn at the display's 262 dpi, and
+        // shown at 164 over 262 on the 125% monitor as before.
+        for (scaling, available) in [
+            (DpiScaling::App, true),
+            (DpiScaling::Auto, true),
+            (DpiScaling::SystemForced, false),
+        ] {
+            let (windows, size) = flo_lyrics(scaling, 164, available, 120);
+            assert_eq!(size, (199, 54), "{scaling:?} {available}");
+            assert_eq!(windows.scale(LYRICS), (82, 131), "{scaling:?} {available}");
+        }
+        // An overlay of an app with no task is drawn at the display's density too.
+        let mut windows = TaskWindows::new();
+        windows.apply(&TaskEvent::Updated(lyrics(158, 82, 318, 86)));
+        let (size, _, _) = windows.window_opened(LYRICS, 120).unwrap();
+        assert_eq!(size, (199, 54));
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_a_forced_app_follows_its_tasks_new_density() {
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        // FLO's window goes to the 200% monitor and its task takes 262 dpi: the lyrics, still
+        // on the 125% monitor, are drawn at 262 now and shown at 164 over 262.
+        let changes = windows.apply(&TaskEvent::Updated(flo_task(262, true)));
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(199, 54, (82, 131)));
+        // Back on the 125% monitor at 164: 1:1 again.
+        let changes = windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(318, 86, (1, 1)));
+        // The same density again changes nothing.
+        let changes = windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        assert_eq!(lyrics_sizes(changes), vec![]);
+        // The user sets FLO to another mode: its process is given no density of its own from
+        // now on, and the lyrics are taken at the display's again.
+        let changes = windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::App,
+            ..AppWindowSettings::default()
+        }]);
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(199, 54, (82, 131)));
+        // FLO's task ends while the lyrics stay: at the display's density, nothing to change.
+        let changes = windows.apply(&TaskEvent::Removed { task_id: 21 });
+        assert_eq!(lyrics_sizes(changes), vec![]);
+    }
+
+    /// FLO's floating lyrics as the guest reports them once FLO drew that window at `own` dpi
+    /// (0: at FLO's own density), `width` by `height` on the guest's display.
+    fn lyrics_drawn_at(width: i32, height: i32, own: u32) -> Task {
+        Task {
+            overlay: Some(OverlayWindow {
+                window_type: 2038,
+                touchable: true,
+                density_dpi: own,
+                ..OverlayWindow::default()
+            }),
+            ..lyrics(158, 82, width, height)
+        }
+    }
+
+    fn overlay_density(density_dpi: u32) -> TaskRequest {
+        TaskRequest::SetOverlayDensity {
+            overlay_id: LYRICS,
+            density_dpi,
+        }
+    }
+
+    /// The overlay densities among `requests`.
+    fn overlay_densities(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
+        requests
+            .into_iter()
+            .filter(|request| matches!(request, TaskRequest::SetOverlayDensity { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn fr41_the_density_asked_for_a_forced_apps_overlay_is_its_monitors_when_it_differs() {
+        // FLO in System (forced) with its task at 164 dpi (125%): on the 200% main monitor
+        // (192 dpi) the lyrics are to be drawn at 262, on the 125% monitor at FLO's own.
+        assert_eq!(overlay_density_wanted(164, 192), 262);
+        assert_eq!(overlay_density_wanted(164, 120), 0);
+        assert_eq!(overlay_density_wanted(262, 120), 164);
+        // An app that is not forced, or a window that has not said its monitor: nothing.
+        assert_eq!(overlay_density_wanted(0, 192), 0);
+        assert_eq!(overlay_density_wanted(164, 0), 0);
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_dragged_onto_another_density_is_asked_for_it_when_the_drag_ends()
+    {
+        let now = Instant::now();
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        // On the task's monitor nothing is asked.
+        assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+        assert!(windows.window_dragging(LYRICS, true, now).is_empty());
+        // Dragged onto the 200% main monitor: shown as #1039 shows it, and asked nothing yet.
+        let (changes, requests) = windows.window_dpi(LYRICS, 192);
+        assert_eq!(changes, lyrics_sized(508, 137, (131, 82)));
+        assert!(requests.is_empty());
+        assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+        // The drag ends there: that window alone is asked for the monitor's density, once.
+        assert_eq!(
+            windows.window_dragging(LYRICS, false, now),
+            vec![overlay_density(262)]
+        );
+        assert!(windows.window_dragging(LYRICS, false, now).is_empty());
+        assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_is_scaled_until_the_guest_draws_it_then_shown_one_to_one() {
+        let now = Instant::now();
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        windows.window_dragging(LYRICS, true, now);
+        windows.window_dpi(LYRICS, 192);
+        windows.window_dragging(LYRICS, false, now);
+        // Until the guest says FLO drew it at 262, the 318 by 86 picture drawn at 164 is
+        // stretched to 508 by 137.
+        assert_eq!(windows.scale(LYRICS), (131, 82));
+        // FLO lays the window out at 262: 508 by 137 on the guest's display, shown 1:1, at the
+        // same size on the desktop. Only the lyrics' window hears of it.
+        let changes = windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        assert_eq!(
+            changes,
+            vec![
+                WindowChange::Resize {
+                    task_id: LYRICS,
+                    width: 508,
+                    height: 137,
+                },
+                WindowChange::TaskSize {
+                    task_id: LYRICS,
+                    width: 508,
+                    height: 137,
+                    max: None,
+                    min: None,
+                    scale: (1, 1),
+                },
+            ]
+        );
+        assert_eq!(windows.scale(LYRICS), (1, 1));
+        // Nothing more is asked of it, and FLO's own task is asked no size or density.
+        assert_nothing_asked_of_sizes(windows.reconfigures(now));
+    }
+
+    /// `requests` ask no task or overlay for a size or a density.
+    fn assert_nothing_asked_of_sizes(requests: Vec<TaskRequest>) {
+        assert!(
+            !requests.iter().any(|request| matches!(
+                request,
+                TaskRequest::SetOverlayDensity { .. }
+                    | TaskRequest::SetDensity { .. }
+                    | TaskRequest::Resize { .. }
+            )),
+            "{requests:?}"
+        );
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_back_on_its_tasks_monitor_returns_to_its_tasks_density() {
+        let now = Instant::now();
+        let (mut windows, _) = flo_lyrics(DpiScaling::SystemForced, 164, true, 120);
+        windows.window_dragging(LYRICS, true, now);
+        windows.window_dpi(LYRICS, 192);
+        windows.window_dragging(LYRICS, false, now);
+        windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        // Dragged back onto the 125% monitor: the picture drawn at 262 is shown at 164 over
+        // 262, the size it has there, until the drag ends.
+        windows.window_dragging(LYRICS, true, now);
+        let (_, requests) = windows.window_dpi(LYRICS, 120);
+        assert!(requests.is_empty());
+        assert_eq!(windows.scale(LYRICS), (82, 131));
+        // Then the window is drawn at FLO's own density again.
+        assert_eq!(
+            windows.window_dragging(LYRICS, false, now),
+            vec![overlay_density(0)]
+        );
+        let changes = windows.apply(&TaskEvent::Updated(lyrics_drawn_at(318, 86, 0)));
+        assert_eq!(lyrics_sizes(changes), lyrics_sized(318, 86, (1, 1)));
+        assert_nothing_asked_of_sizes(windows.reconfigures(now));
+    }
+
+    #[test]
+    fn fr41_a_forced_apps_overlay_follows_its_tasks_density_and_mode() {
+        let now = Instant::now();
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::SystemForced,
+            ..AppWindowSettings::default()
+        }]);
+        windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        windows.apply(&TaskEvent::Updated(lyrics(158, 82, 318, 86)));
+        // The lyrics open on the main monitor, where the user's drag left them last time.
+        let (_, requests, _) = windows.window_opened(LYRICS, 192).unwrap();
+        assert_eq!(requests, vec![overlay_density(262)]);
+        windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        // FLO's window goes to the main monitor too and its task takes 262: the lyrics are
+        // drawn at FLO's own density again, which is the monitor's.
+        windows.apply(&TaskEvent::Updated(flo_task(262, true)));
+        assert_eq!(
+            overlay_densities(windows.reconfigures(now)),
+            vec![overlay_density(0)]
+        );
+        // FLO's window goes back to the 125% monitor: the lyrics are asked for 262 again.
+        windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        assert_eq!(
+            overlay_densities(windows.reconfigures(now)),
+            vec![overlay_density(262)]
+        );
+        // The user sets FLO to another mode: the window is drawn as the rest of FLO again.
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::App,
+            ..AppWindowSettings::default()
+        }]);
+        assert_eq!(
+            overlay_densities(windows.reconfigures(now)),
+            vec![overlay_density(0)]
+        );
+    }
+
+    #[test]
+    fn fr41_an_overlay_the_guest_draws_at_a_density_nobody_asked_for_is_asked_back() {
+        // The window manager started again while FLO still draws the lyrics at 262 on the 125%
+        // monitor: they are shown at the size they have, and asked for FLO's density.
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "skplanet.musicmate".into(),
+            dpi_scaling: DpiScaling::SystemForced,
+            ..AppWindowSettings::default()
+        }]);
+        windows.apply(&TaskEvent::Updated(flo_task(164, true)));
+        windows.apply(&TaskEvent::Updated(lyrics_drawn_at(508, 137, 262)));
+        let (size, requests, _) = windows.window_opened(LYRICS, 120).unwrap();
+        assert_eq!(size, (318, 86));
+        assert_eq!(requests, vec![overlay_density(0)]);
+    }
+
+    #[test]
+    fn fr41_an_overlay_of_an_app_that_is_not_forced_is_never_asked_a_density() {
+        let now = Instant::now();
+        for (scaling, available) in [
+            (DpiScaling::App, true),
+            (DpiScaling::Auto, true),
+            (DpiScaling::System, true),
+            (DpiScaling::SystemForced, false),
+        ] {
+            let (mut windows, _) = flo_lyrics(scaling, 164, available, 120);
+            windows.window_dragging(LYRICS, true, now);
+            let (changes, requests) = windows.window_dpi(LYRICS, 192);
+            assert!(requests.is_empty(), "{scaling:?} {available}");
+            // Shown as before: drawn at the display's 262, 1:1 on the 200% monitor.
+            assert_eq!(windows.scale(LYRICS), (1, 1), "{scaling:?} {available}");
+            assert_eq!(lyrics_sizes(changes), lyrics_sized(318, 86, (1, 1)));
+            assert!(
+                windows.window_dragging(LYRICS, false, now).is_empty(),
+                "{scaling:?} {available}"
+            );
+            assert_eq!(overlay_densities(windows.reconfigures(now)), vec![]);
+        }
+    }
+
     #[test]
     fn fr41_the_host_never_closes_resizes_or_reconfigures_an_overlay() {
         let mut windows = TaskWindows::new();
@@ -3326,6 +4389,7 @@ mod tests {
                 window_type: 2038,
                 focusable: false,
                 touchable: false,
+                ..OverlayWindow::default()
             }),
             ..lyrics(0, 0, 3840, 3840)
         };
@@ -3393,6 +4457,7 @@ mod tests {
                 window_type: 2038,
                 focusable: true,
                 touchable: true,
+                ..OverlayWindow::default()
             }),
             ..lyrics(158, 82, 508, 138)
         };
@@ -3431,6 +4496,102 @@ mod tests {
         let again = windows.reopen(LYRICS);
         assert!(matches!(again[0], WindowChange::Open { width: 508, .. }));
         assert_eq!(again[2], placed(158, 82, false, true));
+    }
+
+    fn frame_asks(requests: &[TaskRequest]) -> Vec<i32> {
+        requests
+            .iter()
+            .filter_map(|request| match request {
+                TaskRequest::RequestFrame { task_id } => Some(*task_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fr3_a_window_reopened_after_the_agent_restarted_asks_for_its_frame_once() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        // The next agent reports the task again, and the host gives it its display back.
+        let opened = windows.apply(&updated(5, "Settings"));
+        assert!(matches!(opened[0], WindowChange::Open { task_id: 5, .. }));
+        windows.apply(&frames(5, 3));
+        assert_eq!(frame_asks(&windows.reconfigures(start)), vec![5]);
+        // However often the windows are asked before the retry is due, nothing more goes.
+        for ms in [1, 16, 100, 900] {
+            let later = start + std::time::Duration::from_millis(ms);
+            assert!(frame_asks(&windows.reconfigures(later)).is_empty());
+        }
+    }
+
+    #[test]
+    fn fr3_a_frame_reaching_the_reopened_window_stops_its_requests() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        assert_eq!(frame_asks(&windows.reconfigures(start)), vec![5]);
+        drawn.frame_drawn(5, (720, 1280));
+        let later = start + super::super::frame_requests::FRAME_RETRY * 5;
+        assert!(frame_asks(&windows.reconfigures(later)).is_empty());
+    }
+
+    #[test]
+    fn fr3_a_frame_kept_for_a_window_not_ready_yet_counts_as_arrived() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        windows.reconfigures(start);
+        drawn.frame_arrived(5);
+        let later = start + super::super::frame_requests::FRAME_RETRY * 2;
+        assert!(frame_asks(&windows.reconfigures(later)).is_empty());
+    }
+
+    #[test]
+    fn fr3_a_window_without_a_frame_asks_again_until_the_bound() {
+        let start = Instant::now();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(DrawnFrames::new());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        let retry = super::super::frame_requests::FRAME_RETRY;
+        let asks: usize = (0..10u32)
+            .map(|step| frame_asks(&windows.reconfigures(start + retry * step)).len())
+            .sum();
+        assert_eq!(asks, super::super::frame_requests::FRAME_ASKS as usize);
+    }
+
+    #[test]
+    fn fr3_a_window_that_crashed_and_opened_again_asks_again() {
+        let start = Instant::now();
+        let drawn = DrawnFrames::new();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(drawn.clone());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        windows.reconfigures(start);
+        drawn.frame_drawn(5, (720, 1280));
+        windows.reconfigures(start);
+        windows.reopen(5);
+        assert_eq!(frame_asks(&windows.reconfigures(start)), vec![5]);
+    }
+
+    #[test]
+    fn fr3_a_closed_window_asks_for_nothing() {
+        let start = Instant::now();
+        let mut windows = TaskWindows::new();
+        windows.watch_frames(DrawnFrames::new());
+        windows.apply(&updated(5, "Settings"));
+        windows.apply(&frames(5, 3));
+        windows.user_closed(5);
+        assert!(frame_asks(&windows.reconfigures(start)).is_empty());
     }
 
     #[test]
@@ -3497,5 +4658,341 @@ mod tests {
         assert!(!resizes(
             &windows.tick(now + super::super::window_sizing::SETTLE * 2)
         ));
+    }
+
+    /// FLO on a 125% monitor (120 DPI, density 164) beside a 200% main one (density 262): the
+    /// task it starts with, 1000 by 1600 pixels at the main monitor's density.
+    fn flo(handles_density_change: bool) -> Task {
+        let mut flo = task(1, "FLO", 1000, 1600);
+        flo.density_dpi = 262;
+        flo.handles_density_change = handles_density_change;
+        flo
+    }
+
+    fn opened_size(changes: &[WindowChange]) -> Option<(u32, u32)> {
+        changes.iter().find_map(|change| match change {
+            WindowChange::Open { width, height, .. } => Some((*width, *height)),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn fr4_a_window_opening_on_a_secondary_monitor_keeps_its_first_size() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        // The window waits: the task takes that monitor's density and its size there first.
+        assert_eq!(windows.apply(&TaskEvent::Updated(flo(true))), vec![]);
+        let requests = windows.reconfigures(Instant::now());
+        let density_at = requests.iter().position(|request| {
+            *request
+                == TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 164,
+                    forced: false,
+                }
+        });
+        let size_at = requests.iter().position(|request| {
+            *request
+                == TaskRequest::Resize {
+                    task_id: 1,
+                    width: 626,
+                    height: 1002,
+                    live: false,
+                }
+        });
+        assert!(
+            matches!((density_at, size_at), (Some(d), Some(s)) if d < s),
+            "{requests:?}"
+        );
+        // The size alone is not enough: the app would still draw at the main monitor's density.
+        let mut resized = flo(true);
+        resized.bounds.right = resized.bounds.left + 626;
+        resized.bounds.bottom = resized.bounds.top + 1002;
+        assert_eq!(windows.apply(&TaskEvent::Updated(resized.clone())), vec![]);
+        // Both taken: the window opens at that size, the one it keeps.
+        resized.density_dpi = 164;
+        let changes = windows.apply(&TaskEvent::Updated(resized));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        // On that monitor the window is told no other size, and the task no other density.
+        assert_eq!(windows.window_dpi(1, 120), (vec![], vec![]));
+        let now = Instant::now();
+        assert_eq!(windows.window_resized(1, (626, 1002), now), vec![]);
+        assert!(!asks_for_density(&windows.reconfigures(now)));
+        assert!(!windows
+            .tick(now + SETTLE * 2)
+            .iter()
+            .any(|change| matches!(change, WindowChange::Resize { .. })));
+    }
+
+    #[test]
+    fn fr4_a_system_scaled_window_opening_on_a_secondary_monitor_opens_at_its_scale() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        // A task that keeps its density opens at once, shown at that monitor's scale: the same
+        // size to the eye as on the main monitor, and no density asked.
+        let changes = windows.apply(&TaskEvent::Updated(flo(false)));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        assert!(changes.iter().any(|change| matches!(
+            change,
+            WindowChange::TaskSize { width: 1000, height: 1600, scale, .. } if *scale != (1, 1)
+        )));
+        assert!(!asks_for_density(&windows.reconfigures(Instant::now())));
+        assert_eq!(windows.window_dpi(1, 120), (vec![], vec![]));
+    }
+
+    #[test]
+    fn fr4_a_window_opening_on_the_main_monitor_opens_at_once_as_before() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(192));
+        let changes = windows.apply(&TaskEvent::Updated(flo(true)));
+        assert_eq!(opened_size(&changes), Some((1000, 1600)));
+        assert!(!asks_for_density(&windows.reconfigures(Instant::now())));
+        assert_eq!(windows.window_dpi(1, 192), (vec![], vec![]));
+        // An app whose monitor is not known opens at its task's size, as in 1.0.
+        let mut windows = TaskWindows::new();
+        let changes = windows.apply(&TaskEvent::Updated(flo(true)));
+        assert_eq!(opened_size(&changes), Some((1000, 1600)));
+    }
+
+    #[test]
+    fn fr4_a_guest_that_does_not_take_the_opening_density_still_gets_a_window() {
+        let mut windows = TaskWindows::new();
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        windows.apply(&TaskEvent::Updated(flo(true)));
+        let now = Instant::now();
+        windows.reconfigures(now);
+        // Nothing came within the wait: the window opens at the size the task has there.
+        let changes = windows.tick(now + SETTLE);
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        assert!(asks_for_density(&windows.reconfigures(now + SETTLE)));
+    }
+
+    /// Task windows whose app is set to `scaling`, opening on a 125% monitor (120 DPI).
+    fn on_the_secondary(scaling: DpiScaling) -> TaskWindows {
+        let mut windows = TaskWindows::new();
+        windows.set_app_windows(&[AppWindowSettings {
+            package_name: "com.example.app1".into(),
+            dpi_scaling: scaling,
+            ..AppWindowSettings::default()
+        }]);
+        windows.set_opening_dpi("com.example.app1", Some(120));
+        windows
+    }
+
+    /// FLO's next task as Android starts it after its window closed at 577x815 on the 125%
+    /// monitor: those bounds, at the main monitor's density.
+    fn reopened_flo() -> Task {
+        let mut flo = task(1, "FLO", 577, 815);
+        flo.density_dpi = 262;
+        flo.forced_density_available = true;
+        flo
+    }
+
+    /// The window of `windows`' task 1, opened once the task took `density` and `size` as
+    /// asked: the density first, then the size.
+    fn reopen(
+        windows: &mut TaskWindows,
+        density: u32,
+        size: (u32, u32),
+        forced: bool,
+    ) -> Vec<WindowChange> {
+        let mut flo = reopened_flo();
+        assert_eq!(windows.apply(&TaskEvent::Updated(flo.clone())), vec![]);
+        let requests = windows.reconfigures(Instant::now());
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| matches!(
+                    request,
+                    TaskRequest::SetDensity { .. } | TaskRequest::Resize { .. }
+                ))
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![
+                TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: density,
+                    forced,
+                },
+                TaskRequest::Resize {
+                    task_id: 1,
+                    width: size.0,
+                    height: size.1,
+                    live: false,
+                },
+            ]
+        );
+        flo.density_dpi = density;
+        flo.bounds.right = flo.bounds.left + size.0 as i32;
+        flo.bounds.bottom = flo.bounds.top + size.1 as i32;
+        windows.apply(&TaskEvent::Updated(flo))
+    }
+
+    #[test]
+    fn fr4_a_forced_window_reopens_on_a_lower_scale_monitor_at_the_size_it_closed_at() {
+        // FLO, forced, closed at 577x815 on the 125% monitor, where its task drew at 164 dpi.
+        // Read as pixels at 262 dpi, those bounds made each new window smaller by 164/262:
+        // 577x815, then 361x510, then smaller again.
+        let mut windows = on_the_secondary(DpiScaling::SystemForced);
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (577, 815),
+                density: 164,
+            }),
+        );
+        let changes = reopen(&mut windows, 164, (577, 815), true);
+        assert_eq!(opened_size(&changes), Some((577, 815)), "{changes:?}");
+        assert_eq!(windows.scale(1), (1, 1));
+        // Closed again at that size: the same size is remembered, so it reopens the same way
+        // however often it is closed.
+        assert!(windows.user_closed(1).is_some());
+        assert_eq!(
+            windows.take_closed_sizes(),
+            vec![(
+                "com.example.app1".to_string(),
+                ClosedSize {
+                    size: (577, 815),
+                    density: 164,
+                }
+            )]
+        );
+        assert_eq!(windows.take_closed_sizes(), vec![]);
+        windows.apply(&TaskEvent::Removed { task_id: 1 });
+        assert_eq!(windows.take_closed_sizes(), vec![], "noted once");
+        let changes = reopen(&mut windows, 164, (577, 815), true);
+        assert_eq!(opened_size(&changes), Some((577, 815)), "{changes:?}");
+    }
+
+    #[test]
+    fn fr4_an_app_mode_window_reopens_on_a_lower_scale_monitor_at_the_size_it_closed_at() {
+        let mut windows = on_the_secondary(DpiScaling::App);
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (577, 815),
+                density: 164,
+            }),
+        );
+        let changes = reopen(&mut windows, 164, (577, 815), false);
+        assert_eq!(opened_size(&changes), Some((577, 815)), "{changes:?}");
+        // A window whose app closed it is remembered too.
+        windows.apply(&TaskEvent::Removed { task_id: 1 });
+        assert_eq!(
+            windows.take_closed_sizes(),
+            vec![(
+                "com.example.app1".to_string(),
+                ClosedSize {
+                    size: (577, 815),
+                    density: 164,
+                }
+            )]
+        );
+        // Closed on the main monitor at 952x1318 (262 dpi) and opening on the 125% one: the
+        // same size to the eye there.
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (952, 1318),
+                density: 262,
+            }),
+        );
+        let mut flo = reopened_flo();
+        flo.bounds.right = flo.bounds.left + 952;
+        flo.bounds.bottom = flo.bounds.top + 1318;
+        windows.apply(&TaskEvent::Updated(flo));
+        assert!(windows
+            .reconfigures(Instant::now())
+            .contains(&TaskRequest::Resize {
+                task_id: 1,
+                width: 596,
+                height: 825,
+                live: false,
+            }));
+    }
+
+    #[test]
+    fn fr4_a_window_reopening_on_the_main_monitor_opens_as_before() {
+        // On the main monitor the task keeps the density it starts with: it opens at once, at
+        // the size Android gives it, whatever was remembered.
+        for closed in [
+            ClosedSize {
+                size: (952, 1318),
+                density: 262,
+            },
+            ClosedSize {
+                size: (577, 815),
+                density: 164,
+            },
+        ] {
+            let mut windows = TaskWindows::new();
+            windows.set_app_windows(&[AppWindowSettings {
+                package_name: "com.example.app1".into(),
+                dpi_scaling: DpiScaling::SystemForced,
+                ..AppWindowSettings::default()
+            }]);
+            windows.set_opening_dpi("com.example.app1", Some(192));
+            windows.set_closed_size("com.example.app1", Some(closed));
+            let mut flo = reopened_flo();
+            flo.bounds.right = flo.bounds.left + 952;
+            flo.bounds.bottom = flo.bounds.top + 1318;
+            let changes = windows.apply(&TaskEvent::Updated(flo));
+            assert_eq!(opened_size(&changes), Some((952, 1318)), "{changes:?}");
+            assert!(!asks_for_density(&windows.reconfigures(Instant::now())));
+        }
+        // A task that keeps its density on the 125% monitor is shown scaled, as before.
+        let mut windows = on_the_secondary(DpiScaling::System);
+        windows.set_closed_size(
+            "com.example.app1",
+            Some(ClosedSize {
+                size: (577, 815),
+                density: 164,
+            }),
+        );
+        let changes = windows.apply(&TaskEvent::Updated(flo(false)));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+    }
+
+    #[test]
+    fn fr4_a_forced_window_takes_its_monitors_density_forced_before_it_opens() {
+        // Its first report does not say yet that the guest can give a density without a
+        // relaunch: the window still waits for the monitor's density, as an App mode one does,
+        // and the density goes out forced, so the agent marks the task before it gives it.
+        let mut windows = on_the_secondary(DpiScaling::SystemForced);
+        let mut first = flo(false);
+        first.forced_density_available = false;
+        assert_eq!(windows.apply(&TaskEvent::Updated(first.clone())), vec![]);
+        let requests = windows.reconfigures(Instant::now());
+        assert_eq!(
+            requests.first(),
+            Some(&TaskRequest::SetDensity {
+                task_id: 1,
+                density_dpi: 164,
+                forced: true,
+            }),
+            "{requests:?}"
+        );
+        let mut taken = first.clone();
+        taken.forced_density_available = true;
+        taken.density_dpi = 164;
+        taken.bounds.right = taken.bounds.left + 626;
+        taken.bounds.bottom = taken.bounds.top + 1002;
+        let changes = windows.apply(&TaskEvent::Updated(taken));
+        assert_eq!(opened_size(&changes), Some((626, 1002)), "{changes:?}");
+        assert_eq!(windows.scale(1), (1, 1));
+
+        // A guest that cannot mark the task gives it no density: the window opens after the
+        // wait, scaled as a System one, and the app is never asked for a density unforced,
+        // which would relaunch it.
+        let mut windows = on_the_secondary(DpiScaling::SystemForced);
+        windows.apply(&TaskEvent::Updated(first));
+        let now = Instant::now();
+        windows.reconfigures(now);
+        let changes = windows.tick(now + SETTLE);
+        assert!(opened_size(&changes).is_some(), "{changes:?}");
+        assert!(!windows
+            .reconfigures(now + SETTLE)
+            .iter()
+            .any(|request| matches!(request, TaskRequest::SetDensity { forced: false, .. })));
     }
 }

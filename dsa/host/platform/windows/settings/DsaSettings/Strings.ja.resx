@@ -1094,6 +1094,15 @@ Microsoft および Google とは提携しておらず、両社による承認�
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} をデスクトップから削除しました。</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>ウィジェット {0} 個</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>ウィジェット 1 個</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>さらに {0} 個を表示</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK インストーラー</value>
   </data>
@@ -2641,7 +2650,7 @@ Android はこれを拒否します。</value>
     <value>代替ストア</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。</value>
+    <value>DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。インストールしたストアは他のアプリと同じようにアプリの一覧に表示され、削除もアプリの一覧から行います。</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>未インストール</value>
@@ -2663,5 +2672,39 @@ Android はこれを拒否します。</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>開く</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>ゲーム</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>ゲーム</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>最新の情報に更新</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>DSA でゲームを快適に遊ぶための設定です。</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>ゲームの設定を読み取れないか、変更できませんでした</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>ゲームの快適さ</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>ゲームのフォーカスを維持</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>下でオンにしたアプリは、別のウィンドウをクリックしても動き続けます。フォーカスを失うと止まるゲームも止まりません。
+キー入力と文字入力は、今までどおり使っているウィンドウにだけ送られます。</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>すべて選択</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Android にはまだアプリがインストールされていません。</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>ゲーム · {0}</value>
   </data>
 </root>

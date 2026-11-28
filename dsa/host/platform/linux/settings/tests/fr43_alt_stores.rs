@@ -112,7 +112,7 @@ fn catalogue(path: &Path) -> BTreeMap<String, String> {
 fn fr43_alternative_store_strings_exist_in_every_language() {
     let texts = [
         "Alternative stores",
-        "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps.",
+        "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Installed stores appear in the app list like any other app, and you uninstall them there.",
         "Installed, version {0}",
         "Downloading and installing\u{2026}",
         "Not installed: {0}",

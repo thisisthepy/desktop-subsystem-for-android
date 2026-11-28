@@ -64,7 +64,8 @@ use dsa_host_core::compositor::surface_calls::{
     SURFACE_OP_TICK,
 };
 use dsa_host_core::compositor::window_sizing::{
-    frame_placement, to_task_length, uncovered_fill, window_size_of, FramePlacement, Scale,
+    placement_ratios, shown_frame_placement, to_task_length, uncovered_fill, window_size_of,
+    FramePlacement, Scale,
 };
 use dsa_protocol::window_host::encode_body;
 use dsa_protocol::window_host::types::{envelope::Body, SurfaceAnswer, SurfaceCall};
@@ -938,10 +939,13 @@ impl WindowPresenter {
             }
         }
         let committed = self.commit_visual(&mut state);
+        // Not while the window moves onto a monitor of another scale: this runs inside the
+        // desktop's SetWindowPos of the suggested rectangle, which the wait held up.
+        let wait = committed && state.follow.waits_for_commit();
         let device = state.tree.as_ref().map(|tree| tree.device.clone());
         drop(state);
         self.claim_released.notify_all();
-        if committed {
+        if wait {
             if let Some(device) = device {
                 // SAFETY: a plain COM call on the device.
                 unsafe {
@@ -957,6 +961,18 @@ impl WindowPresenter {
                 let _ = windows_sys::Win32::Graphics::Dwm::DwmFlush();
             }
         }
+    }
+
+    /// The largest client area the guest can draw for the task at the window's scale
+    /// (`None`: not known), so a held window larger than it fills the strips it leaves.
+    pub fn set_limit(&self, limit: Option<(u32, u32)>) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed || state.follow.limit() == limit {
+            return;
+        }
+        state.follow.set_limit(limit);
+        // Committed again with the next frame or tick, with or without the fill.
+        state.committed = None;
     }
 
     pub fn set_held(&self, held: bool) {
@@ -1453,17 +1469,30 @@ impl WindowPresenter {
             return false;
         };
         let view = state.follow.view();
-        let placement = frame_placement(state.frame, view, state.scale, state.follow.held());
+        let placement = shown_frame_placement(
+            state.frame,
+            view,
+            state.scale,
+            state.follow.held(),
+            state.follow.stretched(),
+        );
         // The window has no redirection surface (WS_EX_NOREDIRECTIONBITMAP) and paints no
         // background (WM_ERASEBKGND), so wherever the frame's visual does not reach, beside a
-        // frame shown 1:1 in a larger window, the desktop shows through unless the fill under
-        // the frame covers it.
-        let colour = fill_colour(
-            self.see_through,
-            state.band_sample,
-            state.splash_background,
-            || super::system_settings::read().dark_mode,
-        );
+        // frame shown in a larger window, the desktop shows through unless the fill under the
+        // frame covers it. Core decides from where the frame is (FrameFollow::strips_filled):
+        // only when the placed frame does not cover a held window and cannot (the window is
+        // beyond what the guest can draw) or no longer will (nothing is pending). While a
+        // maximise, snap or restore waits for the app, nothing is drawn around the last frame.
+        let colour = if state.follow.strips_filled(placement) {
+            fill_colour(
+                self.see_through,
+                state.band_sample,
+                state.splash_background,
+                || super::system_settings::read().dark_mode,
+            )
+        } else {
+            None
+        };
         let wanted = (buffers, state.frame, placement, view, colour);
         if state.committed == Some(wanted) {
             return false;
@@ -1488,7 +1517,8 @@ impl WindowPresenter {
             }
             fill_shown &= state.fill_colour == Some(colour) && state.fill_surface.is_some();
         }
-        let (x, y, dx, dy) = frame_transform(frame_scale(buffers, state.frame), placement);
+        let (x, y, dx, dy) =
+            frame_transform(frame_scale(buffers, state.frame), state.frame, placement);
         let matrix = Matrix3x2 {
             M11: x,
             M12: 0.0,
@@ -1497,11 +1527,13 @@ impl WindowPresenter {
             M31: dx,
             M32: dy,
         };
+        // No colour: the fill's one pixel is scaled to nothing, so it covers nothing.
+        let fill_size = if colour.is_some() { view } else { (0, 0) };
         let fill = Matrix3x2 {
-            M11: view.0 as f32,
+            M11: fill_size.0 as f32,
             M12: 0.0,
             M21: 0.0,
-            M22: view.1 as f32,
+            M22: fill_size.1 as f32,
             M31: 0.0,
             M32: 0.0,
         };
@@ -1793,12 +1825,17 @@ fn fill_colour(
 /// The frame visual's scale and offset (x scale, y scale, x, y) that shows the frame where
 /// core places it (`placement`), for a swapchain whose buffers the frame fills at
 /// `buffer_scale`.
-fn frame_transform(buffer_scale: (f32, f32), placement: FramePlacement) -> (f32, f32, f32, f32) {
-    let (numerator, denominator) = placement.scale;
-    let ratio = numerator as f32 / denominator.max(1) as f32;
+fn frame_transform(
+    buffer_scale: (f32, f32),
+    frame: (u32, u32),
+    placement: FramePlacement,
+) -> (f32, f32, f32, f32) {
+    // Each axis on its own: a frame stretched over the window while it moves onto a monitor
+    // of another scale may be a pixel off on one axis. Any other placement keeps its shape.
+    let (x, y) = placement_ratios(frame, placement);
     (
-        buffer_scale.0 * ratio,
-        buffer_scale.1 * ratio,
+        buffer_scale.0 * x as f32,
+        buffer_scale.1 * y as f32,
         placement.origin.0 as f32,
         placement.origin.1 as f32,
     )
@@ -1807,13 +1844,13 @@ fn frame_transform(buffer_scale: (f32, f32), placement: FramePlacement) -> (f32,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dsa_host_core::compositor::window_sizing::vectors;
+    use dsa_host_core::compositor::window_sizing::{frame_placement, vectors};
 
     #[test]
     fn nfr8_windows_places_each_frame_as_the_shared_vectors_say() {
         for case in vectors::PLACEMENTS {
             let placement = frame_placement(case.frame, case.view, case.scale, case.held);
-            let (x, y, dx, dy) = frame_transform((1.0, 1.0), placement);
+            let (x, y, dx, dy) = frame_transform((1.0, 1.0), case.frame, placement);
             let expected = case.expected;
             assert_eq!(
                 (dx, dy),

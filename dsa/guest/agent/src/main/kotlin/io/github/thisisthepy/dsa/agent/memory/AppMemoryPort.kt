@@ -25,8 +25,25 @@ interface AppMemoryPort {
     /** Sets the trim request, "<number> <HIDDEN|BACKGROUND> <compact: 0 or 1> <process>". */
     fun requestTrim(value: String)
 
-    /** The number of the last trim request carried out, or empty. */
+    /**
+     * The answer to the last trim request carried out, "<number> <result>" (sent, refused
+     * with the activity manager's reason, or invalid), the number alone from an older image's
+     * script, or empty.
+     */
     fun trimDone(): String
+
+    /**
+     * Whether the framework sends a memory trim to an app the host hides although Android
+     * shows its task (the activity manager's dsa-hidden-trim, which DSA's framework adds).
+     * A framework without that change answers false.
+     */
+    fun hiddenTrimSupported(): Boolean = false
+
+    /**
+     * Tells the framework which apps the host hides, replacing those it was told before, so
+     * that it sends them their trims. Returns whether it took them.
+     */
+    fun setHiddenApps(packages: Set<String>): Boolean = false
 
     /** Sets the compile request, "<number> <package>". */
     fun requestCompile(value: String)

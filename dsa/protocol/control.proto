@@ -169,6 +169,12 @@ message TaskUpdated {
   // the density of another monitor; for any other app it keeps the task's density and scales
   // the window instead. False when the agent cannot read it.
   bool handles_density_change = 26;
+  // Whether the guest can give this task a new density without relaunching its activity, even
+  // though the activity does not say it handles one: the guest's framework has the change that
+  // lets the agent mark a task for it (SetTaskDensity's `forced`). The host gives the task of
+  // an app the user set to System (forced) scaling another monitor's density only when this
+  // is set, and scales its window as for System otherwise. False on an image without it.
+  bool forced_density_available = 29;
   // Which kind of full screen the task's app asks for, if any. The host shows the task's
   // window on its whole monitor or keeps it inside its window, as the user's setting for that
   // kind of request says.
@@ -202,7 +208,8 @@ message TaskUpdated {
 // the overlay's ID as `task_id`, the positions relative to the top left corner of `bounds`.
 // It never sends CloseTask, ResizeTask, SetTaskDensity, SetTaskCaption or SetTaskFullScreen
 // for one, and the agent ignores them: how an overlay moves, changes size and closes is its
-// app's.
+// app's. The one thing it asks of an overlay is a density (SetOverlayDensity), and only for an
+// app set to System (forced) scaling.
 //
 // An overlay whose `bounds` cover the whole display (a screen filter, a dimmer) is reported
 // the same way. The host opens no window for it, because that window would cover the user's
@@ -220,6 +227,11 @@ message OverlayWindow {
   // Whether the window takes pointer input (its app did not set FLAG_NOT_TOUCHABLE). The
   // pointer passes through the host's window of one that does not.
   bool touchable = 3;
+  // The density the app draws this window at, in dots per inch, when the host gave the window
+  // one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+  // window's size on the guest's display has changed since. 0 while the app draws it as the
+  // rest of its process, as every overlay the host gave no density.
+  uint32 density_dpi = 4;
 }
 
 // Host to guest: the apps whose tasks start below the title bar, as the user chose for each
@@ -230,8 +242,18 @@ message OverlayWindow {
 // before. It counts when a task starts: a task that runs already keeps what it started
 // with, because an app may read its insets once per screen. The host sends it when it
 // connects and whenever the list changes.
+//
+// keep_focus: the apps the user set to keep game focus. While a task of one of these
+// packages stays resumed (its window is visible), its app is not told that it lost the focus
+// to another app's window: no onTopResumedActivityChanged(false) and no
+// onWindowFocusChanged(false), so a game that pauses on either keeps running. Keys and IME
+// text still go only to the window that has the focus. The agent gives the list to the
+// framework (the window manager's shell command dsa-keep-focus), where it counts at once; an
+// image whose framework lacks that change ignores it. Empty, the default, keeps every app as
+// before.
 message CaptionCompat {
   repeated string below_title_bar = 1;
+  repeated string keep_focus = 2;
 }
 
 // How a task's app asks to fill the screen.
@@ -279,6 +301,15 @@ message TaskRemoved {
 message TaskFrames {
   int32 task_id = 1;
   uint32 display_id = 2;
+}
+
+// Host to guest, to the hwcomposer: the host opened a window for the task that has no frame
+// yet, as after the agent restarted. The hwcomposer presents once and sends the task's
+// current frame even when nothing in it changed, since an app that is still (a dialog, a
+// settings page) would otherwise never draw into the new window. The host asks again, a
+// bounded number of times, while no frame arrives.
+message RequestTaskFrame {
+  int32 task_id = 1;
 }
 
 // Host to guest: the user closed the task's window; the agent ends the task.
@@ -331,10 +362,36 @@ message ResizeTask {
 // it handles a change of density itself. Some apps that say so lay out only part of their
 // screen again and leave the rest at the old density. An activity that does not say so is
 // recreated by Android anyway, so the agent asks for nothing more.
+//
+// `forced` is set when the user set the task's app to System (forced) scaling, and the task
+// said `forced_density_available`: the agent first marks the task so that Android gives it the
+// density without relaunching its activity, whether or not the activity says it handles a
+// change of density, and only then gives it the density. If the task cannot be marked, the
+// agent gives it no density, so the app is never restarted for it. Without `forced`, the agent
+// takes away a mark it gave the task before, so that Android handles the density as it would.
 message SetTaskDensity {
   int32 task_id = 1;
   uint32 density_dpi = 2;
   bool recreate = 3;
+  bool forced = 4;
+}
+
+// Host to guest: the window of an app overlay window (see OverlayWindow) is on a monitor whose
+// density differs from the one its app draws at; the app is to draw that window alone at
+// `density_dpi` (130 at a scale of 100%). 0 has the app draw it at its own density again, when
+// the window is back on a monitor of that density.
+//
+// The host asks it only for an app the user set to System (forced) scaling, whose process draws
+// at the density of the monitor its task's window is on, overlays included: such an overlay on
+// another monitor would otherwise be shown stretched. The other windows of the app's process,
+// its tasks among them, keep their density. The agent gives the window the density through the
+// framework (the window manager's shell command dsa-overlay-density, which converts that
+// window's views in the app's process); an image whose framework lacks that change ignores it.
+// Once the app has laid the window out again, the agent reports the overlay with
+// OverlayWindow.density_dpi set, and the host shows it 1:1 on that monitor from then on.
+message SetOverlayDensity {
+  int32 overlay_id = 1;
+  uint32 density_dpi = 2;
 }
 
 // Host to guest: the monitor the window of the next task opens on, so that the task starts at
@@ -454,6 +511,10 @@ message InstalledApp {
   // treats them as one group wherever only the uid tells them apart, as root elevation does.
   // Empty for an app with a user ID of its own.
   string shared_user_id = 14;
+  // Whether the app says it is a game: its ApplicationInfo.category is CATEGORY_GAME, or it
+  // sets the older android:isGame. The host lists games first where it offers settings for
+  // games.
+  bool game = 15;
 }
 
 // The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
@@ -893,6 +954,18 @@ message PowerState {
 // Android. Sent when the agent connects, once the host knows the monitors, and on each change.
 message DisplayRefresh {
   uint32 hz = 1;
+}
+
+// Host to guest, to the hwcomposer: the size in pixels the guest's display grows to, without
+// restarting Android. The host sends it when a task's window opens and the monitors connected
+// then need a larger display than the one the guest reports with its tasks. The hwcomposer
+// only ever grows the display, each side to at most 16384, and keeps its density; a size not
+// larger than the display's on either side changes nothing on that side. SurfaceFlinger takes
+// the new size as a reconnection of the same display, and the agent reports every task again
+// with the new size as its largest. A hwcomposer that subscribes later is told the last size.
+message DisplaySize {
+  uint32 width = 1;
+  uint32 height = 2;
 }
 
 // Guest to host, from the control daemon: how much memory the guest has and how hard it
@@ -1591,6 +1664,19 @@ message GuestMemory {
   uint64 free_reported_kb = 27;
   uint64 reported_total_kb = 28;
   uint64 refaulted_total_kb = 29;
+  // The swap cache (SwapCached in /proc/meminfo): pages read back from zram that zram still
+  // holds, kept until one of them is written to. Cached leaves them out; those a process maps
+  // are in anon_pages_kb as well, the rest in no other field. 0 when the guest cannot read it.
+  uint64 swap_cached_kb = 30;
+  // The page structures the kernel made after boot, in KiB (nr_memmap_pages in /proc/vmstat
+  // times the page size): those of the persistent memory the guest maps directly (the disks
+  // it reads in place) and of memory hot-added while it ran. They come out of MemTotal, and
+  // /proc/meminfo counts them in no field. 0 when the kernel does not say (before Linux 6.11).
+  uint64 memmap_kb = 31;
+  // The page structures the kernel made at boot, in KiB (nr_memmap_boot_pages): part of what
+  // it reserved before MemTotal (mem_online_kb less mem_total_kb). 0 when the kernel does not
+  // say.
+  uint64 memmap_boot_kb = 32;
 }
 
 // From the agent to the guest's control daemon, on each connection to it: the agent has
@@ -2097,6 +2183,56 @@ message ClockAnswer {
 // `complete`.
 message ListWidgetProviders {
   uint32 request_id = 1;
+  // Whether the previews are left out: each widget's `preview_png` is empty, and each app's
+  // icon comes once, in `app_icons`, instead. A gallery that shows only the widgets of the
+  // apps the user opens asks so, and asks for those widgets' previews with
+  // GetWidgetPreviews: an app may offer hundreds of widgets, and drawing every preview up
+  // front would take seconds and hold hundreds of images.
+  bool lazy_previews = 2;
+}
+
+// Where a widget's preview comes from, best first: the layout the app gives for its
+// preview (drawn by the agent at the widget's default size), the app's preview image, or,
+// when the widget has neither, the app's icon.
+enum WidgetPreviewSource {
+  WIDGET_PREVIEW_SOURCE_UNSPECIFIED = 0;
+  WIDGET_PREVIEW_SOURCE_LAYOUT = 1;
+  WIDGET_PREVIEW_SOURCE_IMAGE = 2;
+  WIDGET_PREVIEW_SOURCE_ICON = 3;
+}
+
+// An app's icon, for a gallery that groups the widgets by the app that offers them.
+message WidgetAppIcon {
+  string package_name = 1;
+  // A PNG image of at most 160 pixels on a side and 48 KiB.
+  bytes icon_png = 2;
+}
+
+// Host to guest: asks the agent for the previews of some widgets on offer, as a gallery
+// shows them when the user opens their app. The agent answers with one or more
+// WidgetPreviews of the same `request_id`, the last one marked `complete`. At most 64
+// providers are asked for at once; the agent leaves out the rest.
+message GetWidgetPreviews {
+  uint32 request_id = 1;
+  // The providers' components, as `package/class`.
+  repeated string providers = 2;
+}
+
+// One widget's preview: the best the widget has (see WidgetPreviewSource), as a PNG image of
+// at most 256 pixels on a side and 48 KiB. Empty when the widget has none, or its app is
+// gone.
+message WidgetPreview {
+  string provider = 1;
+  bytes preview_png = 2;
+  WidgetPreviewSource source = 3;
+}
+
+// Guest to host, from the agent: part of the answer to GetWidgetPreviews. Each message is
+// kept under 256 KiB, so the previews come in several; `complete` marks the last.
+message WidgetPreviews {
+  uint32 request_id = 1;
+  repeated WidgetPreview previews = 2;
+  bool complete = 3;
 }
 
 // One widget an app in the guest offers, as a gallery shows it.
@@ -2135,6 +2271,9 @@ message WidgetProviders {
   uint32 request_id = 1;
   repeated WidgetProvider providers = 2;
   bool complete = 3;
+  // With `lazy_previews`: the icons of the apps whose widgets this message holds, each app
+  // once in the whole answer.
+  repeated WidgetAppIcon app_icons = 4;
 }
 
 // Host to guest: place a new widget of `provider`. The agent allocates a widget ID, binds it
@@ -3454,6 +3593,7 @@ message Envelope {
     ResizeTask resize_task = 11;
     SetTaskDensity set_task_density = 12;
     PointerEvent pointer_event = 13;
+    SetOverlayDensity set_overlay_density = 14;
     AppInfo app_info = 15;
     KeyEvent key_event = 16;
     ImeComposition ime_composition = 17;
@@ -3478,6 +3618,7 @@ message Envelope {
     TasksShown tasks_shown = 46;
     PowerState power_state = 41;
     DisplayRefresh display_refresh = 407;
+    DisplaySize display_size = 416;
     PowerHint power_hint = 110;
     DeveloperMode developer_mode = 140;
     ArmTranslationRemove arm_translation_remove = 152;
@@ -3518,6 +3659,7 @@ message Envelope {
     NotificationClicked notification_clicked = 72;
     NotificationDismissed notification_dismissed = 73;
     NotificationButtonClicked notification_button_clicked = 730;
+    RequestTaskFrame request_task_frame = 731;
     BackgroundApp background_app = 74;
     BackgroundAppGone background_app_gone = 75;
     BackgroundAppAction background_app_action = 76;
@@ -3646,5 +3788,7 @@ message Envelope {
     DnsAnswer dns_answer = 691;
     LaunchPlacement launch_placement = 710;
     CaptionCompat caption_compat = 715;
+    GetWidgetPreviews get_widget_previews = 740;
+    WidgetPreviews widget_previews = 741;
   }
 }

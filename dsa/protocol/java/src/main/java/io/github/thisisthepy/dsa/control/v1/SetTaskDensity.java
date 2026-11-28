@@ -14,6 +14,12 @@ package io.github.thisisthepy.dsa.control.v1;
  * it handles a change of density itself. Some apps that say so lay out only part of their
  * screen again and leave the rest at the old density. An activity that does not say so is
  * recreated by Android anyway, so the agent asks for nothing more.
+ * `forced` is set when the user set the task's app to System (forced) scaling, and the task
+ * said `forced_density_available`: the agent first marks the task so that Android gives it the
+ * density without relaunching its activity, whether or not the activity says it handles a
+ * change of density, and only then gives it the density. If the task cannot be marked, the
+ * agent gives it no density, so the app is never restarted for it. Without `forced`, the agent
+ * takes away a mark it gave the task before, so that Android handles the density as it would.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.SetTaskDensity}
@@ -101,6 +107,32 @@ public  final class SetTaskDensity extends
   private void clearRecreate() {
     
     recreate_ = false;
+  }
+
+  public static final int FORCED_FIELD_NUMBER = 4;
+  private boolean forced_;
+  /**
+   * <code>bool forced = 4;</code>
+   * @return The forced.
+   */
+  @java.lang.Override
+  public boolean getForced() {
+    return forced_;
+  }
+  /**
+   * <code>bool forced = 4;</code>
+   * @param value The forced to set.
+   */
+  private void setForced(boolean value) {
+    
+    forced_ = value;
+  }
+  /**
+   * <code>bool forced = 4;</code>
+   */
+  private void clearForced() {
+    
+    forced_ = false;
   }
 
   public static io.github.thisisthepy.dsa.control.v1.SetTaskDensity parseFrom(
@@ -195,6 +227,12 @@ public  final class SetTaskDensity extends
    * it handles a change of density itself. Some apps that say so lay out only part of their
    * screen again and leave the rest at the old density. An activity that does not say so is
    * recreated by Android anyway, so the agent asks for nothing more.
+   * `forced` is set when the user set the task's app to System (forced) scaling, and the task
+   * said `forced_density_available`: the agent first marks the task so that Android gives it the
+   * density without relaunching its activity, whether or not the activity says it handles a
+   * change of density, and only then gives it the density. If the task cannot be marked, the
+   * agent gives it no density, so the app is never restarted for it. Without `forced`, the agent
+   * takes away a mark it gave the task before, so that Android handles the density as it would.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.SetTaskDensity}
@@ -294,6 +332,34 @@ public  final class SetTaskDensity extends
       return this;
     }
 
+    /**
+     * <code>bool forced = 4;</code>
+     * @return The forced.
+     */
+    @java.lang.Override
+    public boolean getForced() {
+      return instance.getForced();
+    }
+    /**
+     * <code>bool forced = 4;</code>
+     * @param value The forced to set.
+     * @return This builder for chaining.
+     */
+    public Builder setForced(boolean value) {
+      copyOnWrite();
+      instance.setForced(value);
+      return this;
+    }
+    /**
+     * <code>bool forced = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearForced() {
+      copyOnWrite();
+      instance.clearForced();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.SetTaskDensity)
   }
   @java.lang.Override
@@ -313,10 +379,11 @@ public  final class SetTaskDensity extends
             "taskId_",
             "densityDpi_",
             "recreate_",
+            "forced_",
           };
           java.lang.String info =
-              "\u0000\u0003\u0000\u0000\u0001\u0003\u0003\u0000\u0000\u0000\u0001\u0004\u0002\u000b" +
-              "\u0003\u0007";
+              "\u0000\u0004\u0000\u0000\u0001\u0004\u0004\u0000\u0000\u0000\u0001\u0004\u0002\u000b" +
+              "\u0003\u0007\u0004\u0007";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

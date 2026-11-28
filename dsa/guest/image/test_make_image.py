@@ -176,6 +176,13 @@ class ImageLayoutTests(unittest.TestCase):
                 ("sysfs", "dir"),
                 ("sysfs", "file"),
             ],
+            # Each slab cache's reclaim_account. A merged cache's entry is a link to its
+            # group's directory, so the link is read too.
+            "/sys/kernel/slab": [
+                ("sysfs", "dir"),
+                ("sysfs", "file"),
+                ("sysfs", "lnk_file"),
+            ],
         },
     }
     # The modes init runs the same binary in, each in a domain of its own.
@@ -2644,7 +2651,8 @@ class GuestMemoryTests(unittest.TestCase):
 
     def test_nfr1_the_guest_swaps_to_zram_of_half_its_memory(self):
         fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
-        self.assertIn("/dev/block/zram0 none swap defaults zramsize=100%", fstab)
+        self.assertIn("/dev/block/zram0 none swap defaults zramsize=50%,", fstab)
+        self.assertNotIn("zramsize=100%", fstab)
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
             self.assertIn("swapon_all /vendor/etc/fstab.dsa", rc)
@@ -2659,7 +2667,7 @@ class GuestMemoryTests(unittest.TestCase):
                 archive.read("META/vendor_filesystem_config.txt").decode(),
             )
             for directory in make_image.FSTAB_DIRS:
-                self.assertIn(b"zramsize=100%", archive.read(directory + "fstab.dsa"))
+                self.assertIn(b"zramsize=50%,", archive.read(directory + "fstab.dsa"))
 
     def test_nfr1_the_idle_reclaim_compresses_what_stays_in_zram_again_with_zstd(self):
         # LZ4 for every swap, zstd for what stays cold: zstd must be named before swapon_all
@@ -3144,6 +3152,15 @@ class GuestMemoryTests(unittest.TestCase):
                 self.assertIn(f"(allow {app} dsa_sysfs_memory (dir (search read open getattr)))", policy)
                 self.assertIn(f"(allow {app} dsa_sysfs_memory (file (read open getattr)))", policy)
 
+    def test_nfr1_the_agent_may_read_the_page_structures_the_kernel_made_after_boot(self):
+        # nr_memmap_pages in /proc/vmstat: the page structures of the disks mapped in place and
+        # of added memory, which `dsa memory` shows apart from the unaccounted rest.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            for app in ("system_app", "platform_app"):
+                self.assertIn(f"(allow {app} proc_vmstat (file (read open getattr)))", policy)
+            self.assertNotRegex(policy, r"\(allow \S+ proc_vmstat \(file \([^)]*write")
+
     def test_fr5_the_audio_hal_and_software_codecs_can_share_memory_through_memfds(self):
         # Refused, libcutils falls back to an ashmem device DSA's kernel does not have: audio
         # policy never starts, system_server retries ten times a second, and every click
@@ -3179,6 +3196,17 @@ class GuestMemoryTests(unittest.TestCase):
         # It exits as soon as it starts, init starts it again every five seconds, and each
         # exit runs flags_health_check too.
         self.assertTrue(make_image.removed("VENDOR/etc/init/seriallogging.rc"))
+
+    def test_nfr1_the_ota_daemon_dsa_never_uses_is_removed(self):
+        # The host updates Android by replacing the whole image (its image store and trial
+        # boot), and the system disk is read only, so update_engine never has an update to
+        # apply; it only held about 3.5 MiB for the guest's whole life.
+        self.assertTrue(make_image.removed("SYSTEM/etc/init/update_engine.rc"))
+        self.assertTrue(make_image.removed("SYSTEM/bin/update_engine"))
+        # The verifier and the rest of the A/B plumbing stay: first stage init and the boot
+        # control HAL still use the slot they describe.
+        self.assertFalse(make_image.removed("SYSTEM/bin/update_verifier"))
+        self.assertFalse(make_image.removed("SYSTEM/etc/init/update_verifier.rc"))
 
     def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
@@ -3217,6 +3245,25 @@ class GuestMemoryTests(unittest.TestCase):
             for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo", "proc_allocinfo"]:
                 self.assertIn(f"(allow dsa_memory_report {kind} (file (read open getattr)))", policy)
             # It writes nothing but its log.
+            writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)
+            self.assertEqual(sorted(writes), [("kmsg_debug_device", "chr_file"), ("kmsg_device", "chr_file")])
+
+    def test_nfr1_the_host_diagnostics_get_the_kernel_memory_report_without_developer_mode(self):
+        # `dsa memory snapshot` carries the report (slab, vmalloc by caller, threads, page tables,
+        # what the processes read and wrote) whether or not developer mode is on: the daemon sets
+        # a property only it and init may set, and init runs the same read-only root report.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode().splitlines()
+            trigger = rc.index("on property:vendor.dsa.memory.report=*")
+            self.assertEqual(rc[trigger + 1], "    start dsa_memory_report")
+            contexts = archive.read(make_image.VENDOR_PROPERTY_CONTEXTS).decode()
+            self.assertIn("vendor.dsa.memory.report u:object_r:dsa_memory_prop:s0 exact int", contexts)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            setters = re.findall(r"\(allow\s+(\S+)\s+dsa_memory_prop\s+\(\s*property_service\s+\(([^)]*)\)", policy)
+            self.assertEqual({who for who, perms in setters if "set" in perms.split()},
+                             {"dsa_channeld", "vendor_init"})
+            # /proc/<pid>/io is its owner's alone: root reads it with two read-only capabilities.
+            self.assertIn("(allow dsa_memory_report self (capability (dac_read_search sys_ptrace)))", policy)
             writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)
             self.assertEqual(sorted(writes), [("kmsg_debug_device", "chr_file"), ("kmsg_device", "chr_file")])
 
@@ -3314,7 +3361,9 @@ class GuestMemoryTests(unittest.TestCase):
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
             trigger = rc[rc.index("on property:vendor.dsa.memory.trim=1"):]
             self.assertIn("vendor.dsa.memory.trim_size u:object_r:dsa_memory_prop:s0 exact int", contexts)
-            self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"', trigger)
+            # The daemon says the swappiness: 0 while a window is shown, 30 while none is.
+            self.assertIn("vendor.dsa.memory.trim_swappiness u:object_r:dsa_memory_prop:s0 exact int", contexts)
+            self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=${vendor.dsa.memory.trim_swappiness:-0}"', trigger)
             self.assertNotIn("drop_caches", trigger)
             # What the trim freed is scattered: compacting gathers it into whole blocks that free
             # page reporting hands back now, not when background compaction gets to it.
@@ -3339,6 +3388,7 @@ class GuestMemoryTests(unittest.TestCase):
             + make_image.RECLAIM_STEP_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_SIZE_PROPERTY_CONTEXT + "\n"
+            + make_image.TRIM_SWAPPINESS_PROPERTY_CONTEXT + "\n"
             + "".join(context + "\n" for context in make_image.WRITEBACK_PROPERTY_CONTEXTS.values())
             + make_image.BOOT_PROPERTY_CONTEXT + "\n"
             + make_image.ADB_PROPERTY_CONTEXT + "\n"
@@ -5188,17 +5238,6 @@ def top_level_settings_dex():
     return dex_file(methods, {0: (4, on_create_recycler_view), 4: (2, is_running_in_freeform_window)})
 
 
-def card_background(top_radius):
-    """SettingsLib's top group background, as PermissionController compiles it, whose top
-    corners are `top_radius` dp."""
-    return compiled_layout(("ripple", [], [("item", [], [("shape", [], [("corners", [
-        ("topLeftRadius", 0x010101A9, TYPE_DIMENSION, dp(top_radius)),
-        ("topRightRadius", 0x010101AA, TYPE_DIMENSION, dp(top_radius)),
-        ("bottomLeftRadius", 0x010101AB, TYPE_DIMENSION, dp(4)),
-        ("bottomRightRadius", 0x010101AC, TYPE_DIMENSION, dp(4))], [])])])]))
-
-
-CARD_TOP = "res/drawable-v36/settingslib_round_background_top.xml"
 
 
 LIST_END = dp(16)
@@ -5529,7 +5568,7 @@ class ListBottomRoomTests(unittest.TestCase):
                 return {n: payload.read(n) for n in payload.namelist()}, apex.read("apex_build_info.pb")
 
     def test_fr34_the_permission_apex_is_packed_again_with_the_edited_controller(self):
-        controller = self.apk({CARD_TOP: card_background(4)})
+        controller = self.apk({PREFERENCE_LIST: compiled_layout(PREFERENCE_LIST_LAYOUT)})
         capex = self.permission_capex(controller)
         name = "SYSTEM/apex/com.android.permission.capex"
         self.assertIn(name, make_image.PERMISSION_APEXES)
@@ -5553,14 +5592,14 @@ class ListBottomRoomTests(unittest.TestCase):
                 problems = make_image.permission_controller_problems(signed, Path(tmp) / "otatools", Path(tmp), {})
                 self.assertEqual(bool(problems), found, problems)
                 if found:
-                    self.assertIn("so its lists keep corners of their own", problems[0])
+                    self.assertIn("so its lists end on the window's bottom edge", problems[0])
         self.assertEqual(build_info, b"build info")
         # apexer writes the manifest into the payload itself.
         self.assertNotIn("apex_manifest.pb", files)
         self.assertEqual(files["priv-app/SafetyCenterResources@BP4A/SafetyCenterResources.apk"], b"resources")
         with zipfile.ZipFile(io.BytesIO(files["priv-app/PermissionController@BP4A/PermissionController.apk"])) as apk:
-            found_top = layout_attributes(apk.read(CARD_TOP))
-        self.assertIn(("topLeftRadius", TYPE_DIMENSION, dp(26)), found_top[3][2])
+            found = layout_attributes(apk.read(PREFERENCE_LIST))
+        self.assertIn(("paddingBottom", TYPE_DIMENSION, dp(make_image.SETTINGS_LIST_END_DP)), found[0][2])
 
     def test_fr34_without_otatools_the_permission_apex_is_left_as_it_is(self):
         capex = self.permission_capex(b"controller")
@@ -5584,12 +5623,13 @@ def string_pool(strings):
     return header + b"".join(struct.pack("<I", offset) for offset in offsets) + data
 
 
-def resource_table(resources, layout="full", public=()):
+def resource_table(resources, layout="full", public=(), overlayable=None):
     """A compiled resource table of package 0x7f with `resources` ({type: [name]}), one spec
     chunk and one type chunk per type in the default configuration, with the resources
     `public` names ("type/name") public. `layout` is how aapt2 lays the entries out: "full"
     (32-bit offsets, with one empty entry), "compact" (16-bit offsets and compact entries,
-    with one empty entry) or "sparse" (index and offset pairs)."""
+    with one empty entry) or "sparse" (index and offset pairs). `overlayable` declares
+    overlayable sets, {name: [(policy flags, ["type/name"])]}, after the types, as aapt2 does."""
     types = list(resources)
     keys = [name for names in resources.values() for name in names]
     type_pool, key_pool = string_pool(types), string_pool(keys)
@@ -5623,6 +5663,16 @@ def resource_table(resources, layout="full", public=()):
         header_size = 8 + 12 + len(config)
         body = struct.pack("<BBHII", type_id, flags, 0, count, header_size + len(array)) + config + array + entries
         chunks += struct.pack("<HHI", 0x0201, header_size, 8 + len(body)) + body
+    for set_name, policies in (overlayable or {}).items():
+        inner = b""
+        for flags, names in policies:
+            refs = [(0x7F << 24) | ((types.index(n.split("/", 1)[0]) + 1) << 16)
+                    | resources[n.split("/", 1)[0]].index(n.split("/", 1)[1]) for n in names]
+            policy_body = struct.pack("<II", flags, len(refs)) + b"".join(struct.pack("<I", r) for r in refs)
+            inner += struct.pack("<HHI", make_image.ARSC_OVERLAYABLE_POLICY, 16, 8 + len(policy_body)) + policy_body
+        head = set_name.encode("utf-16-le").ljust(512, b"\0") + "".encode("utf-16-le").ljust(512, b"\0")
+        chunks += struct.pack("<HHI", make_image.ARSC_OVERLAYABLE, 8 + len(head), 8 + len(head) + len(inner)) \
+            + head + inner
     name = "com.example".encode("utf-16-le").ljust(256, b"\0")
     package_body = (struct.pack("<I", 0x7F) + name
                     + struct.pack("<IIIII", 288, len(types), 288 + len(type_pool), len(keys), 0)
@@ -5632,14 +5682,14 @@ def resource_table(resources, layout="full", public=()):
     return struct.pack("<HHII", 0x0002, 12, 12 + len(globals_pool) + len(package), 1) + globals_pool + package
 
 
-def table_of(names, public=()):
+def table_of(names, public=(), overlayable=None, layout="full"):
     """A resource table that defines exactly `names` ("type/name"), with those `public`
-    names public."""
+    names public and the overlayable sets `overlayable` (see resource_table)."""
     resources = {}
     for name in names:
         kind, entry = name.split("/", 1)
         resources.setdefault(kind, []).append(entry)
-    return resource_table(resources, public=public)
+    return resource_table(resources, layout=layout, public=public, overlayable=overlayable)
 
 
 # Every framework resource the system screen overlays name, as checked in the framework-res
@@ -5661,7 +5711,7 @@ FRAMEWORK_PUBLIC_CHECKED = {
     "attr/maxLines", "attr/maxWidth", "attr/minHeight", "attr/minSdkVersion", "attr/orientation",
     "attr/paddingBottom", "attr/paddingEnd", "attr/paddingStart", "attr/paddingTop", "attr/pathData",
     "attr/priority", "attr/radius", "attr/requiredSystemPropertyName", "attr/requiredSystemPropertyValue",
-    "attr/resourcesMap", "attr/scrollIndicators",
+    "attr/resourcesMap", "attr/scrollIndicators", "attr/targetName",
     "attr/scrollbarAlwaysDrawVerticalTrack", "attr/selectableItemBackground", "attr/shape", "attr/src",
     "attr/start", "attr/strokeColor", "attr/strokeLineCap", "attr/strokeWidth", "attr/targetPackage",
     "attr/targetSdkVersion", "attr/text", "attr/textAppearance", "attr/textColor", "attr/textColorPrimary",
@@ -5982,6 +6032,86 @@ class SystemScreenDesignTests(unittest.TestCase):
                 make_image.build_system_overlays(Path("/sdk/aapt2"), Path(tmp) / "framework-res.apk",
                                                  Path(tmp), tables)
 
+    # The overlayable set each app the image overlays declares the overlaid resources in, as
+    # aapt2 dump overlayable shows them in the Android 17 (16373615) image's DocumentsUI,
+    # PermissionController and IntentResolver. framework-res, Settings and PackageInstaller
+    # declare none.
+    OVERLAYABLE_SETS = {
+        "DsaDocumentsUiOverlay.apk": "DocumentsUICustomization",
+        "DsaPermissionControllerOverlay.apk": "PermissionControllerStyles",
+        "DsaIntentResolverOverlay.apk": "IntentResolver",
+    }
+    # product|system|vendor, DocumentsUI's policy.
+    VENDOR_POLICY = 0x02 | 0x04 | 0x08
+
+    def target_with_sets(self, apk, name=None, policy=None, leave_out=()):
+        """A table of the app `apk` overlays that declares its overlayable set (`name`, or the
+        app's own), with the overlaid resources in it but `leave_out`, under `policy`."""
+        overlaid = make_image.overlaid_resources(apk)
+        return table_of(overlaid + ["id/not_overlayable"], overlayable={
+            name or self.OVERLAYABLE_SETS[apk]: [(self.VENDOR_POLICY if policy is None else policy,
+                                                  [r for r in overlaid if r not in leave_out])],
+            "Another": [(self.VENDOR_POLICY, ["id/not_overlayable"])]})
+
+    def test_fr42_an_overlayable_set_is_read_from_a_resource_table(self):
+        names = ["bool/force_material3", "color/primary", "dimen/grid_item_radius"]
+        for layout in ("full", "compact", "sparse"):
+            table = table_of(names, overlayable={"DocumentsUICustomization": [
+                (0x0E, ["bool/force_material3", "color/primary"]), (0x10, ["dimen/grid_item_radius"])]},
+                layout=layout)
+            self.assertEqual(make_image.arsc_overlayables(table), {"DocumentsUICustomization": [
+                (0x0E, {"bool/force_material3", "color/primary"}), (0x10, {"dimen/grid_item_radius"})]}, layout)
+        self.assertEqual(make_image.arsc_overlayables(table_of(names)), {})
+
+    def test_fr42_each_overlay_names_the_overlayable_set_of_the_app_it_overlays(self):
+        # DocumentsUI, PermissionController and IntentResolver declare overlayable sets, so
+        # idmap2 maps an overlay of theirs only when its manifest names the set: without it
+        # Files kept its old look and none of the image's blue scheme (the overlay was listed
+        # but never enabled, and force_material3 stayed false).
+        named = {overlay["apk"]: overlay.get("overlayable") for overlay in make_image.SYSTEM_OVERLAYS}
+        self.assertEqual({apk: name for apk, name in named.items() if name}, self.OVERLAYABLE_SETS)
+        for apk, files in self.every_overlay().items():
+            element = ET.fromstring(files["AndroidManifest.xml"]).find("overlay")
+            self.assertEqual(element.get(NS + "targetName"), self.OVERLAYABLE_SETS.get(apk), apk)
+
+    def test_fr42_an_overlay_idmap2_would_map_nothing_of_is_refused(self):
+        for apk in self.OVERLAYABLE_SETS:
+            overlay = make_image.system_overlay(apk)
+            overlaid = make_image.overlaid_resources(apk)
+            with self.subTest(apk=apk):
+                self.assertEqual(make_image.overlayable_problems(overlay, overlaid, self.target_with_sets(apk)), [])
+                unnamed = {**overlay, "overlayable": None}
+                self.assertIn("names none", " ".join(
+                    make_image.overlayable_problems(unnamed, overlaid, self.target_with_sets(apk))))
+                self.assertIn("does not declare", " ".join(make_image.overlayable_problems(
+                    overlay, overlaid, self.target_with_sets(apk, name="SomethingElse"))))
+                self.assertIn(f"is not in {overlay['target']}'s overlayable set", " ".join(
+                    make_image.overlayable_problems(overlay, overlaid,
+                                                    self.target_with_sets(apk, leave_out=overlaid[:1]))))
+                # Signature only: an overlay in /vendor/overlay is not signed with the app's key.
+                self.assertIn("vendor partition's policy", " ".join(make_image.overlayable_problems(
+                    overlay, overlaid, self.target_with_sets(apk, policy=0x10))))
+        # An app that declares no set takes a preinstalled overlay whatever it names.
+        overlay = make_image.system_overlay("DsaPackageInstallerOverlay.apk")
+        overlaid = make_image.overlaid_resources("DsaPackageInstallerOverlay.apk")
+        self.assertEqual(make_image.overlayable_problems(overlay, overlaid, table_of(overlaid)), [])
+
+    def test_fr42_an_overlay_that_would_never_be_applied_stops_the_image(self):
+        tables = {apk: table_of(make_image.overlaid_resources(apk)) for apk in make_image.SYSTEM_OVERLAY_FILES}
+        tables["DsaFrameworkOverlay.apk"] = linkable_framework_table(
+            overlaid=make_image.overlaid_resources("DsaFrameworkOverlay.apk"))
+        for apk in self.OVERLAYABLE_SETS:
+            tables[apk] = self.target_with_sets(apk)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run"):
+            make_image.build_system_overlays(Path("/sdk/aapt2"), Path(tmp) / "framework-res.apk", Path(tmp), tables)
+        overlays = [{**o, "overlayable": None} if o["apk"] == "DsaDocumentsUiOverlay.apk" else o
+                    for o in make_image.SYSTEM_OVERLAYS]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run"), \
+                patch.object(make_image, "SYSTEM_OVERLAYS", overlays):
+            with self.assertRaisesRegex(ValueError, "DsaDocumentsUiOverlay.apk would never be applied"):
+                make_image.build_system_overlays(Path("/sdk/aapt2"), Path(tmp) / "framework-res.apk",
+                                                 Path(tmp), tables)
+
     def image(self, framework_table=b"", break_settings=False, without=None):
         """The names and files of a target_files with every overlay, built against
         `framework_table` (the image's own when empty), its framework-res, and its apps."""
@@ -6227,52 +6357,41 @@ class SystemScreenDesignTests(unittest.TestCase):
         self.assertEqual(set(make_image.SETTINGS_TITLE_EXPANDED), {
             SETTINGS_TITLE_LAYOUT, "res/layout-v36/settingslib_expressive_support_toolbar_layout.xml"})
 
-    def test_fr34_settings_lists_are_grouped_in_rounded_cards(self):
+    def test_fr34_nothing_overrides_the_cards_and_titles_the_patched_source_owns(self):
+        # The patched SettingsLib draws the cards, their colour, radius and spacing, and the
+        # titles; the Settings overlay and the compiled edits leave all of them alone.
+        self.assertEqual(make_image.system_screen_override_problems(), [])
         files = self.every_overlay()["DsaSettingsOverlay.apk"]
-        corners = {"settingslib_round_background": (26, 26), "settingslib_round_background_top": (26, 0),
-                   "settingslib_round_background_center": (0, 0), "settingslib_round_background_bottom": (0, 26)}
-        for folder, theme in [("drawable-v36", "light"), ("drawable-night-v36", "dark")]:
-            for name, (top, bottom) in corners.items():
-                ripple = ET.fromstring(files[f"res/{folder}/{name}.xml"])
-                # SettingsLib's padding, which its adapter gives the row.
-                self.assertEqual(ripple.get(NS + "paddingStart"), "32dp")
-                item = ripple.find("item")
-                self.assertEqual(item.get(NS + "start"), "?android:attr/listPreferredItemPaddingStart")
-                shape = item.find("shape")
-                self.assertIn(f"system_surface_bright_{theme}", shape.find("solid").get(NS + "color"))
-                radii = shape.find("corners")
-                self.assertEqual([radii.get(NS + f"{side}Radius") for side in
-                                  ("topLeft", "topRight", "bottomLeft", "bottomRight")],
-                                 [f"{top}dp", f"{top}dp", f"{bottom}dp", f"{bottom}dp"], name)
-        values = ET.fromstring(files["res/values-v36/dsa_design.xml"])
-        self.assertEqual({d.get("name"): d.text for d in values.findall("dimen")},
-                         {"settingslib_preference_corner_radius": "26dp"})
-        # The page and the cards differ in both themes, so the cards show.
-        colors = make_image.DESIGN_COLORS
-        for theme in ("light", "dark"):
-            self.assertNotEqual(colors[f"system_surface_container_{theme}"], colors[f"system_surface_bright_{theme}"])
+        for name in ("settingslib_round_background", "settingslib_round_background_top",
+                     "settingslib_round_background_center", "settingslib_round_background_bottom"):
+            for folder in ("drawable-v36", "drawable-night-v36"):
+                self.assertNotIn(f"res/{folder}/{name}.xml", files)
+        self.assertNotIn("res/values-v36/dsa_design.xml", files)
+        overlaid = set(make_image.settings_overlay_map())
+        for owned in make_image.SOURCE_OWNED_SETTINGSLIB:
+            self.assertNotIn(owned, overlaid)
+        # What the source does not cover stays: the home page's large title, the back button,
+        # the large title's expanded state by window height.
+        self.assertIn(f"layout/{make_image.SETTINGS_HOME_LAYOUT}", overlaid)
+        self.assertIn(f"style/{make_image.SETTINGS_TITLE_THEME}", overlaid)
+        # PermissionController's compiled edits are the list end alone.
+        self.assertEqual(make_image.permission_controller_edits(), make_image.PERMISSION_CONTROLLER_LIST_END)
 
-    def test_fr34_permission_controller_lists_get_the_same_cards(self):
-        def corners(attrs):
-            return compiled_layout(("ripple", [], [("item", [], [("shape", [], [("corners", attrs, [])])])]))
+    def test_fr34_the_override_check_names_an_overlay_that_puts_a_card_back(self):
+        original = make_image.settings_overlay_map
 
-        top = corners([("topLeftRadius", 0x010101A9, TYPE_REFERENCE, 0x7F0705F5),
-                       ("topRightRadius", 0x010101AA, TYPE_REFERENCE, 0x7F0705F5),
-                       ("bottomLeftRadius", 0x010101AB, TYPE_DIMENSION, dp(4)),
-                       ("bottomRightRadius", 0x010101AC, TYPE_DIMENSION, dp(4))])
-        center = corners([("radius", 0x010101A8, TYPE_DIMENSION, dp(4))])
-        apk = ListBottomRoomTests.apk({"res/drawable-v36/settingslib_round_background_top.xml": top,
-                                         "res/drawable-v36/settingslib_round_background_center.xml": center})
-        edited = make_image.edit_permission_controller_apk(apk, "PermissionController.apk")
-        with zipfile.ZipFile(io.BytesIO(edited)) as archive:
-            found_top = layout_attributes(archive.read("res/drawable-v36/settingslib_round_background_top.xml"))
-            found_center = layout_attributes(archive.read("res/drawable-v36/settingslib_round_background_center.xml"))
-        self.assertEqual(found_top[3][2], [("topLeftRadius", TYPE_DIMENSION, dp(26)),
-                                           ("topRightRadius", TYPE_DIMENSION, dp(26)),
-                                           ("bottomLeftRadius", TYPE_DIMENSION, dp(0)),
-                                           ("bottomRightRadius", TYPE_DIMENSION, dp(0))])
-        self.assertEqual(found_center[3][2], [("radius", TYPE_DIMENSION, dp(0))])
-        self.assertEqual(make_image.apk_edits_left(edited, dimensions=make_image.permission_controller_edits()), [])
+        def with_card():
+            return {**original(), "drawable/settingslib_round_background_top": "drawable/settingslib_round_background_top",
+                    "dimen/settingslib_preference_corner_radius": "dimen/settingslib_preference_corner_radius"}
+
+        with patch.object(make_image, "settings_overlay_map", with_card):
+            problems = make_image.system_screen_override_problems()
+        self.assertTrue(any("drawable/settingslib_round_background_top" in p for p in problems), problems)
+        self.assertTrue(any("dimen/settingslib_preference_corner_radius" in p for p in problems), problems)
+        edits = {**make_image.PERMISSION_CONTROLLER_LIST_END, "res/drawable-v36/settingslib_round_background.xml": []}
+        with patch.object(make_image, "permission_controller_edits", lambda: edits):
+            problems = make_image.system_screen_override_problems()
+        self.assertTrue(any("settingslib_round_background.xml is edited" in p for p in problems), problems)
 
     def test_fr34_the_accent_is_blue_in_the_light_and_the_dark_theme(self):
         colors = make_image.DESIGN_COLORS
@@ -6296,6 +6415,70 @@ class SystemScreenDesignTests(unittest.TestCase):
         files = self.every_overlay()["DsaFrameworkOverlay.apk"]
         values = ET.fromstring(files["res/values/dsa_design.xml"])
         self.assertEqual({c.get("name"): c.text for c in values.findall("color")}, colors)
+
+    @staticmethod
+    def luminance(color):
+        value = color.lstrip("#")
+        r, g, b = (make_image._linear(int(value[i:i + 2], 16)) for i in (0, 2, 4))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    def contrast(self, one, other):
+        light, dark = sorted((self.luminance(one), self.luminance(other)), reverse=True)
+        return (light + 0.05) / (dark + 0.05)
+
+    def test_fr34_every_palette_runs_from_white_to_black_in_order(self):
+        colors = make_image.DESIGN_COLORS
+        for palette in make_image.DESIGN_PALETTES:
+            for theme in ("light", "dark"):
+                shades = [colors[f"system_{palette}_{shade}_{theme}"] for shade in make_image.DESIGN_SHADE_TONES]
+                self.assertEqual((shades[0], shades[-1]), ("#FFFFFF", "#000000"), palette)
+                lights = [self.luminance(shade) for shade in shades]
+                self.assertEqual(lights, sorted(lights, reverse=True), (palette, theme, shades))
+                self.assertEqual(len(set(shades)), len(shades), (palette, theme))
+
+    def test_fr34_text_on_every_colour_role_is_readable(self):
+        colors = make_image.DESIGN_COLORS
+        pairs = [(role, f"on_{role}") for role in
+                 ("primary", "primary_container", "secondary", "secondary_container", "tertiary",
+                  "tertiary_container", "surface", "background", "surface_variant")]
+        pairs += [(f"surface_container{level}", "on_surface")
+                  for level in ("_lowest", "_low", "", "_high", "_highest")]
+        pairs += [("surface_bright", "on_surface"), ("surface_dim", "on_surface"),
+                  ("surface", "on_surface_variant"), ("inverse_surface", "inverse_on_surface")]
+        for theme in ("light", "dark"):
+            for back, text in pairs:
+                with self.subTest(theme=theme, role=back):
+                    self.assertGreaterEqual(
+                        self.contrast(colors[f"system_{back}_{theme}"], colors[f"system_{text}_{theme}"]), 4.5)
+        for role in ("primary", "secondary", "tertiary"):
+            self.assertGreaterEqual(self.contrast(colors[f"system_{role}_fixed"],
+                                                  colors[f"system_on_{role}_fixed"]), 4.5, role)
+
+    def test_fr34_every_colour_role_comes_from_the_blue(self):
+        colors = make_image.DESIGN_COLORS
+        # No role keeps the framework's own grey violet value.
+        for theme, roles in make_image.DESIGN_ROLE_TONES.items():
+            for role in roles:
+                self.assertIn(f"system_{role}_{theme}", colors)
+        for role in make_image.DESIGN_FIXED_ROLE_TONES:
+            self.assertIn(f"system_{role}", colors)
+        _, _, blue = make_image.color_lch(make_image.DESIGN_SEED)
+
+        def turn(color):
+            return (make_image.color_lch(color)[2] - blue + 180) % 360 - 180
+
+        # The secondary roles are the blue itself, the tertiary turns towards cyan, not violet.
+        for theme in ("light", "dark"):
+            for role in ("secondary", "secondary_container", "on_secondary_container"):
+                self.assertLess(abs(turn(colors[f"system_{role}_{theme}"])), 8, (role, theme))
+            for role in ("tertiary", "tertiary_container"):
+                self.assertLess(turn(colors[f"system_{role}_{theme}"]), -30, (role, theme))
+        # A tone is the same lightness in every palette, so a role's contrast does not depend
+        # on its hue.
+        for shade in (100, 500, 900):
+            lights = [self.luminance(colors[f"system_{palette}_{shade}_light"])
+                      for palette in make_image.DESIGN_PALETTES if palette != "accent1"]
+            self.assertLess(max(lights) - min(lights), 0.03, shade)
 
     def test_fr34_titles_are_bold(self):
         overlays = self.every_overlay()
@@ -7919,16 +8102,107 @@ class AppMemoryTests(unittest.TestCase):
     def test_nfr1_a_hidden_app_is_trimmed_then_compacted_once(self):
         state = self._run(self.TRIM, "7 HIDDEN 0 com.spotify.music", {"am": self.AM})
         self.assertEqual((state / "calls").read_text().splitlines(), ["send-trim-memory com.spotify.music HIDDEN"])
-        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7")
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
         state = self._run(self.TRIM, "8 BACKGROUND 1 com.spotify.music", {"am": self.AM})
         self.assertEqual((state / "calls").read_text().splitlines(),
                          ["send-trim-memory com.spotify.music BACKGROUND", "compact full com.spotify.music"])
-        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "8")
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "8 sent")
         # A level or a process name it does not take is answered but never passed on.
         for request in ["9 COMPLETE 1 com.spotify.music", "9 HIDDEN 1 com.x;reboot"]:
             state = self._run(self.TRIM, request, {"am": self.AM})
             self.assertFalse((state / "calls").exists(), request)
-            self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "9")
+            self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "9 invalid")
+
+    # The activity manager's answer when setProcessMemoryTrimLevel refuses a process in the
+    # foreground, as ShellCommand prints an exception, and its exit status.
+    REFUSED = ('#!/bin/sh\necho "$*" >> "{s}/calls"\n'
+               'if [ "$1" = send-trim-memory ]; then\n'
+               "    echo\n"
+               "    echo \"Exception occurred while executing 'send-trim-memory':\" >&2\n"
+               '    echo "java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process" >&2\n'
+               '    printf "\\tat com.android.server.am.ActivityManagerService.setProcessMemoryTrimLevel(ActivityManagerService.java:3761)\\n" >&2\n'
+               '    printf "\\tat android.os.Binder.shellCommand(Binder.java:1151)\\n" >&2\n'
+               "    exit 255\n"
+               "fi\n"
+               'echo "Finished full compaction for 4242"\n')
+
+    @staticmethod
+    def _activity(supported, answer="", status=0):
+        """`cmd` with the activity manager's dsa-hidden-trim (DSA's framework) when `supported`,
+        whose send answers `answer` on its error output with `status`; without it, the command
+        is unknown, as on a framework without DSA's change."""
+        if not supported:
+            return ('#!/bin/sh\necho "cmd $*" >> "{s}/calls"\n'
+                    'echo "Unknown command: $2"\nexit 255\n')
+        return ('#!/bin/sh\n'
+                'if [ "$1 $2" = "activity dsa-hidden-trim" ] && [ $# = 2 ]; then echo supported; exit 0; fi\n'
+                'echo "cmd $*" >> "{s}/calls"\n'
+                f'printf "%s" "{answer}" >&2\nexit {status}\n')
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_a_hidden_app_receives_ui_hidden_through_the_frameworks_hidden_trim(self):
+        # With DSA's framework the trim goes to the activity manager's dsa-hidden-trim, which
+        # sends it although Android shows the app's task; send-trim-memory is not asked.
+        state = self._run(self.TRIM, "7 HIDDEN 0 com.android.deskclock",
+                          {"am": self.AM, "cmd": self._activity(True)})
+        self.assertEqual((state / "calls").read_text().splitlines(),
+                         ["cmd activity dsa-hidden-trim send com.android.deskclock HIDDEN"])
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
+        self.assertIn("sent com.android.deskclock the memory trim HIDDEN (dsa-hidden-trim)",
+                      (state / "log").read_text())
+        state = self._run(self.TRIM, "8 BACKGROUND 1 com.android.deskclock",
+                          {"am": self.AM, "cmd": self._activity(True)})
+        self.assertEqual((state / "calls").read_text().splitlines(),
+                         ["cmd activity dsa-hidden-trim send com.android.deskclock BACKGROUND",
+                          "compact full com.android.deskclock"])
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "8 sent")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_a_framework_without_hidden_trim_gets_send_trim_memory_as_before(self):
+        state = self._run(self.TRIM, "7 HIDDEN 0 com.android.deskclock",
+                          {"am": self.AM, "cmd": self._activity(False)})
+        calls = (state / "calls").read_text().splitlines()
+        self.assertEqual(calls[-1], "send-trim-memory com.android.deskclock HIDDEN")
+        self.assertNotIn("cmd activity dsa-hidden-trim send com.android.deskclock HIDDEN", calls)
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
+        self.assertIn("(send-trim-memory)", (state / "log").read_text())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_hidden_trim_reports_the_frameworks_refusal(self):
+        # The activity manager's own words reach the log and the answer, not a guess; the
+        # compaction that follows still runs, and its answer is logged too.
+        state = self._run(self.TRIM, "7 BACKGROUND 1 com.android.deskclock",
+                          {"am": self.REFUSED, "cmd": self._activity(False)})
+        log = (state / "log").read_text()
+        self.assertIn("the activity manager did not send com.android.deskclock the memory trim BACKGROUND "
+                      "(send-trim-memory, exit status 255): ", log)
+        self.assertIn("java.lang.IllegalArgumentException: Unable to set a background trim level on a foreground process",
+                      log)
+        # The stack frames say nothing the exception's line does not.
+        self.assertNotIn("Binder.shellCommand", log)
+        self.assertIn("compacted com.android.deskclock: Finished full compaction for 4242", log)
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(),
+                         "7 refused Unable to set a background trim level on a foreground process")
+        # DSA's framework refuses an app the agent did not say the host hides, in one line.
+        state = self._run(self.TRIM, "8 HIDDEN 0 com.android.deskclock", {
+            "am": self.AM,
+            "cmd": self._activity(True, "Error: The host has not hidden the tasks of com.android.deskclock", 255),
+        })
+        self.assertIn("(dsa-hidden-trim, exit status 255): Error: The host has not hidden the tasks of "
+                      "com.android.deskclock", (state / "log").read_text())
+        done = (state / "prop.vendor.dsa.app.trim.done").read_text()
+        self.assertEqual(done, "8 refused The host has not hidden the tasks of com.android.deskclock")
+        # Android keeps a property's value under 92 bytes.
+        self.assertLess(len(f"{2**63} refused " + "x" * 64), 92)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "runs the script with a POSIX sh")
+    def test_nfr1_hidden_trim_reports_a_failed_compaction(self):
+        failing = '#!/bin/sh\nif [ "$1" = compact ]; then echo "Error: could not find process" >&2; exit 255; fi\n'
+        state = self._run(self.TRIM, "7 BACKGROUND 1 com.android.deskclock",
+                          {"am": failing, "cmd": self._activity(True)})
+        self.assertIn("could not compact com.android.deskclock (exit status 255): Error: could not find process",
+                      (state / "log").read_text())
+        self.assertEqual((state / "prop.vendor.dsa.app.trim.done").read_text(), "7 sent")
 
     def _cmd(self, status):
         """The package manager, whose ART dump gives `status` (filter, reason) or nothing, and
@@ -8175,13 +8449,17 @@ class ServicesJarImageTests(unittest.TestCase):
             jar.writestr(info, dex)
         return data.getvalue()
 
-    def _framework(self, root, build_id="16373615", arch="x86_64", machine=62, jar=None):
+    def _framework(self, root, build_id="16373615", arch="x86_64", machine=62, jar=None, framework_jar=None,
+                   names=None):
         folder = FrameworkImageTests()._framework(root, build_id, arch, machine)
         description = json.loads((folder / "framework.json").read_text())
-        data = self._jar() if jar is None else jar
-        (folder / make_image.SERVICES_JAR).parent.mkdir(parents=True, exist_ok=True)
-        (folder / make_image.SERVICES_JAR).write_bytes(data)
-        description["files"][make_image.SERVICES_JAR] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        payloads = {make_image.SERVICES_JAR: self._jar() if jar is None else jar,
+                    make_image.FRAMEWORK_JAR: self._jar(hidden_api_dex()) if framework_jar is None else framework_jar}
+        for name in make_image.FRAMEWORK_JAVA_FILES if names is None else names:
+            data = payloads[name]
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(data)
+            description["files"][name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         (folder / "framework.json").write_text(json.dumps(description))
         return folder
 
@@ -8189,6 +8467,7 @@ class ServicesJarImageTests(unittest.TestCase):
         source = FrameworkImageTests()._source(root, names)
         with zipfile.ZipFile(source, "a") as archive:
             archive.writestr(make_image.SERVICES_JAR, self._jar(b"dex\n035\0published"))
+            archive.writestr(make_image.FRAMEWORK_JAR, self._jar(hidden_api_dex(b"published")))
         return source
 
     def test_fr22_a_dialog_gets_no_caption_inset_from_the_framework_services_jar(self):
@@ -8236,7 +8515,495 @@ class ServicesJarImageTests(unittest.TestCase):
 
     def test_fr22_the_framework_services_jar_is_compiled_like_an_edited_one(self):
         self.assertIn(make_image.SERVICES_JAR, make_image.EDITED_JARS)
-        self.assertEqual(make_image.FRAMEWORK_JAVA_FILES, [make_image.SERVICES_JAR])
+        self.assertEqual(make_image.FRAMEWORK_JAVA_FILES, [make_image.SERVICES_JAR, make_image.FRAMEWORK_JAR])
+
+    def test_fr4_the_image_takes_framework_jar_with_services_jar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payloads, description = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
+            jar = payloads[make_image.FRAMEWORK_JAR]
+            # Stored and aligned, as the published build stores a boot jar's dex.
+            with zipfile.ZipFile(io.BytesIO(jar)) as z:
+                self.assertEqual(z.getinfo("classes.dex").compress_type, zipfile.ZIP_STORED)
+            self.assertEqual(make_image.zip_misaligned(jar), [])
+            modified = root / "modified.zip"
+            make_image.modify(self._source(root), modified, framework=payloads)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(archive.read(make_image.FRAMEWORK_JAR), jar)
+                manifest = {"arch": "x86_64", "source": {"build_id": "16373615"},
+                            "framework": make_image.framework_entry(description, payloads)}
+                self.assertEqual(manifest["framework"]["files"][make_image.FRAMEWORK_JAR],
+                                 hashlib.sha256(jar).hexdigest())
+                self.assertEqual(make_image.check_framework(manifest, archive.namelist(), archive.read), [])
+            with zipfile.ZipFile(self._source(root)) as archive:
+                problems = make_image.check_framework(manifest, archive.namelist(), archive.read)
+            self.assertTrue(any("framework.jar is not the framework build's file" in p
+                                and "forced system scaling" in p for p in problems), problems)
+
+    def test_fr4_services_jar_without_framework_jar_is_refused(self):
+        # services.jar's window manager calls framework.jar's new code: one without the other
+        # would stop system_server.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(SystemExit, "the framework has"):
+                make_image.checked_framework(self._framework(root, names=[make_image.SERVICES_JAR]),
+                                             "16373615", 17, "x86_64")
+
+    def test_fr4_a_framework_jar_without_hidden_api_flags_is_refused(self):
+        # A boot jar's dex carries the hidden API flags the build encodes; without them apps could
+        # reach every hidden API.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(SystemExit, "framework.jar carries no hidden API flags"):
+                make_image.checked_framework(self._framework(root, framework_jar=self._jar()),
+                                             "16373615", 17, "x86_64")
+        self.assertTrue(make_image.jar_has_hidden_api_flags(self._jar(hidden_api_dex())))
+        self.assertFalse(make_image.jar_has_hidden_api_flags(self._jar()))
+        self.assertFalse(make_image.jar_has_hidden_api_flags(b"not a jar"))
+
+
+def hidden_api_dex(body=b""):
+    """A dex file whose map list, right after its header, names a hidden API class data section."""
+    header = bytearray(b"dex\n035\0" + bytes(0x70 - 8))
+    struct.pack_into("<I", header, 0x34, 0x70)
+    items = [(0x0000, 1, 0), (make_image.DEX_HIDDEN_API_CLASS_DATA, 1, 0x70)]
+    map_list = struct.pack("<I", len(items)) + b"".join(struct.pack("<HHII", kind, 0, size, offset)
+                                                        for kind, size, offset in items)
+    return bytes(header) + map_list + body
+
+
+def fake_art(components, begin, checksum, boot_begin=0, boot_components=0, boot_checksum=0,
+             reservation=0, boot_size=0):
+    """A boot image (.art) header with the fields art_header reads."""
+    fields = [reservation, components, begin, 0x1000, checksum, 0, 0, 0, 0, 0, boot_begin, boot_size,
+              boot_components, boot_checksum]
+    return b"art\n118\0" + struct.pack("<14I", *fields) + bytes(64)
+
+
+def fake_dex_jar(*dexes):
+    """A jar holding the given classes*.dex files. (A later fake_apk of this module makes APKs
+    that name a package and hold no dex.)"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for i, content in enumerate(dexes):
+            z.writestr("classes.dex" if i == 0 else f"classes{i + 1}.dex", content)
+    return buffer.getvalue()
+
+
+class BootImageTests(unittest.TestCase):
+    """framework.jar from the Framework build is on the boot class path: the image compiles the
+    boot images again for it, and every odex compiled against them."""
+
+    ISA = "x86_64"
+    BCP = ("/apex/com.android.art/javalib/core-oj.jar:/system/framework/framework.jar:"
+           "/system/framework/ext.jar:/apex/com.android.adservices/javalib/framework-adservices.jar:"
+           "/apex/com.android.wifi/javalib/framework-wifi.jar")
+
+    PRIMARY = 0x1613B7A8
+    EXTENSION = 0xC4F09353
+
+    def _files(self, framework_dex=b"dex\n035\0framework"):
+        folder = f"SYSTEM/framework/{self.ISA}"
+        framework_jar = fake_dex_jar(framework_dex)
+        published = fake_dex_jar(b"dex\n035\0framework")
+        ext = fake_dex_jar(b"dex\n035\0ext")
+        return {
+            # The primary image: core-oj, framework and ext, as a multi-image.
+            f"{folder}/boot.art": fake_art(3, 0x70000000, self.PRIMARY, reservation=0x2000000),
+            f"{folder}/boot-framework.art": fake_art(0, 0, 0),
+            f"{folder}/boot-ext.art": fake_art(0, 0, 0),
+            f"{folder}/boot.oat": fake_odex(**{"compiler-filter": "speed-profile"}),
+            f"{folder}/boot-framework.oat": fake_odex(),
+            f"{folder}/boot-ext.oat": fake_odex(),
+            "SYSTEM/framework/boot.vdex": fake_vdex([1]),
+            "SYSTEM/framework/boot-framework.vdex": fake_vdex(make_image.apk_dex_checksums(published)),
+            "SYSTEM/framework/boot-ext.vdex": fake_vdex(make_image.apk_dex_checksums(ext)),
+            # The mainline extension of the build: one image of its two jars (--single-image).
+            f"{folder}/boot-framework-adservices.art": fake_art(
+                2, 0x72460000, self.EXTENSION, 0x70000000, 3, self.PRIMARY, reservation=0x100000,
+                boot_size=0x2000000),
+            f"{folder}/boot-framework-adservices.oat": fake_odex(**{"compiler-filter": "verify"}),
+            "SYSTEM/framework/boot-framework-adservices.vdex": fake_vdex([2, 3]),
+            "SYSTEM/framework/framework.jar": framework_jar,
+            "SYSTEM/framework/ext.jar": ext,
+            make_image.FRAMEWORK_ODEX: fake_odex(**{
+                "bootclasspath": self.BCP, "bootclasspath-checksums": "i;3/1613b7a8:i;2/c4f09353"}),
+        }
+
+    def _read(self, files):
+        return lambda name: files[name]
+
+    def test_fr4_a_changed_framework_jar_makes_the_boot_image_stale(self):
+        files = self._files()
+        self.assertEqual(make_image.stale_boot_jars(set(files), self._read(files), self.BCP), [])
+        files = self._files(framework_dex=b"dex\n035\0rebuilt")
+        self.assertEqual(make_image.stale_boot_jars(set(files), self._read(files), self.BCP),
+                         ["/system/framework/framework.jar"])
+        # An image without a boot image has nothing to compile again.
+        self.assertEqual(make_image.stale_boot_jars(set(), self._read({}), self.BCP), [])
+
+    def test_fr4_compiling_drops_the_partition_images_signing_built(self):
+        # sign_target_files_apks builds IMAGES/system.img before anything is compiled, and
+        # add_img_to_target_files -a keeps an image that is there: the guest got the published
+        # boot image beside the new framework.jar, and a PairIP app crashed at its start.
+        folder = f"SYSTEM/framework/{self.ISA}"
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("IMAGES/system.img", b"published boot image inside")
+            z.writestr("IMAGES/vbmeta.img", b"hashes of that image")
+            z.writestr(f"{folder}/boot.art", b"published")
+            z.writestr("SYSTEM/app/A/oat/x86_64/A.art", b"app image")
+            z.writestr("META/filesystem_config.txt", "system/app/A 0 0 755\n")
+            z.writestr("SYSTEM/framework/framework.jar", b"rebuilt jar")
+        out = Path(tempfile.mkdtemp()) / "compiled.zip"
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as z:
+            make_image.write_compiled_target_files(
+                z, out, {f"{folder}/boot.art": b"compiled"}, {"SYSTEM/app/A/oat/x86_64/A.art"},
+                {"META/filesystem_config.txt": ["system/app/A/oat 0 0 755"]})
+        with zipfile.ZipFile(out) as z:
+            self.assertEqual(sorted(z.namelist()), sorted([
+                "META/filesystem_config.txt", "SYSTEM/framework/framework.jar", f"{folder}/boot.art"]))
+            self.assertEqual(z.read(f"{folder}/boot.art"), b"compiled")
+            self.assertIn(b"system/app/A/oat 0 0 755", z.read("META/filesystem_config.txt"))
+
+    def test_fr4_a_partition_image_with_another_boot_image_is_found(self):
+        files = self._files(framework_dex=b"dex\n035\0rebuilt")
+        files["SYSTEM/framework/oat/x86_64/telecom.odex"] = fake_odex()
+        names = set(files)
+        # The image as built from these contents.
+        self.assertEqual(make_image.partition_image_problems(
+            "SYSTEM", names, self._read(files), names, self._read(files), self.BCP), [])
+        # The image signing built: the published boot image and odex beside the new jar.
+        image = dict(files)
+        image[f"SYSTEM/framework/{self.ISA}/boot-framework.oat"] = b"published oat"
+        del image["SYSTEM/framework/oat/x86_64/telecom.odex"]
+        image["SYSTEM/framework/oat/x86_64/telecom.art"] = b"published app image"
+        problems = make_image.partition_image_problems(
+            "SYSTEM", names, self._read(files), set(image), self._read(image), self.BCP)
+        self.assertEqual(len(problems), 3, problems)
+        for expected in (f"IMAGES/system.img holds another /system/framework/{self.ISA}/boot-framework.oat",
+                         "IMAGES/system.img has no /system/framework/oat/x86_64/telecom.odex",
+                         "IMAGES/system.img still has /system/framework/oat/x86_64/telecom.art"):
+            self.assertTrue(any(problem.startswith(expected) for problem in problems), (expected, problems))
+        # A boot class path jar of the system partition is compared too, other files are not.
+        image = dict(files)
+        image["SYSTEM/framework/framework.jar"] = fake_dex_jar(b"dex\n035\0framework")
+        image["SYSTEM/etc/hosts"] = b"other"
+        problems = make_image.partition_image_problems(
+            "SYSTEM", names, self._read(files), set(image), self._read(image), self.BCP)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("/system/framework/framework.jar", problems[0])
+
+    def test_fr4_the_system_image_is_read_from_its_system_folder(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "system" / "framework" / self.ISA).mkdir(parents=True)
+        (root / "system" / "build.prop").write_text("ro.build.id=x\n")
+        (root / "system" / "framework" / self.ISA / "boot.art").write_bytes(b"art")
+        (root / "init").write_bytes(b"root file system")
+        try:
+            (root / "system" / "framework" / self.ISA / "boot.vdex").symlink_to("../boot.vdex")
+        except OSError:
+            pass
+        members = make_image.image_tree_members(root, "SYSTEM")
+        self.assertEqual(sorted(members), ["SYSTEM/build.prop", f"SYSTEM/framework/{self.ISA}/boot.art"])
+        product = Path(tempfile.mkdtemp())
+        (product / "app").mkdir()
+        (product / "app" / "A.odex").write_bytes(b"odex")
+        self.assertEqual(sorted(make_image.image_tree_members(product, "PRODUCT")), ["PRODUCT/app/A.odex"])
+
+    def test_fr4_the_boot_images_are_the_primary_then_each_extension(self):
+        files = self._files()
+        chunks = make_image.boot_image_chunks(set(files), self._read(files), self.BCP)
+        self.assertEqual([member for member, _ in chunks],
+                         [f"SYSTEM/framework/{self.ISA}/boot.art",
+                          f"SYSTEM/framework/{self.ISA}/boot-framework-adservices.art"])
+        self.assertEqual([header["start"] for _, header in chunks], [0, 3])
+        self.assertEqual(make_image.boot_image_checksums(set(files), self._read(files), self.BCP),
+                         "i;3/1613b7a8:i;2/c4f09353")
+        self.assertEqual(make_image.boot_image_locations_of(chunks),
+                         ["/system/framework/boot.art", "/system/framework/boot-framework-adservices.art"])
+        jars = self.BCP.split(":")
+        self.assertEqual(make_image.boot_image_component_stems(set(files), chunks[0][1], jars),
+                         ["boot", "boot-framework", "boot-ext"])
+        # The extension was compiled as a single image: one file for both its jars.
+        self.assertEqual(make_image.boot_image_component_stems(set(files), chunks[1][1], jars),
+                         ["boot-framework-adservices"])
+        self.assertEqual(make_image.boot_image_chain_problems(set(files), self._read(files), self.BCP), [])
+        self.assertEqual(make_image.boot_image_vdex(0, "/apex/com.android.art/javalib/core-oj.jar"),
+                         "SYSTEM/framework/boot.vdex")
+        self.assertEqual(make_image.boot_image_vdex(1, "/system/framework/framework.jar"),
+                         "SYSTEM/framework/boot-framework.vdex")
+
+    def test_fr4_the_boot_image_is_compiled_as_the_build_compiles_it(self):
+        root = Path("/r")
+        primary = make_image.boot_image_command(
+            "dex2oat", root, Path("/o/boot"),
+            ["/apex/com.android.art/javalib/core-oj.jar", "/system/framework/framework.jar"], 0x70000000,
+            "speed-profile", profiles=[Path("/p/boot-image.prof")], dirty=Path("/p/dirty"),
+            preloaded=Path("/p/preloaded"), extra=["--runtime-arg", "-Xgc:CMC"])
+        for flag in ("--base=0x70000000", "--compiler-filter=speed-profile", "--profile-file=/p/boot-image.prof",
+                     "--dirty-image-objects=/p/dirty", "--preloaded-classes=/p/preloaded",
+                     "--dex-file=/r/system/framework/framework.jar", "--dex-location=/system/framework/framework.jar",
+                     "--oat-location=/system/framework/x86_64/boot.oat", "--image=/o/boot/boot.art",
+                     "--image-format=lz4hc", "--abort-on-hard-verifier-error", "--force-determinism", "--strip",
+                     "--instruction-set=x86_64", "-Xgc:CMC"):
+            self.assertIn(flag, [str(part) for part in primary], flag)
+        self.assertNotIn("--single-image", primary)
+        self.assertFalse(any(str(part).startswith("--boot-image=") for part in primary))
+        # The build's boot image heap: -Xmx1024m made the debug dex2oat reserve a 2 GiB
+        # mark-compact from-space in the low 4 GiB, which the CI runner did not have.
+        heap = [str(part) for part in primary[1:6]]
+        self.assertEqual(heap, ["--avoid-storing-invocation", "--runtime-arg", "-Xms64m",
+                                "--runtime-arg", "-Xmx64m"])
+        self.assertEqual([part for part in map(str, primary) if part.startswith("-Xmx")], ["-Xmx64m"])
+        extension = make_image.boot_image_command(
+            "dex2oat", root, Path("/o/ext"),
+            ["/apex/com.android.adservices/javalib/framework-adservices.jar"], 0x72460000, "verify",
+            base_images=["/system/framework/boot.art"],
+            deps=["/apex/com.android.art/javalib/core-oj.jar",
+                  "/apex/com.android.adservices/javalib/framework-adservices.jar"],
+            single_image=True)
+        parts = [str(part) for part in extension]
+        self.assertIn("--boot-image=/r/system/framework/boot.art", parts)
+        self.assertIn("-Xbootclasspath-locations:/apex/com.android.art/javalib/core-oj.jar:"
+                      "/apex/com.android.adservices/javalib/framework-adservices.jar", parts)
+        self.assertIn("--single-image", parts)
+        self.assertIn("--compiler-filter=verify", parts)
+        self.assertFalse(any(part.startswith("--base=") for part in parts))
+        # Like the build, an extension is named boot.art too: dex2oat names its files after its
+        # first jar, boot-framework-adservices.art, where ART looks for it. Named after its own
+        # image, it came out as boot-framework-adservices-framework-adservices.art.
+        for flag in ("--image=/o/ext/boot.art", "--oat-file=/o/ext/boot.oat",
+                     "--oat-location=/system/framework/x86_64/boot.oat", "--oat-symbols=/o/ext/symbols/boot.oat"):
+            self.assertIn(flag, [part.replace("\\", "/") for part in parts], flag)
+        self.assertFalse(any("framework-adservices.art" in part or "framework-adservices.oat" in part
+                             for part in parts), parts)
+        # The vdex goes beside the images' folder, which links to it, or where the build put it.
+        self.assertEqual(make_image.boot_image_member(Path("/o/boot/boot-framework.vdex")),
+                         "SYSTEM/framework/boot-framework.vdex")
+        self.assertEqual(make_image.boot_image_member(
+            Path("/o/ext/boot-framework-adservices.vdex"),
+            {"SYSTEM/framework/x86_64/boot-framework-adservices.vdex"}),
+            "SYSTEM/framework/x86_64/boot-framework-adservices.vdex")
+        self.assertEqual(make_image.boot_image_member(Path("/o/boot/boot-framework.oat")),
+                         "SYSTEM/framework/x86_64/boot-framework.oat")
+
+    def test_fr4_every_framework_jar_is_compiled_again_against_the_new_boot_images(self):
+        files = self._files()
+        context = "PCL[/system/framework/services.jar]"
+        files.update({
+            "SYSTEM/framework/oat/x86_64/am.odex": fake_odex(**{"compiler-filter": "speed", "classpath": "PCL[]"}),
+            "SYSTEM/framework/am.jar": fake_apk(b"dex\n035\0am"),
+            "SYSTEM/framework/oat/x86_64/apex@com.android.wifi@javalib@service-wifi.jar@classes.odex":
+                fake_odex(**{"compiler-filter": "speed-profile", "classpath": context}),
+            "SYSTEM/framework/oat/x86_64/apex@com.android.wifi@javalib@service-wifi.jar@classes.art": b"art",
+            "SYSTEM/apex/com.android.wifi.capex": b"capex",
+        })
+        jobs = make_image.boot_image_jar_jobs(set(files), self._read(files))
+        by_location = {job["location"]: job for job in jobs}
+        self.assertEqual(by_location["/system/framework/am.jar"]["jar"], "SYSTEM/framework/am.jar")
+        wifi = by_location["/apex/com.android.wifi/javalib/service-wifi.jar"]
+        self.assertIsNone(wifi["jar"])
+        self.assertEqual(wifi["filter"], "speed-profile")
+        self.assertEqual(wifi["classpath"], context)
+        self.assertTrue(wifi["app_image"])
+        # services.jar is compiled with the apps (PREBUILT_OAT_RECORD), not here.
+        self.assertNotIn("/system/framework/services.jar", by_location)
+        self.assertEqual(make_image.system_server_apexes(set(files)),
+                         {"com.android.wifi": "SYSTEM/apex/com.android.wifi.capex"})
+
+    def test_fr4_every_app_the_published_build_compiled_is_compiled_again(self):
+        apk = "SYSTEM/app/BasicDreams/BasicDreams.apk"
+        data = fake_apk(b"dex\n035\0calendar")
+        files = {
+            apk: data,
+            "SYSTEM/app/BasicDreams/oat/x86_64/BasicDreams.vdex": fake_vdex(make_image.apk_dex_checksums(data)),
+            make_image.PREBUILT_OAT_RECORD: json.dumps({apk: {
+                "files": ["SYSTEM/app/BasicDreams/oat/x86_64/BasicDreams.odex", "SYSTEM/app/BasicDreams/oat/x86_64/BasicDreams.vdex"],
+                "filter": "speed-profile", "classpath": "PCL[]"}}).encode(),
+        }
+        # Its dex did not change, so it is left alone, unless the boot images were compiled again.
+        self.assertEqual(make_image.compile_jobs(set(files), self._read(files)), [])
+        self.assertEqual(make_image.compile_jobs(set(files), self._read(files), boot_image_rebuilt=True),
+                         [(apk, "speed-profile", "PCL[]", False)])
+
+    def test_fr4_an_odex_compiled_against_the_old_boot_images_is_found(self):
+        files = self._files()
+        files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"] = fake_odex(**{
+            "bootclasspath-checksums": "i;3/1613b7a8:i;2/c4f09353"})
+        self.assertEqual(make_image.boot_image_problems(zip_of(files)), [])
+        files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"] = fake_odex(**{
+            "bootclasspath-checksums": "i;3/00000001:i;2/c4f09353"})
+        problems = make_image.boot_image_problems(zip_of(files))
+        self.assertTrue(any("Calendar.odex was compiled against boot images" in p for p in problems), problems)
+        # A changed framework.jar left with the old boot image, and an extension of another image.
+        files = self._files(framework_dex=b"dex\n035\0rebuilt")
+        files[f"SYSTEM/framework/{self.ISA}/boot-framework-adservices.art"] = fake_art(
+            2, 0x72460000, self.EXTENSION, 0x70000000, 3, 0x0BADBEEF, reservation=0x100000,
+            boot_size=0x2000000)
+        problems = make_image.boot_image_problems(zip_of(files))
+        self.assertTrue(any("framework.jar is not the dex the boot image was compiled from" in p for p in problems),
+                        problems)
+        self.assertTrue(any("extends another boot image" in p for p in problems), problems)
+
+    def _rebuilt(self):
+        """The image the Development build on develop c7c985d1 made: the primary image compiled
+        again (checksum c47daff9), the extension compiled again under the name of its own image
+        (boot-framework-adservices-framework-adservices.art, against the new primary image), and
+        the published extension left where ART looks for it, extending the old primary image."""
+        files = self._files(framework_dex=b"dex\n035\0rebuilt")
+        folder = f"SYSTEM/framework/{self.ISA}"
+        rebuilt = fake_dex_jar(b"dex\n035\0rebuilt")
+        files[f"{folder}/boot.art"] = fake_art(3, 0x70000000, 0xC47DAFF9, reservation=0x2000000)
+        files["SYSTEM/framework/boot-framework.vdex"] = fake_vdex(make_image.apk_dex_checksums(rebuilt))
+        files[f"{folder}/boot-framework-adservices-framework-adservices.art"] = fake_art(
+            2, 0x72460000, 0x2710D6FA, 0x70000000, 3, 0xC47DAFF9, reservation=0x100000, boot_size=0x2000000)
+        files[f"{folder}/boot-framework-adservices-framework-adservices.oat"] = fake_odex()
+        files["SYSTEM/framework/boot-framework-adservices-framework-adservices.vdex"] = fake_vdex([2, 3])
+        return files
+
+    def test_fr4_an_extension_under_another_name_than_art_loads_is_found(self):
+        files = self._rebuilt()
+        read = self._read(files)
+        # ART loads the extension by its first jar's name: the misnamed one is not a boot image.
+        chunks = make_image.boot_image_chunks(set(files), read, self.BCP)
+        self.assertEqual([member for member, _ in chunks],
+                         [f"SYSTEM/framework/{self.ISA}/boot.art",
+                          f"SYSTEM/framework/{self.ISA}/boot-framework-adservices.art"])
+        self.assertEqual(make_image.boot_image_checksums(set(files), read, self.BCP), "i;3/c47daff9:i;2/c4f09353")
+        problems = make_image.boot_image_chain_problems(set(files), read, self.BCP)
+        self.assertTrue(any("boot-framework-adservices.art extends another boot image" in p for p in problems),
+                        problems)
+        self.assertTrue(any("boot-framework-adservices-framework-adservices.art is a boot image file of no "
+                            "boot image" in p for p in problems), problems)
+        self.assertTrue(any("boot-framework-adservices-framework-adservices.vdex is a boot image file" in p
+                            for p in problems), problems)
+        self.assertEqual(make_image.boot_image_leftovers(set(files), read, self.BCP), [
+            "SYSTEM/framework/boot-framework-adservices-framework-adservices.vdex",
+            f"SYSTEM/framework/{self.ISA}/boot-framework-adservices-framework-adservices.art",
+            f"SYSTEM/framework/{self.ISA}/boot-framework-adservices-framework-adservices.oat"])
+        # An odex compiled against the primary image alone (dex2oat could not load the extension
+        # and only logged it) does not name the guest's images.
+        files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"] = fake_odex(**{
+            "bootclasspath-checksums": "i;3/c47daff9:d/1234"})
+        problems = make_image.boot_image_problems(zip_of(files))
+        self.assertTrue(any("Calendar.odex was compiled against boot images i;3/c47daff9, but the guest's are "
+                            "i;3/c47daff9:i;2/c4f09353" in p for p in problems), problems)
+        with self.assertRaisesRegex(ValueError, "could not load all of them"):
+            make_image.check_compiled_against(files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"],
+                                              "i;3/c47daff9:i;2/2710d6fa", "/system/app/Calendar/Calendar.apk")
+        make_image.check_compiled_against(fake_odex(**{"bootclasspath-checksums": "i;3/c47daff9:i;2/2710d6fa"}),
+                                          "i;3/c47daff9:i;2/2710d6fa", "/system/app/Calendar/Calendar.apk")
+
+    def test_fr4_an_extension_must_name_the_images_before_it_as_art_counts_them(self):
+        folder = f"SYSTEM/framework/{self.ISA}"
+        cases = {
+            # Its count ends inside the primary image.
+            "ends inside": fake_art(2, 0x72460000, self.EXTENSION, 0x70000000, 2, self.PRIMARY,
+                                    reservation=0x100000, boot_size=0x2000000),
+            # The images before it reserve another size.
+            "another size": fake_art(2, 0x72460000, self.EXTENSION, 0x70000000, 3, self.PRIMARY,
+                                     reservation=0x100000, boot_size=0x1000),
+            # It holds more jars than the boot class path has left.
+            "too many jars": fake_art(5, 0x72460000, self.EXTENSION, 0x70000000, 3, self.PRIMARY,
+                                      reservation=0x100000, boot_size=0x2000000),
+        }
+        for case, header in cases.items():
+            files = self._files()
+            files[f"{folder}/boot-framework-adservices.art"] = header
+            problems = make_image.boot_image_chain_problems(set(files), self._read(files), self.BCP)
+            expected = "the boot class path has 2" if case == "too many jars" else "extends another boot image"
+            self.assertTrue(any(expected in p for p in problems), (case, problems))
+        # A file of an image missing.
+        files = self._files()
+        del files[f"{folder}/boot-ext.oat"]
+        problems = make_image.boot_image_chain_problems(set(files), self._read(files), self.BCP)
+        self.assertTrue(any(f"{folder}/boot-ext.oat is missing" in p for p in problems), problems)
+
+    def test_fr4_an_app_image_of_the_old_boot_images_is_found(self):
+        files = self._files()
+        image = f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.art"
+        files[f"SYSTEM/app/Calendar/oat/{self.ISA}/Calendar.odex"] = fake_odex(**{
+            "bootclasspath-checksums": "i;3/1613b7a8:i;2/c4f09353"})
+        files[image] = fake_art(1, 0x73000000, 0x1234, 0x70000000, 5, self.PRIMARY ^ self.EXTENSION,
+                                boot_size=0x2100000)
+        self.assertEqual(make_image.boot_image_problems(zip_of(files)), [])
+        files[image] = fake_art(1, 0x73000000, 0x1234, 0x70000000, 5, 0xCB8FC4A6 ^ self.EXTENSION,
+                                boot_size=0x2100000)
+        problems = make_image.boot_image_problems(zip_of(files))
+        self.assertTrue(any("Calendar.art was made against other boot images" in p for p in problems), problems)
+
+    def test_fr4_boot_images_of_other_instruction_sets_are_dropped(self):
+        names = set(self._files()) | {"SYSTEM/framework/x86/boot.art", "SYSTEM/framework/x86/boot.oat",
+                                      "SYSTEM/framework/x86/boot-framework.vdex", "SYSTEM/framework/x86/other.txt"}
+        self.assertEqual(make_image.other_isa_boot_images(names),
+                         ["SYSTEM/framework/x86/boot-framework.vdex", "SYSTEM/framework/x86/boot.art",
+                          "SYSTEM/framework/x86/boot.oat"])
+
+    def test_fr4_a_changed_jar_in_an_extension_compiled_as_one_image_is_found(self):
+        # An extension of system jars compiled as a single image: its vdex holds both jars' dex.
+        bcp = ("/apex/com.android.art/javalib/core-oj.jar:/system/framework/framework.jar:"
+               "/system/framework/a.jar:/system/framework/b.jar")
+        folder = f"SYSTEM/framework/{self.ISA}"
+        framework = fake_dex_jar(b"dex\n035\0framework")
+        a, b = fake_dex_jar(b"dex\n035\0a"), fake_dex_jar(b"dex\n035\0b")
+        files = {
+            f"{folder}/boot.art": fake_art(2, 0x70000000, self.PRIMARY),
+            f"{folder}/boot-framework.art": fake_art(0, 0, 0),
+            "SYSTEM/framework/boot-framework.vdex": fake_vdex(make_image.apk_dex_checksums(framework)),
+            "SYSTEM/framework/framework.jar": framework,
+            f"{folder}/boot-a.art": fake_art(2, 0x72460000, self.EXTENSION, 0x70000000, 2, self.PRIMARY),
+            "SYSTEM/framework/boot-a.vdex": fake_vdex(make_image.apk_dex_checksums(a) +
+                                                      make_image.apk_dex_checksums(b)),
+            "SYSTEM/framework/a.jar": a,
+            "SYSTEM/framework/b.jar": b,
+        }
+        self.assertEqual(make_image.stale_boot_jars(set(files), self._read(files), bcp), [])
+        files["SYSTEM/framework/b.jar"] = fake_dex_jar(b"dex\n035\0b2")
+        self.assertEqual(make_image.stale_boot_jars(set(files), self._read(files), bcp),
+                         ["/system/framework/a.jar", "/system/framework/b.jar"])
+
+    def test_fr4_the_boot_image_profile_is_carried_over_to_the_changed_jar(self):
+        jars = ["/apex/com.android.art/javalib/core-oj.jar", "/system/framework/framework.jar"]
+        dump, create = make_image.boot_profile_commands(
+            "profman", "/p/boot-image.prof", jars, Path("/r"),
+            {"/system/framework/framework.jar": "/old/framework.jar"}, "/t/list.txt", "/t/boot-image.prof")
+        dump = [str(part).replace("\\", "/") for part in dump]
+        create = [str(part).replace("\\", "/") for part in create]
+        # The list is read with the jars the profile was made for: the published framework.jar.
+        self.assertIn("--dump-classes-and-methods", dump)
+        self.assertIn("--profile-file=/p/boot-image.prof", dump)
+        self.assertIn("--apk=/old/framework.jar", dump)
+        self.assertIn("--apk=/r/apex/com.android.art/javalib/core-oj.jar", dump)
+        # The new profile is made, as the build makes it, for the jars the image has.
+        for flag in ("--output-profile-type=boot", "--create-profile-from=/t/list.txt",
+                     "--apk=/r/system/framework/framework.jar", "--dex-location=/system/framework/framework.jar",
+                     "--reference-profile-file=/t/boot-image.prof"):
+            self.assertIn(flag, create, flag)
+        self.assertNotIn("--apk=/old/framework.jar", create)
+
+    def test_fr4_a_compiled_app_keeps_the_app_image_the_published_build_gave_it(self):
+        apk = "PRODUCT/app/webview/webview.apk"
+        self.assertIn(apk, make_image.COMPILED_APPS)
+        files = {
+            apk: fake_dex_jar(b"dex\n035\0webview"),
+            make_image.PREBUILT_OAT_RECORD: json.dumps({apk: {
+                "files": [f"PRODUCT/app/webview/oat/{self.ISA}/webview.odex",
+                          f"PRODUCT/app/webview/oat/{self.ISA}/webview.vdex",
+                          f"PRODUCT/app/webview/oat/{self.ISA}/webview.art"],
+                "filter": "speed-profile", "classpath": "PCL[]"}}).encode(),
+        }
+        jobs = {job[0]: job for job in make_image.compile_jobs(set(files), self._read(files), boot_image_rebuilt=True)}
+        self.assertTrue(jobs[apk][3])
+
+
+def zip_of(files):
+    """An open zip of `files` (member name to bytes)."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return zipfile.ZipFile(io.BytesIO(buffer.getvalue()))
 
 
 class KeyMintImageTests(unittest.TestCase):
@@ -9719,7 +10486,7 @@ class SlimSystemServerTests(unittest.TestCase):
 
     def test_nfr1_the_dsu_installer_and_trade_in_diagnostics_no_longer_start_at_every_boot(self):
         self.assertEqual(make_image.BOOT_RECEIVER_FREE_APKS,
-                         ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"])
+                         ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk", "/Traceur.apk"])
         published = {DYNSYSTEM_APK: _apk({"AndroidManifest.xml": DYNSYSTEM_MANIFEST, "classes.dex": b"dex"}),
                      DIAGNOSTICS_APK: _apk({"AndroidManifest.xml": DIAGNOSTICS_MANIFEST, "classes.dex": b"dex"})}
         with tempfile.TemporaryDirectory() as tmp:
@@ -9750,6 +10517,16 @@ class SlimSystemServerTests(unittest.TestCase):
         for app in ("Traceur", "EasterEgg"):
             self.assertNotIn(app, make_image.REMOVED_APPS)
         self.assertIn("/Traceur.apk", make_image.BOOT_RECEIVER_FREE_APKS)
+
+    def test_nfr1_check_image_refuses_an_image_without_system_tracing_or_the_easter_egg(self):
+        self.assertEqual(make_image.SETTINGS_ONLY_APKS,
+                         ["SYSTEM/app/Traceur/Traceur.apk", "SYSTEM/app/EasterEgg/EasterEgg.apk"])
+        for name in make_image.SETTINGS_ONLY_APKS:
+            # Neither is taken out by any removal rule of the image.
+            self.assertFalse(make_image.replaced_by_default_apps(name))
+            self.assertFalse(any(f"/{app}/" in name for app in make_image.REMOVED_APPS))
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("make_image.SETTINGS_ONLY_APKS", script)
 
     def test_nfr1_check_image_refuses_an_app_that_still_starts_at_boot(self):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()
@@ -10091,7 +10868,7 @@ class DefaultAppsTests(unittest.TestCase):
         # The AOSP apps they replace, and Calendar, are not left beside them.
         left = dict(self.files)
         left["PRODUCT/app/DeskClock/DeskClock.apk"] = fake_apk("com.android.deskclock")
-        left["SYSTEM/app/Calendar/Calendar.apk"] = fake_apk("com.android.calendar")
+        left["SYSTEM/app/BasicDreams/BasicDreams.apk"] = fake_apk("com.android.calendar")
         problems = self.problems(left)
         self.assertTrue(any("DeskClock/DeskClock.apk is still in the image" in p for p in problems))
         self.assertTrue(any("Calendar/Calendar.apk is still in the image" in p for p in problems))
@@ -10126,21 +10903,32 @@ class DefaultAppsTests(unittest.TestCase):
         self.assertIn('<exception package="com.android.deskclock">', permissions)
         self.assertIn('<permission name="android.permission.POST_NOTIFICATIONS" fixed="false" />', permissions)
         fs_config = make_image.default_apps_fs_config([by_name["camera"]])
-        self.assertIn("system/app/dsacamera 0 0 755 capabilities=0x0", fs_config)
-        self.assertIn("system/app/dsacamera/dsacamera.apk 0 0 644 capabilities=0x0", fs_config)
+        self.assertIn("system/app/DsaCamera 0 0 755 capabilities=0x0", fs_config)
+        self.assertIn("system/app/DsaCamera/DsaCamera.apk 0 0 644 capabilities=0x0", fs_config)
+
+    def test_fr42_default_apps_fs_config_keeps_the_case_mkfs_erofs_looks_up(self):
+        # mkfs.erofs refused the image with "failed to find system/app/DsaCalculator in
+        # canned fs_config" when these lines were lower cased: it matches paths with their case.
+        for app in make_image.default_apps():
+            fs_config = make_image.default_apps_fs_config([app])
+            partition, rest = app["image"].split("/", 1)
+            self.assertIn(f"{partition.lower()}/{rest} 0 0 644 capabilities=0x0", fs_config)
+            self.assertIn(f"{partition.lower()}/{rest.rsplit('/', 1)[0]} 0 0 755 capabilities=0x0", fs_config)
+        self.assertEqual(make_image.fs_config_path("SYSTEM/app/DsaCalculator"), "system/app/DsaCalculator")
         self.assertIn("system/etc/sysconfig/dsa-default-apps.xml 0 0 644 capabilities=0x0", fs_config)
 
     def test_fr42_make_image_refuses_default_apps_built_from_other_patches(self):
         apps_script = make_image._apps_script()
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "default-apps"
-            for app in self.apps:
+            every = make_image.image_apps()
+            for app in every:
                 apk = Path(tmp) / f"{app['name']}.apk"
-                apk.write_bytes(self.files[app["image"]])
+                apk.write_bytes(fake_apk(app["package"]))
                 apps_script.write_record(app, apk, folder, self.ANDROID)
             payloads, records = make_image.load_default_apps(folder, self.ANDROID)
-            self.assertEqual(set(payloads), {app["image"] for app in self.apps})
-            self.assertEqual([r["name"] for r in records], [app["name"] for app in self.apps])
+            self.assertEqual(set(payloads), {app["image"] for app in every})
+            self.assertEqual([r["name"] for r in records], [app["name"] for app in every])
             self.assertEqual(self.problems(records=records), [])
 
             record = folder / "music.json"
@@ -10152,6 +10940,73 @@ class DefaultAppsTests(unittest.TestCase):
             record.unlink()
             with self.assertRaisesRegex(ValueError, "no Music app"):
                 make_image.load_default_apps(folder, self.ANDROID)
+
+
+class SystemScreensTests(unittest.TestCase):
+    ANDROID = "android17"
+
+    def setUp(self):
+        self.apps = make_image.system_screen_apps()
+        self.files = {app["image"]: fake_apk(app["package"]) for app in self.apps if not make_image.in_apex(app)}
+        self.files["SYSTEM/apex/com.android.permission.apex"] = b"apex"
+        self.records = [{**make_image.default_app_provenance(app, self.ANDROID), "image": app["image"]}
+                        for app in self.apps]
+
+    def problems(self, files=None, records="same"):
+        files = self.files if files is None else files
+        return make_image.system_screens_problems(
+            set(files), files.__getitem__, self.records if records == "same" else records, self.ANDROID)
+
+    def test_fr34_each_system_screen_is_built_from_dsa_apps_in_the_published_apps_place(self):
+        self.assertEqual({app["name"]: app["image"] for app in self.apps}, {
+            "settings": "SYSTEM_EXT/priv-app/Settings/Settings.apk",
+            "permissioncontroller": make_image.PERMISSION_CONTROLLER_IMAGE,
+            "packageinstaller": "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+            "intentresolver": "SYSTEM/priv-app/IntentResolver/IntentResolver.apk",
+        })
+        self.assertEqual(self.problems(), [])
+        for app in self.apps:
+            # In place of the published app: nothing of it is taken out, and it is not a default app.
+            self.assertEqual(app["replaces"], [])
+            self.assertNotIn(app, make_image.default_apps())
+        self.assertTrue(make_image.replaced_by_default_apps("SYSTEM_EXT/priv-app/Settings/oat/x86_64/Settings.odex"))
+
+    def test_fr34_the_image_check_refuses_a_published_system_screen(self):
+        # No record: the image may carry the published AOSP app.
+        self.assertTrue(any("Settings screens were built from" in p or "does not say what the Settings" in p
+                            for p in self.problems(records=None)))
+        stale = [dict(r) for r in self.records]
+        stale[0]["patches"] = {"0001-follow-the-dsa-design.patch": "0" * 64}
+        self.assertTrue(any("other patches" in p for p in self.problems(records=stale)))
+        # SettingsLib's patches are part of what Settings and PermissionController are built from.
+        settings = next(r for r in self.records if r["name"] == "settings")
+        self.assertIn("settingslib", settings["libraries"])
+        changed = [dict(r) for r in self.records]
+        for record in changed:
+            if record["name"] == "settings":
+                record["libraries"] = {"settingslib": {**record["libraries"]["settingslib"], "commit": "0" * 40}}
+        self.assertTrue(any("Settings screens were built from another source" in p
+                            for p in self.problems(records=changed)))
+        missing = {k: v for k, v in self.files.items() if "IntentResolver" not in k}
+        self.assertTrue(any("no Share sheet screens" in p for p in self.problems(missing)))
+        renamed = dict(self.files)
+        renamed["SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk"] = fake_apk("com.example")
+        self.assertTrue(any("is com.example, not com.android.packageinstaller" in p for p in self.problems(renamed)))
+        no_apex = {k: v for k, v in self.files.items() if "apex" not in k}
+        self.assertTrue(any("no permission APEX" in p for p in self.problems(no_apex)))
+
+    def test_fr34_system_screens_are_signed_on_their_own_partition_and_keep_their_configuration(self):
+        by_name = {app["name"]: app for app in self.apps}
+        self.assertEqual(
+            make_image.default_app_apkcerts(by_name["settings"]),
+            'name="Settings.apk" certificate="build/make/target/product/security/platform.x509.pem" '
+            'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"')
+        self.assertIn('partition="system"', make_image.default_app_apkcerts(by_name["intentresolver"]))
+        self.assertTrue(make_image.in_apex(by_name["permissioncontroller"]))
+        self.assertFalse(make_image.in_apex(by_name["settings"]))
+        # The default apps' sysconfig is not theirs.
+        names = {app["name"] for app in make_image.default_apps()}
+        self.assertFalse(names & set(by_name))
 
 
 if __name__ == "__main__":

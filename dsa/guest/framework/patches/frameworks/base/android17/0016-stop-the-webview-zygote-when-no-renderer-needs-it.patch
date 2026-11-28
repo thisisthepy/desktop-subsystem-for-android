@@ -1,0 +1,181 @@
+Subject: WebView: stop the WebView zygote when no renderer has needed it for a while
+
+0005 starts the WebView zygote with the first WebView renderer rather than at boot, but from
+then on the zygote ran until the guest stopped. A DSA guest idle for two hours still held it
+(PSS 11 MiB) long after the app that showed web content had closed.
+
+The activity manager now checks the zygote every minute once a renderer has started from it
+(ProcessList, on the process start handler with its lock held). When no process started from
+the WebView zygote has existed, or been starting, for three minutes, it stops the zygote
+(WebViewZygote.stopIdleZygote) and stops checking. WebViewZygote.getProcess, which starts each
+renderer, starts the zygote again when there is none, as for the first renderer, and the checks
+begin again. A renderer is started either on the process start handler or with the activity
+manager's lock held, and its process record exists before it starts, so a start never finds the
+zygote stopping under it. The WebView package is kept; a change of WebView provider still stops
+the zygote as before. Two log lines tell the cost:
+
+  ProcessList: Stopped the WebView zygote: no WebView renderer for N s; the next WebView starts
+  it again
+  WebViewZygote: Started the WebView zygote in N ms
+
+Three minutes keep the zygote for an app that opens one web page after another. The first
+WebView after a stop waits for the zygote to start again (a few hundred milliseconds).
+
+Applies to frameworks/base at 94b4c163b7dfe5ce3607f7bb8456f9573f7de57d (Android 17), after 0015.
+---
+diff --git a/core/java/android/webkit/WebViewZygote.java b/core/java/android/webkit/WebViewZygote.java
+index efe7f354..a57e6222 100644
+--- a/core/java/android/webkit/WebViewZygote.java
++++ b/core/java/android/webkit/WebViewZygote.java
+@@ -20,6 +20,7 @@ import android.content.pm.PackageInfo;
+ import android.os.Build;
+ import android.os.ChildZygoteProcess;
+ import android.os.Process;
++import android.os.SystemClock;
+ import android.os.UserHandle;
+ import android.os.ZygoteProcess;
+ import android.text.TextUtils;
+@@ -78,6 +79,21 @@ public class WebViewZygote {
+         }
+     }
+ 
++    /**
++     * DSA: stops the zygote, if it runs, and keeps the WebView package, so the next
++     * {@link #getProcess()} starts it again. The activity manager calls this once no WebView
++     * renderer has existed for a while. Returns whether a zygote was running.
++     */
++    public static boolean stopIdleZygote() {
++        synchronized (sLock) {
++            if (sZygote == null) {
++                return false;
++            }
++            stopZygoteLocked();
++            return true;
++        }
++    }
++
+     @GuardedBy("sLock")
+     private static void stopZygoteLocked() {
+         if (sZygote != null) {
+@@ -103,6 +119,7 @@ public class WebViewZygote {
+         }
+ 
+         try {
++            final long start = SystemClock.uptimeMillis();
+             String abi = sPackage.applicationInfo.primaryCpuAbi;
+             int runtimeFlags = Zygote.getMemorySafetyRuntimeFlagsForSecondaryZygote(
+                     sPackage.applicationInfo, null);
+@@ -125,6 +142,10 @@ public class WebViewZygote {
+             ZygoteProcess.waitForConnectionToZygote(
+                     sZygote.getZygoteProcessAsManaged().getPrimarySocketAddress());
+             sZygote.getZygoteProcessAsManaged().preloadApp(sPackage.applicationInfo, abi);
++            // DSA: the zygote starts with the first renderer and again after it was stopped
++            // idle, and the renderer waits for it.
++            Log.i(LOGTAG, "Started the WebView zygote in " + (SystemClock.uptimeMillis() - start)
++                    + " ms");
+         } catch (Exception e) {
+             Log.e(LOGTAG, "Error connecting to webview zygote", e);
+             stopZygoteLocked();
+diff --git a/services/core/java/com/android/server/am/ProcessList.java b/services/core/java/com/android/server/am/ProcessList.java
+index de1d0241..f4ea27d0 100644
+--- a/services/core/java/com/android/server/am/ProcessList.java
++++ b/services/core/java/com/android/server/am/ProcessList.java
+@@ -161,6 +161,7 @@ import android.util.SparseBooleanArray;
+ import android.util.TimeUtils;
+ import android.util.proto.ProtoOutputStream;
+ import android.view.Display;
++import android.webkit.WebViewZygote;
+ 
+ import com.android.internal.annotations.CompositeRWLock;
+ import com.android.internal.annotations.GuardedBy;
+@@ -2581,6 +2582,82 @@ public final class ProcessList extends ProcessListInternal
+                 && mountMode != Zygote.MOUNT_EXTERNAL_NONE;
+     }
+ 
++    /**
++     * DSA: how long no WebView renderer may exist before the WebView zygote is stopped, and how
++     * often that is checked while the zygote may run. The zygote holds 5 to 11 MiB for as long as
++     * it runs, and once started it ran until the guest stopped, though most apps show web content
++     * only now and then. Three minutes keep it for an app that opens one web page after another;
++     * a WebView opened later waits once more for the zygote to start (a few hundred milliseconds).
++     */
++    private static final long DSA_WEBVIEW_ZYGOTE_IDLE_MS = 3 * 60 * 1000;
++    private static final long DSA_WEBVIEW_ZYGOTE_CHECK_MS = 60 * 1000;
++
++    /** DSA: when a WebView renderer last existed, as the last check or start saw it. */
++    @GuardedBy("mService")
++    private long mDsaWebViewRendererSeen;
++
++    /** DSA: a check of the WebView zygote is posted to the process start handler. */
++    @GuardedBy("mService")
++    private boolean mDsaWebViewZygoteCheckPending;
++
++    /**
++     * DSA: a WebView renderer is about to start, which starts the WebView zygote if it is not
++     * running. From then on the zygote is checked every minute until it is stopped.
++     */
++    private void dsaWebViewRendererStarting() {
++        synchronized (mService) {
++            mDsaWebViewRendererSeen = SystemClock.uptimeMillis();
++            if (!mDsaWebViewZygoteCheckPending && mService.mProcStartHandler != null) {
++                mDsaWebViewZygoteCheckPending = true;
++                mService.mProcStartHandler.postDelayed(this::dsaCheckWebViewZygote,
++                        DSA_WEBVIEW_ZYGOTE_CHECK_MS);
++            }
++        }
++    }
++
++    /**
++     * DSA: stops the WebView zygote once no WebView renderer has existed for
++     * DSA_WEBVIEW_ZYGOTE_IDLE_MS; WebViewZygote.getProcess() starts it again for the next one.
++     * Runs on the process start handler with the activity manager's lock held. A renderer is
++     * started either on that handler or with that lock held, and its process record exists
++     * before it starts, so no start can find the zygote stopping under it.
++     */
++    private void dsaCheckWebViewZygote() {
++        synchronized (mService) {
++            final long now = SystemClock.uptimeMillis();
++            if (dsaHasWebViewRendererLocked()) {
++                mDsaWebViewRendererSeen = now;
++            }
++            if (now - mDsaWebViewRendererSeen < DSA_WEBVIEW_ZYGOTE_IDLE_MS) {
++                mService.mProcStartHandler.postDelayed(this::dsaCheckWebViewZygote,
++                        DSA_WEBVIEW_ZYGOTE_CHECK_MS);
++                return;
++            }
++            mDsaWebViewZygoteCheckPending = false;
++            if (WebViewZygote.stopIdleZygote()) {
++                Slog.i(TAG, "Stopped the WebView zygote: no WebView renderer for "
++                        + (now - mDsaWebViewRendererSeen) / 1000
++                        + " s; the next WebView starts it again");
++            }
++        }
++    }
++
++    /** DSA: whether a process started from the WebView zygote exists, or is starting. */
++    @GuardedBy("mService")
++    private boolean dsaHasWebViewRendererLocked() {
++        final ArrayMap<String, SparseArray<ProcessRecord>> names = mProcessNames.getMap();
++        for (int i = names.size() - 1; i >= 0; i--) {
++            final SparseArray<ProcessRecord> apps = names.valueAt(i);
++            for (int j = apps.size() - 1; j >= 0; j--) {
++                final HostingRecord hosting = apps.valueAt(j).getHostingRecord();
++                if (hosting != null && hosting.usesWebviewZygote()) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++
+     private Process.ProcessStartResult startProcess(HostingRecord hostingRecord, String entryPoint,
+             ProcessRecord app, int uid, int[] gids, int runtimeFlags, int zygotePolicyFlags,
+             int mountExternal, String seInfo, String requiredAbi, String instructionSet,
+@@ -2712,6 +2789,7 @@ public final class ProcessList extends ProcessListInternal
+             long forkTimeNs = SystemClock.uptimeNanos();
+             final boolean useDeliQueue = mPlatformCompat.getUseDeliQueue(app.info);
+             if (hostingRecord.usesWebviewZygote()) {
++                dsaWebViewRendererStarting();
+                 startResult = startWebView(entryPoint,
+                         app.processName, uid, uid, gids, runtimeFlags, mountExternal,
+                         app.info.targetSdkVersion, seInfo, requiredAbi, instructionSet,

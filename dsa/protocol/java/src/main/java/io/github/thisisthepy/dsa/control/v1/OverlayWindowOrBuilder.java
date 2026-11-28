@@ -41,4 +41,17 @@ public interface OverlayWindowOrBuilder extends
    * @return The touchable.
    */
   boolean getTouchable();
+
+  /**
+   * <pre>
+   * The density the app draws this window at, in dots per inch, when the host gave the window
+   * one of its own (SetOverlayDensity) and the app has laid the window out again at it: the
+   * window's size on the guest's display has changed since. 0 while the app draws it as the
+   * rest of its process, as every overlay the host gave no density.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 4;</code>
+   * @return The densityDpi.
+   */
+  int getDensityDpi();
 }

@@ -528,6 +528,9 @@ mod windows_host {
             Arc::new(dsa_host_windows::compositor::log::PerformanceCounterClock),
             Arc::new(|line: &str| eprintln!("{line}")),
         )));
+        // Each time a task's window opens, the guest's display grows when the monitors this
+        // process sees then need more of it.
+        session.set_monitor_source(Arc::new(|| Some(dsa_host_windows::monitors::current())));
         // The guest's battery follows the computer's power.
         let power = Arc::new(PowerHub::new());
         power.attach(&session);

@@ -193,6 +193,8 @@ const char* describe(WriteResult result) {
             return "the picture is shorter than its size";
         case WriteResult::NotUnlocked:
             return "the buffer could not be unlocked";
+        case WriteResult::NotDecoded:
+            return "the picture has rows its decoder never wrote, which would show green";
     }
     return "unknown";
 }

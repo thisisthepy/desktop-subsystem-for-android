@@ -228,6 +228,42 @@ fn pr7_a_picture_goes_in_a_slot_and_only_its_number_crosses_the_connection() {
 }
 
 #[test]
+fn fr26_a_slot_the_decoder_never_wrote_goes_back_and_its_packet_gets_no_picture() {
+    // A surface the decoder handed back unwritten holds zeros, solid green in the app. Before,
+    // it went to the guest like any picture, in its slot or its message.
+    for direct in [false, true] {
+        let region = region();
+        let slots = PictureSlots::open(region.clone()).unwrap();
+        let mut stream = open(
+            SharedDecoders {
+                slots: Some(Arc::clone(&slots)),
+                direct,
+            },
+            REGION_ID,
+        );
+        send(stream.guest.as_mut(), packet(1, 0));
+        let none = frame(next(stream.guest.as_mut()));
+        assert_eq!(none.frame_index, 1, "the packet's work ends at once");
+        assert_eq!((none.width, none.height), (0, 0), "with no picture");
+        assert_eq!(none.slot, 0);
+        assert!(none.nv12.is_empty());
+        assert!(!none.end_of_stream);
+        assert_eq!(slots.held(), 0, "its slot went back at once");
+        // The stream goes on with the next picture, in a slot.
+        send(stream.guest.as_mut(), packet(2, 0x42));
+        let next_picture = frame(next(stream.guest.as_mut()));
+        assert_eq!(next_picture.frame_index, 2);
+        assert_ne!(next_picture.slot, 0);
+        assert_eq!(
+            region.read(next_picture.slot_offset as usize, PICTURE_BYTES),
+            vec![0x42; PICTURE_BYTES]
+        );
+        stream.guest.close();
+        assert_eq!(stream.host.join().unwrap(), VideoEnd::Closed);
+    }
+}
+
+#[test]
 fn pr7_the_host_does_not_write_a_slot_the_guest_still_holds() {
     let region = region();
     let slots = PictureSlots::open(region.clone()).unwrap();

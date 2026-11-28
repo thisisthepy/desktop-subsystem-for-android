@@ -46,12 +46,15 @@ class FakeMemory : MemorySource {
     )
     var failProcesses = false
     var reporting: PageReporting? = null
+    var vmstatText: String? = null
 
     override fun meminfo() = meminfoText
 
     override fun zramMmStat() = zram
 
     override fun pageReporting() = reporting
+
+    override fun vmstat() = vmstatText
 
     override fun processes(): List<ProcessPss> {
         if (failProcesses) throw SecurityException("no")
@@ -180,6 +183,34 @@ Hugepagesize:       2048 kB
         assertEquals(700_000L, report.freeReportedKb)
         assertEquals(9_000_000L, report.reportedTotalKb)
         assertEquals(12_000L, report.refaultedTotalKb)
+    }
+
+    @Test
+    fun nfr1_the_report_names_the_swap_cache_and_the_page_structures_meminfo_leaves_out() {
+        // The owner's PC on dev.37: the page structures of the two disks the guest maps in place
+        // (2422 MiB each, 64 bytes for every 4 KiB page) and the swap cache made most of what
+        // `dsa memory` called unaccounted. /proc/vmstat counts the page structures in pages.
+        memory.vmstatText = "nr_free_pages 203111\nnr_memmap_pages 19376\nnr_memmap_boot_pages 8192\npgfault 1\n"
+        started()
+        daemon.deliver(Envelope.newBuilder().setRequestGuestMemory(RequestGuestMemory.getDefaultInstance()).build().toByteArray())
+        scheduler.runDue()
+
+        val report = memoryReports().single().guestMemory
+        assertEquals(512L, report.swapCachedKb)
+        assertEquals(19376L * 4, report.memmapKb)
+        assertEquals(8192L * 4, report.memmapBootKb)
+        // A kernel with larger pages counts them in its own page size.
+        assertEquals(MemoryMap(afterBootKb = 160, atBootKb = 0), MemoryMap.parse("nr_memmap_pages 10\n", pageSizeKb = 16))
+    }
+
+    @Test
+    fun nfr1_a_kernel_that_does_not_count_its_page_structures_sends_zeros() {
+        // Before Linux 6.11 /proc/vmstat has no nr_memmap lines; an unreadable file is the same.
+        assertNull(MemoryMap.parse("nr_free_pages 1\npgfault 2\n", pageSizeKb = 4))
+        val report = guestMemory(MemInfo.parse(MEMINFO), null, emptyList())
+        assertEquals(0L, report.memmapKb)
+        assertEquals(0L, report.memmapBootKb)
+        assertEquals(512L, report.swapCachedKb)
     }
 
     @Test

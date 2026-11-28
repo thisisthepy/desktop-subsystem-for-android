@@ -82,7 +82,7 @@ pub use system::{list_here, MediaFoundationCameras};
 #[cfg(windows)]
 mod system {
     use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
     use dsa_host_core::camera::{
@@ -281,26 +281,78 @@ mod system {
         out
     }
 
-    /// A camera's source and its reader. Shut down when dropped, which lets the camera go.
-    struct Opened {
+    /// A line for the window manager's log.
+    type Log = Arc<dyn Fn(&str) + Send + Sync>;
+
+    /// A camera's activation object, its source and its reader: everything that keeps the
+    /// camera in use for Windows (its light and its in-use indicator).
+    struct Parts {
         activate: IMFActivate,
         source: IMFMediaSource,
         reader: IMFSourceReader,
     }
 
-    impl Drop for Opened {
-        fn drop(&mut self) {
+    /// A camera opened through Media Foundation. [`Opened::release`] lets it go, once, from
+    /// any thread: it shuts the source down (a `ReadSample` waiting on another thread then
+    /// returns) and drops every reference this process holds to the camera. Dropping the last
+    /// [`Opened`] does the same.
+    struct Opened {
+        parts: Mutex<Option<Parts>>,
+        /// The camera's name, and the log its release is written to; `None` while the modes
+        /// are only being read.
+        announce: Option<(String, Log)>,
+    }
+
+    // SAFETY: Media Foundation's capture objects are free threaded, and `parts` is reached
+    // through its lock only.
+    unsafe impl Send for Opened {}
+    // SAFETY: as above.
+    unsafe impl Sync for Opened {}
+
+    impl Opened {
+        /// The reader, with a reference of its own, so a release meanwhile does not take it
+        /// from under the caller; `None` once the camera is let go.
+        fn reader(&self) -> Option<IMFSourceReader> {
+            let parts = self.parts.lock().unwrap_or_else(|e| e.into_inner());
+            parts.as_ref().map(|parts| parts.reader.clone())
+        }
+
+        fn release(&self) {
+            let taken = self.parts.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let Some(parts) = taken else {
+                return;
+            };
             // SAFETY: plain Media Foundation calls on objects this owns.
             unsafe {
-                let _ = self.source.Shutdown();
-                let _ = self.activate.ShutdownObject();
+                let _ = parts.source.Shutdown();
+                let _ = parts.activate.ShutdownObject();
             }
+            let Parts {
+                activate,
+                source,
+                reader,
+            } = parts;
+            drop(reader);
+            drop(source);
+            drop(activate);
+            if let Some((name, log)) = &self.announce {
+                log(&format!("camera: {name} is let go"));
+            }
+        }
+    }
+
+    impl Drop for Opened {
+        fn drop(&mut self) {
+            self.release();
         }
     }
 
     const STREAM: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 
-    fn open_reader(activate: IMFActivate) -> Result<Opened, windows::core::Error> {
+    fn open_reader(
+        activate: IMFActivate,
+        announce: Option<(String, Log)>,
+    ) -> Result<Opened, windows::core::Error> {
         // SAFETY: plain Media Foundation calls; the objects are kept together and shut down
         // when dropped.
         unsafe {
@@ -325,9 +377,12 @@ mod system {
                 }
             };
             Ok(Opened {
-                activate,
-                source,
-                reader,
+                parts: Mutex::new(Some(Parts {
+                    activate,
+                    source,
+                    reader,
+                })),
+                announce,
             })
         }
     }
@@ -372,36 +427,51 @@ mod system {
     /// the camera.
     fn modes_of(activate: IMFActivate) -> Result<Vec<Mode>, bool> {
         let denied = |e: windows::core::Error| e.code() == E_ACCESSDENIED;
-        let opened = open_reader(activate).map_err(denied)?;
-        let modes = native_types(&opened.reader)
+        let opened = open_reader(activate, None).map_err(denied)?;
+        let modes = opened
+            .reader()
+            .map(|reader| native_types(&reader))
+            .unwrap_or_default()
             .into_iter()
             .map(|(_, mode)| mode)
             .collect();
         Ok(modes)
     }
 
-    /// A running camera.
+    /// A running camera. Dropping it, or calling its releaser from another thread, lets the
+    /// camera go.
     struct MediaFoundationStream {
-        opened: Opened,
+        opened: Arc<Opened>,
         width: u32,
         height: u32,
     }
 
-    // SAFETY: Media Foundation's capture objects are free threaded, and each stream is used
-    // by one thread at a time.
-    unsafe impl Send for MediaFoundationStream {}
+    impl Drop for MediaFoundationStream {
+        fn drop(&mut self) {
+            self.opened.release();
+        }
+    }
 
     impl CameraStream for MediaFoundationStream {
+        fn releaser(&self) -> Option<Box<dyn Fn() + Send>> {
+            let opened = Arc::clone(&self.opened);
+            Some(Box::new(move || opened.release()))
+        }
+
         fn next(&mut self) -> Result<Frame, String> {
             // A capture source may give a gap (no sample) now and then; a few in a row mean
             // the camera stopped.
             for _ in 0..100 {
+                // A reference of its own for the call, so a release from another thread
+                // shuts the source down (and this call returns) without freeing the reader
+                // under it.
+                let reader = self.opened.reader().ok_or("the camera was let go")?;
                 let mut flags = 0u32;
                 let mut timestamp = 0i64;
                 let mut sample: Option<IMFSample> = None;
                 // SAFETY: the out pointers live for the call.
                 unsafe {
-                    self.opened.reader.ReadSample(
+                    reader.ReadSample(
                         STREAM,
                         0,
                         None,
@@ -523,15 +593,16 @@ mod system {
     /// stays plugged in; listing again opens no camera.
     pub struct MediaFoundationCameras {
         modes: Mutex<HashMap<String, Vec<Mode>>>,
-        log: Box<dyn Fn(&str) + Send + Sync>,
+        log: Log,
     }
 
     impl MediaFoundationCameras {
-        /// `log` takes a line for each camera that cannot be offered.
+        /// `log` takes a line for each camera that cannot be offered, and one when a camera
+        /// opens for an app and when it is let go.
         pub fn new(log: Box<dyn Fn(&str) + Send + Sync>) -> MediaFoundationCameras {
             MediaFoundationCameras {
                 modes: Mutex::new(HashMap::new()),
-                log,
+                log: Arc::from(log),
             }
         }
     }
@@ -638,15 +709,22 @@ mod system {
                 .find(|d| d.link == id)
                 .ok_or("the camera is not plugged in any more")?;
             let name = device.name.clone();
-            let opened = open_reader(device.activate).map_err(|e| {
+            let announce = Some((name.clone(), Arc::clone(&self.log)));
+            let opened = open_reader(device.activate, announce).map_err(|e| {
                 if e.code() == E_ACCESSDENIED {
                     "Windows denies access to the camera (check the privacy settings)".to_string()
                 } else {
                     format!("{name} did not open; another program may be using it: {e}")
                 }
             })?;
+            (self.log)(&format!(
+                "camera: {name} opened for an app, {}x{} at {fps} frames a second",
+                mode.width, mode.height
+            ));
+            // Every failure below drops `opened`, which lets the camera go and says so.
+            let reader = opened.reader().ok_or("the camera was let go")?;
             // The camera's own mode of that size, at the rate nearest the one asked for.
-            let native = native_types(&opened.reader)
+            let native = native_types(&reader)
                 .into_iter()
                 .filter(|(_, m)| m.width == mode.width && m.height == mode.height)
                 .min_by_key(|(_, m)| {
@@ -655,15 +733,16 @@ mod system {
                 });
             if let Some((native, _)) = native {
                 // SAFETY: a plain Media Foundation call.
-                unsafe { opened.reader.SetCurrentMediaType(STREAM, None, &native) }
+                unsafe { reader.SetCurrentMediaType(STREAM, None, &native) }
                     .map_err(|e| format!("{name} did not take the mode: {e}"))?;
             }
             let output = output_type(mode.width, mode.height, fps)?;
             // SAFETY: as above.
-            unsafe { opened.reader.SetCurrentMediaType(STREAM, None, &output) }
+            unsafe { reader.SetCurrentMediaType(STREAM, None, &output) }
                 .map_err(|e| format!("{name} gives no NV12 pictures: {e}"))?;
+            drop(reader);
             Ok(Box::new(MediaFoundationStream {
-                opened,
+                opened: Arc::new(opened),
                 width: mode.width,
                 height: mode.height,
             }))

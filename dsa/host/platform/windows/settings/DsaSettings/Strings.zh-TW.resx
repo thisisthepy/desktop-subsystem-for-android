@@ -1094,6 +1094,15 @@ DSA 不會散布它們。只有在您要求時，才會下載公開的 LiteGapps
   <data name="Widgets_Removed" xml:space="preserve">
     <value>已從您的桌面移除 {0}。</value>
   </data>
+  <data name="Widgets_Count" xml:space="preserve">
+    <value>{0} 個小工具</value>
+  </data>
+  <data name="Widgets_CountOne" xml:space="preserve">
+    <value>1 個小工具</value>
+  </data>
+  <data name="Widgets_ShowMore" xml:space="preserve">
+    <value>再顯示 {0} 個</value>
+  </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
     <value>APK 安裝程式</value>
   </data>
@@ -2641,7 +2650,7 @@ Android 會拒絕安裝。</value>
     <value>其他應用程式商店</value>
   </data>
   <data name="AltStoresCard.Description" xml:space="preserve">
-    <value>DSA 會從官方網站下載應用程式商店，確認簽署者後，像其他應用程式一樣安裝。DSA 不隨附這些商店，各名稱為其所有者的商標。請在應用程式清單中移除商店。</value>
+    <value>DSA 會從官方網站下載應用程式商店，確認簽署者後，像其他應用程式一樣安裝。DSA 不隨附這些商店，各名稱為其所有者的商標。已安裝的商店會像其他應用程式一樣顯示在應用程式清單中，解除安裝也在應用程式清單中進行。</value>
   </data>
   <data name="AltStore_NotInstalled" xml:space="preserve">
     <value>未安裝</value>
@@ -2663,5 +2672,39 @@ Android 會拒絕安裝。</value>
   </data>
   <data name="AltStoreOpenButton.Content" xml:space="preserve">
     <value>開啟</value>
+  </data>
+  <data name="NavGames.Content" xml:space="preserve">
+    <value>遊戲</value>
+  </data>
+  <data name="GamesTitle.Text" xml:space="preserve">
+    <value>遊戲</value>
+  </data>
+  <data name="GamesRefreshButton.Content" xml:space="preserve">
+    <value>重新整理</value>
+  </data>
+  <data name="GamesIntro.Text" xml:space="preserve">
+    <value>讓遊戲在 DSA 中玩得更順手的設定。</value>
+  </data>
+  <data name="GamesErrorBar.Title" xml:space="preserve">
+    <value>無法讀取或變更遊戲設定</value>
+  </data>
+  <data name="GamesConvenienceHeader.Text" xml:space="preserve">
+    <value>遊戲便利性</value>
+  </data>
+  <data name="GamesKeepFocusCard.Header" xml:space="preserve">
+    <value>保持遊戲焦點</value>
+  </data>
+  <data name="GamesKeepFocusCard.Description" xml:space="preserve">
+    <value>下方開啟的應用程式在你點選其他視窗時仍會繼續執行，失去焦點就會暫停的遊戲也會繼續。
+按鍵和文字輸入仍只會傳送到你正在使用的視窗。</value>
+  </data>
+  <data name="GamesSelectAllButton.Content" xml:space="preserve">
+    <value>全選</value>
+  </data>
+  <data name="GamesNone.Text" xml:space="preserve">
+    <value>Android 中還沒有安裝任何應用程式。</value>
+  </data>
+  <data name="Games_GameDetail" xml:space="preserve">
+    <value>遊戲 · {0}</value>
   </data>
 </root>

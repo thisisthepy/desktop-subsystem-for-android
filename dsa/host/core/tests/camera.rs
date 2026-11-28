@@ -2,14 +2,14 @@
 //! standing in for the platform's.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use dsa_host_core::camera::{
-    choose_mode, facing_of, list_text, nv12_to_bgr, offered_modes, parse_list_text, scale_nv12,
-    sensor_orientation, serve_connection, Camera, CameraEnd, CameraStream, Cameras, Facing, Frame,
-    Mode, Panel,
+    center_crop, choose_mode, facing_of, list_text, nv12_to_bgr, offered_modes, parse_list_text,
+    scale_nv12, sensor_orientation, serve_connection, Camera, CameraEnd, CameraStream, Cameras,
+    Facing, Frame, Mode, Panel,
 };
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
@@ -45,11 +45,82 @@ fn picture(width: u32, height: u32, value: u8, timestamp_ns: u64) -> Frame {
     }
 }
 
-/// What the fake cameras were asked, and how many are open now.
+/// What the fake cameras were asked, how many streams are open now, how many cameras are held
+/// (opened and not let go, which is what turns the computer's camera light on), and the most
+/// held at once.
 #[derive(Default)]
 struct Record {
     log: Mutex<Vec<String>>,
     open: AtomicUsize,
+    held: AtomicUsize,
+    peak: AtomicUsize,
+}
+
+impl Record {
+    fn hold(&self) {
+        let now = self.held.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+    }
+
+    fn count(&self, prefix: &str) -> usize {
+        let log = self.log.lock().unwrap();
+        log.iter().filter(|line| line.starts_with(prefix)).count()
+    }
+}
+
+/// Waits up to `limit` for `done`, and says whether it came.
+fn within(limit: Duration, done: impl Fn() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while std::time::Instant::now() < deadline {
+        if done() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    done()
+}
+
+/// A camera that sends no picture until it is let go, as one whose pictures stopped coming
+/// (a source reader waiting on a camera that went quiet). Its releaser lets it go from
+/// another thread, as the platforms' streams do.
+struct WaitingStream {
+    released: Arc<(Mutex<bool>, Condvar)>,
+    record: Arc<Record>,
+}
+
+fn let_go(released: &(Mutex<bool>, Condvar), record: &Record) {
+    let (flag, changed) = released;
+    let mut done = flag.lock().unwrap();
+    if !*done {
+        *done = true;
+        record.held.fetch_sub(1, Ordering::SeqCst);
+        record.log.lock().unwrap().push("release".into());
+    }
+    changed.notify_all();
+}
+
+impl CameraStream for WaitingStream {
+    fn next(&mut self) -> Result<Frame, String> {
+        let (flag, changed) = &*self.released;
+        let mut done = flag.lock().unwrap();
+        while !*done {
+            done = changed.wait(done).unwrap();
+        }
+        Err("the camera was let go".into())
+    }
+
+    fn releaser(&self) -> Option<Box<dyn Fn() + Send>> {
+        let (released, record) = (Arc::clone(&self.released), Arc::clone(&self.record));
+        Some(Box::new(move || let_go(&released, &record)))
+    }
+}
+
+impl Drop for WaitingStream {
+    fn drop(&mut self) {
+        let_go(&self.released, &self.record);
+        self.record.open.fetch_sub(1, Ordering::SeqCst);
+        self.record.log.lock().unwrap().push("close".into());
+    }
 }
 
 /// A camera that gives pictures 1, 2, 3 and so on (in the luma), then fails after `fail_after`
@@ -81,6 +152,7 @@ impl CameraStream for FakeStream {
 impl Drop for FakeStream {
     fn drop(&mut self) {
         self.record.open.fetch_sub(1, Ordering::SeqCst);
+        self.record.held.fetch_sub(1, Ordering::SeqCst);
         self.record.log.lock().unwrap().push("close".into());
     }
 }
@@ -88,6 +160,8 @@ impl Drop for FakeStream {
 struct FakeCameras {
     cameras: Vec<Camera>,
     fail_after: Option<u8>,
+    /// Whether its cameras are [`WaitingStream`]s.
+    waiting: bool,
     record: Arc<Record>,
 }
 
@@ -116,6 +190,7 @@ impl FakeCameras {
                 camera("blocked", Facing::Front, true),
             ],
             fail_after,
+            waiting: false,
             record: Arc::default(),
         }
     }
@@ -133,6 +208,13 @@ impl Cameras for FakeCameras {
             return Err("blocked".into());
         }
         self.record.open.fetch_add(1, Ordering::SeqCst);
+        self.record.hold();
+        if self.waiting {
+            return Ok(Box::new(WaitingStream {
+                released: Arc::default(),
+                record: Arc::clone(&self.record),
+            }));
+        }
         Ok(Box::new(FakeStream {
             width: mode.width,
             height: mode.height,
@@ -172,8 +254,11 @@ type Connected = (
 );
 
 fn connect(fail_after: Option<u8>) -> Connected {
+    connect_to(FakeCameras::new(fail_after))
+}
+
+fn connect_to(cameras: FakeCameras) -> Connected {
     let (mut listener, mut connector) = memory::pair();
-    let cameras = FakeCameras::new(fail_after);
     let record = Arc::clone(&cameras.record);
     let host = thread::spawn(move || {
         let connection = listener.accept(WAIT).expect("accepts");
@@ -318,6 +403,133 @@ fn fr26_the_camera_is_open_only_while_in_use() {
     assert_eq!(record.open.load(Ordering::SeqCst), 0);
 }
 
+fn waiting_cameras() -> FakeCameras {
+    FakeCameras {
+        waiting: true,
+        ..FakeCameras::new(None)
+    }
+}
+
+#[test]
+fn fr26_a_stop_lets_the_camera_go_while_it_waits_for_a_picture() {
+    let (mut guest, host, _, record) = connect_to(waiting_cameras());
+    assert!(open(guest.as_mut(), "front", 640, 480, 30).ok);
+    assert_eq!(record.held.load(Ordering::SeqCst), 1);
+    send(guest.as_mut(), Body::CameraStop(CameraStop {}));
+    // The camera sends nothing, so nothing but the stop can let it go.
+    assert!(
+        within(Duration::from_secs(1), || record
+            .held
+            .load(Ordering::SeqCst)
+            == 0),
+        "the camera is still held a second after the guest stopped it"
+    );
+    // It opens again, and the connection's end lets it go too.
+    assert!(open(guest.as_mut(), "front", 640, 480, 30).ok);
+    assert_eq!(record.held.load(Ordering::SeqCst), 1);
+    drop(guest);
+    assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+    assert_eq!(record.held.load(Ordering::SeqCst), 0);
+    assert_eq!(record.open.load(Ordering::SeqCst), 0);
+    assert_eq!(record.count("open "), record.count("close"));
+}
+
+#[test]
+fn fr26_closing_the_connection_lets_a_waiting_camera_go() {
+    let (mut guest, host, _, record) = connect_to(waiting_cameras());
+    assert!(open(guest.as_mut(), "back", 1280, 720, 30).ok);
+    assert_eq!(record.held.load(Ordering::SeqCst), 1);
+    drop(guest);
+    assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+    assert_eq!(record.held.load(Ordering::SeqCst), 0);
+    assert_eq!(record.open.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn fr26_a_connection_closed_while_its_camera_opens_leaves_no_camera_held() {
+    for waiting in [false, true] {
+        for stop_first in [false, true] {
+            let cameras = FakeCameras {
+                waiting,
+                ..FakeCameras::new(None)
+            };
+            let (mut guest, host, _, record) = connect_to(cameras);
+            // The guest asks and goes before it reads the answer, as a HAL whose app closed
+            // the camera while it was opening.
+            send(
+                guest.as_mut(),
+                Body::CameraOpen(CameraOpen {
+                    id: "usb".into(),
+                    width: 640,
+                    height: 480,
+                    fps: 30,
+                }),
+            );
+            if stop_first {
+                send(guest.as_mut(), Body::CameraStop(CameraStop {}));
+            }
+            drop(guest);
+            assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+            assert_eq!(record.held.load(Ordering::SeqCst), 0, "waiting {waiting}");
+            assert_eq!(record.open.load(Ordering::SeqCst), 0, "waiting {waiting}");
+            assert_eq!(record.count("open "), record.count("close"));
+        }
+    }
+}
+
+#[test]
+fn fr26_opens_and_stops_in_quick_succession_never_hold_a_camera_twice() {
+    for waiting in [false, true] {
+        let cameras = FakeCameras {
+            waiting,
+            ..FakeCameras::new(None)
+        };
+        let (mut guest, host, _, record) = connect_to(cameras);
+        // As an app that probes its cameras: open, stop, open the other, stop, unanswered.
+        for round in 0..6 {
+            let id = if round % 2 == 0 { "front" } else { "back" };
+            send(
+                guest.as_mut(),
+                Body::CameraOpen(CameraOpen {
+                    id: id.into(),
+                    width: 640,
+                    height: 480,
+                    fps: 30,
+                }),
+            );
+            send(guest.as_mut(), Body::CameraStop(CameraStop {}));
+        }
+        // A still's answer shows every message before it was taken.
+        send(
+            guest.as_mut(),
+            Body::CameraStill(CameraStill {
+                request_id: 3,
+                width: 640,
+                height: 480,
+                quality: 90,
+            }),
+        );
+        loop {
+            match next(guest.as_mut()) {
+                Body::CameraStillTaken(taken) => {
+                    assert_eq!(taken.request_id, 3);
+                    break;
+                }
+                Body::CameraOpened(opened) => assert!(opened.ok, "{}", opened.error),
+                Body::CameraFrame(_) => continue,
+                other => panic!("expected the still's answer, got {other:?}"),
+            }
+        }
+        assert_eq!(record.held.load(Ordering::SeqCst), 0, "waiting {waiting}");
+        assert_eq!(record.open.load(Ordering::SeqCst), 0, "waiting {waiting}");
+        assert_eq!(record.peak.load(Ordering::SeqCst), 1, "waiting {waiting}");
+        assert_eq!(record.count("open "), 6);
+        assert_eq!(record.count("close"), 6);
+        drop(guest);
+        assert_eq!(host.join().unwrap(), CameraEnd::Closed);
+    }
+}
+
 #[test]
 fn fr26_a_still_is_encoded_from_the_newest_picture() {
     let (mut guest, host, _, _) = connect(None);
@@ -456,8 +668,9 @@ fn fr26_a_picture_scales_and_converts_for_a_still() {
         nv12: vec![10, 20, 30, 40, 10, 20, 30, 40, 100, 200, 110, 210],
         timestamp_ns: 5,
     };
+    // 2x2 is another shape: the square at the left, from an even offset, not a squeeze.
     let half = scale_nv12(&frame, 2, 2).expect("scales");
-    assert_eq!(half.nv12, vec![10, 30, 10, 30, 100, 200]);
+    assert_eq!(half.nv12, vec![10, 20, 10, 20, 100, 200]);
     assert_eq!(half.timestamp_ns, 5);
     assert_eq!(scale_nv12(&frame, 3, 2), None);
 
@@ -491,4 +704,46 @@ fn nfr1_a_camera_line_that_does_not_read_is_left_out() {
     let parsed = parse_list_text("id\tname\tback\t0\t0\t640x480@1-30,bad,1x2\n");
     assert_eq!(parsed.len(), 1);
     assert_eq!(parsed[0].modes, vec![mode(640, 480, 1, 30)]);
+}
+
+#[test]
+fn nfr8_a_4_3_still_of_a_16_9_picture_is_cropped_at_the_centre_not_stretched() {
+    use dsa_host_core::camera::Crop;
+    let crop = |x, y, width, height| Crop {
+        x,
+        y,
+        width,
+        height,
+    };
+    assert_eq!(
+        center_crop(1920, 1080, 1440, 1080),
+        crop(240, 0, 1440, 1080)
+    );
+    assert_eq!(center_crop(1280, 720, 640, 480), crop(160, 0, 960, 720));
+    assert_eq!(center_crop(640, 480, 1280, 720), crop(0, 60, 640, 360));
+    assert_eq!(center_crop(1280, 720, 320, 180), crop(0, 0, 1280, 720));
+    // A 16x4 picture whose luma is its column number, into an 8x6 (4:3) still: only columns
+    // 4 to 8 of the middle, in order, so nothing is squeezed.
+    let mut nv12 = Vec::new();
+    for _ in 0..4 {
+        nv12.extend(0u8..16);
+    }
+    for _ in 0..2 {
+        for x in 0..8u8 {
+            nv12.extend([100 + x, 200 + x]);
+        }
+    }
+    let frame = Frame {
+        width: 16,
+        height: 4,
+        stride: 16,
+        nv12,
+        timestamp_ns: 0,
+    };
+    assert_eq!(center_crop(16, 4, 8, 6), crop(4, 0, 5, 4));
+    let still = scale_nv12(&frame, 8, 6).expect("scales");
+    let row = &still.nv12[..8];
+    assert!(row.iter().all(|&v| (4..9).contains(&v)), "{row:?}");
+    assert!(row.windows(2).all(|w| w[0] <= w[1]), "{row:?}");
+    assert_eq!(still.nv12[8 * 6], 102);
 }

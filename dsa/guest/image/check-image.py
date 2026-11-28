@@ -276,6 +276,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             if left:
                 problems.append(f"{name} still starts at every boot ({', '.join(map(str, left))}) and "
                                 "stays as a cached process")
+    # The apps Settings opens (System Tracing, the Android logo) stay in the image.
+    for name in make_image.SETTINGS_ONLY_APKS:
+        if name not in names:
+            problems.append(f"{name} is missing, so Settings has nothing to open for it")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
@@ -283,6 +287,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     # The apps the published build shipped compiled keep their odex, vdex and app image,
     # valid for their dex and the guest's boot image, with the filter they were compiled with.
     problems += make_image.prebuilt_oat_problems(z)
+    # The boot images are compiled from the boot class path jars the image ships (framework.jar
+    # from the Framework build among them), and every odex against those boot images, or ART
+    # throws them away and the framework and the apps run interpreted.
+    problems += make_image.boot_image_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     elif b"zram_backingdev_size=" not in z.read("VENDOR/etc/fstab.dsa"):
@@ -431,6 +439,12 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     # patches dsa/apps has now, and none of the AOSP apps they replace (nor Calendar) beside them.
     problems.extend(make_image.default_apps_problems(
         names, z.read, manifest.get("default_apps"), f"android{manifest['android_major']}"))
+    # The system screens (Settings, PermissionController, PackageInstaller, the share sheet): each
+    # the one dsa/apps builds with DSA's design, not the published AOSP app.
+    problems.extend(make_image.system_screens_problems(
+        names, z.read, manifest.get("default_apps"), f"android{manifest['android_major']}"))
+    # Nothing the image lays over them puts the published cards, spacing or titles back.
+    problems.extend(make_image.system_screen_override_problems())
 
     # The network: eth0 shown as Wi-Fi, with its address and DNS servers from DHCP.
     problems.extend(make_image.network_problems(names, z.read, manifest["kernel_cmdline"]))

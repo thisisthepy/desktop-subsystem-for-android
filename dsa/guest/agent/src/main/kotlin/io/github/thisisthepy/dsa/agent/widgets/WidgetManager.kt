@@ -5,8 +5,12 @@ import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.PointerAction
 import io.github.thisisthepy.dsa.control.v1.WidgetAdded
+import io.github.thisisthepy.dsa.control.v1.WidgetAppIcon
 import io.github.thisisthepy.dsa.control.v1.WidgetFrame
 import io.github.thisisthepy.dsa.control.v1.WidgetList
+import io.github.thisisthepy.dsa.control.v1.WidgetPreview
+import io.github.thisisthepy.dsa.control.v1.WidgetPreviewSource
+import io.github.thisisthepy.dsa.control.v1.WidgetPreviews
 import io.github.thisisthepy.dsa.control.v1.WidgetProvider
 import io.github.thisisthepy.dsa.control.v1.WidgetProviders
 import io.github.thisisthepy.dsa.control.v1.WidgetReconfigured
@@ -243,10 +247,66 @@ object WidgetFit {
     data class Told(val widthDp: Int, val heightDp: Int)
 }
 
+/** The kinds of preview a widget's app gives for it. */
+data class PreviewKinds(
+    /** A layout for its preview (Android 12's `previewLayout`), which the agent draws. */
+    val layout: Boolean,
+    /** A picture for its preview (`previewImage`). */
+    val image: Boolean,
+)
+
+/**
+ * Which preview a gallery shows for a widget: the best its app gives. A layout comes first,
+ * as Android's own launcher prefers it: it is the widget itself, drawn at its default size
+ * and in the device's colours, where a picture is one the app made once. An app that gives a
+ * layout often gives no picture at all (Material You Widgets gives none for any of its
+ * hundreds of widgets), and a widget with neither shows its app's icon.
+ */
+object PreviewChoice {
+    /** The sources to try for a widget that offers [kinds], best first; its app's icon last. */
+    fun order(kinds: PreviewKinds): List<WidgetPreviewSource> = buildList {
+        if (kinds.layout) add(WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_LAYOUT)
+        if (kinds.image) add(WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_IMAGE)
+        add(WidgetPreviewSource.WIDGET_PREVIEW_SOURCE_ICON)
+    }
+
+    /**
+     * The sides, in pixels, a preview is drawn at, largest first: a preview whose PNG is more
+     * than [WidgetManager.MAX_PREVIEW_BYTES] at one side is drawn again at the next.
+     */
+    val SIDES = listOf(256, 192, 128)
+}
+
 /** The guest's widget framework, as the agent drives it. Every method runs on the agent's thread. */
 interface WidgetPlatform {
     /** The widgets the installed apps offer. */
     fun providers(): List<WidgetInfo>
+
+    /**
+     * The widgets the installed apps offer, as [providers] does but without their previews
+     * when the platform can leave them out, which saves drawing one for every widget: a
+     * gallery that shows the widgets by app asks for the previews of those it shows instead
+     * ([drawPreview]).
+     */
+    fun galleryProviders(): List<WidgetInfo> = providers()
+
+    /** The icon of the app [packageName] as a PNG within the gallery's limits; empty when none. */
+    fun appIcon(packageName: String): ByteArray = ByteArray(0)
+
+    /**
+     * The kinds of preview each of the widgets [providers] offers, by provider. A widget no app
+     * offers now is left out. May be called on any thread.
+     */
+    fun previewKinds(providers: List<String>): Map<String, PreviewKinds> = emptyMap()
+
+    /**
+     * The preview of the widget [provider] from [source], as a PNG of at most [maxPixels] on a
+     * side: its preview layout drawn at the widget's default size, its preview image, or its
+     * app's icon. Null when the widget has no such preview, or drawing it failed. Called after
+     * [previewKinds] for the same widget, on any thread but the agent's, since drawing a
+     * layout waits for the guest's main thread.
+     */
+    fun drawPreview(provider: String, source: WidgetPreviewSource, maxPixels: Int): ByteArray? = null
 
     /** The widget IDs the agent holds, which outlive its process and the guest's restarts. */
     fun placedIds(): List<Int>
@@ -448,6 +508,12 @@ class WidgetManager(
     private val send: (ByteArray) -> Boolean,
     private val log: Log,
     private val isConnected: () -> Boolean,
+    /**
+     * Runs slow work off the agent's thread: drawing previews waits for the guest's main
+     * thread, and the host's other requests (a window's input among them) must not wait for
+     * it. Its results come back to the agent's thread through the `post` given to [start].
+     */
+    private val background: (() -> Unit) -> Unit = { it() },
 ) {
     private var post: (() -> Unit) -> Unit = { it() }
     private var later: (() -> Unit) -> Unit = {}
@@ -721,8 +787,12 @@ class WidgetManager(
     /** Acts on the frame if it is about widgets. False for any other frame. */
     fun handle(envelope: Envelope): Boolean {
         when (envelope.bodyCase) {
-            Envelope.BodyCase.LIST_WIDGET_PROVIDERS ->
-                whenStarted { listProviders(envelope.listWidgetProviders.requestId) }
+            Envelope.BodyCase.LIST_WIDGET_PROVIDERS -> whenStarted {
+                listProviders(envelope.listWidgetProviders.requestId, envelope.listWidgetProviders.lazyPreviews)
+            }
+            Envelope.BodyCase.GET_WIDGET_PREVIEWS -> whenStarted {
+                previews(envelope.getWidgetPreviews.requestId, envelope.getWidgetPreviews.providersList)
+            }
             Envelope.BodyCase.ADD_WIDGET ->
                 whenStarted { add(envelope.addWidget.requestId, envelope.addWidget.provider) }
             Envelope.BodyCase.REMOVE_WIDGET -> whenStarted { remove(envelope.removeWidget.widgetId) }
@@ -741,26 +811,113 @@ class WidgetManager(
         attempt("telling the widgets the guest dozes") { platform.dozing(!on) }
     }
 
-    private fun listProviders(requestId: Int) {
+    /**
+     * Sends the widgets on offer. With [lazy], as a gallery grouped by app asks: without their
+     * previews, and with each app's icon once, in the part that holds the app's first widget.
+     */
+    private fun listProviders(requestId: Int, lazy: Boolean = false) {
         val providers = try {
-            platform.providers()
+            if (lazy) platform.galleryProviders() else platform.providers()
         } catch (e: Exception) {
             log.warn("reading the installed widgets failed", e)
             emptyList()
         }.take(MAX_PROVIDERS)
         var batch = WidgetProviders.newBuilder().setRequestId(requestId)
         var bytes = 0
+        val iconsSent = HashSet<String>()
         for (info in providers) {
-            val proto = info.toProto()
-            if (batch.providersCount > 0 && bytes + proto.serializedSize > MAX_BATCH_BYTES) {
+            val proto = if (lazy) info.copy(previewPng = ByteArray(0)).toProto() else info.toProto()
+            val icon = if (lazy && iconsSent.add(info.packageName)) appIcon(info.packageName) else null
+            val size = proto.serializedSize + (icon?.serializedSize ?: 0)
+            if (batch.providersCount > 0 && bytes + size > MAX_BATCH_BYTES) {
                 send(Envelope.newBuilder().setWidgetProviders(batch).build().toByteArray())
                 batch = WidgetProviders.newBuilder().setRequestId(requestId)
                 bytes = 0
             }
             batch.addProviders(proto)
-            bytes += proto.serializedSize
+            if (icon != null) batch.addAppIcons(icon)
+            bytes += size
         }
         send(Envelope.newBuilder().setWidgetProviders(batch.setComplete(true)).build().toByteArray())
+    }
+
+    private fun appIcon(packageName: String): WidgetAppIcon {
+        val png = try {
+            platform.appIcon(packageName)
+        } catch (e: Exception) {
+            log.warn("drawing the icon of $packageName failed", e)
+            ByteArray(0)
+        }
+        return WidgetAppIcon.newBuilder()
+            .setPackageName(packageName)
+            .setIconPng(if (png.size <= MAX_PREVIEW_BYTES) ByteString.copyFrom(png) else ByteString.EMPTY)
+            .build()
+    }
+
+    /**
+     * Draws the previews of the widgets [asked] names, each once and at most
+     * [MAX_PREVIEWS_ASKED], off the agent's thread, and sends them as they are drawn, in parts
+     * under [MAX_BATCH_BYTES], the last marked complete. Only one preview's image is held at a
+     * time beyond the part being filled, so a gallery's previews never sit in the agent's
+     * memory all at once. A widget no app offers now has no entry.
+     */
+    private fun previews(requestId: Int, asked: List<String>) {
+        val providers = asked.filter { it.contains('/') }.distinct().take(MAX_PREVIEWS_ASKED)
+        background {
+            var batch = WidgetPreviews.newBuilder().setRequestId(requestId)
+            var bytes = 0
+            try {
+                val kinds = try {
+                    platform.previewKinds(providers)
+                } catch (e: Exception) {
+                    log.warn("reading the widgets' previews failed", e)
+                    emptyMap()
+                }
+                for (provider in providers) {
+                    val offered = kinds[provider] ?: continue
+                    val preview = bestPreview(provider, offered)
+                    if (batch.previewsCount > 0 && bytes + preview.serializedSize > MAX_BATCH_BYTES) {
+                        val part = batch.build()
+                        post { send(Envelope.newBuilder().setWidgetPreviews(part).build().toByteArray()) }
+                        batch = WidgetPreviews.newBuilder().setRequestId(requestId)
+                        bytes = 0
+                    }
+                    batch.addPreviews(preview)
+                    bytes += preview.serializedSize
+                }
+            } catch (e: Exception) {
+                log.warn("drawing the widgets' previews failed", e)
+            }
+            val last = batch.setComplete(true).build()
+            post { send(Envelope.newBuilder().setWidgetPreviews(last).build().toByteArray()) }
+        }
+    }
+
+    /**
+     * The best preview of [provider] that draws ([PreviewChoice]): a source that fails gives way
+     * to the next, and an image too large is drawn again smaller. None at all when even the
+     * app's icon does not draw.
+     */
+    private fun bestPreview(provider: String, kinds: PreviewKinds): WidgetPreview {
+        for (source in PreviewChoice.order(kinds)) {
+            for (side in PreviewChoice.SIDES) {
+                val png = try {
+                    platform.drawPreview(provider, source, side)
+                } catch (e: Exception) {
+                    log.warn("drawing the $source preview of $provider failed", e)
+                    null
+                }
+                if (png == null || png.isEmpty()) break
+                if (png.size <= MAX_PREVIEW_BYTES) {
+                    return WidgetPreview.newBuilder()
+                        .setProvider(provider)
+                        .setPreviewPng(ByteString.copyFrom(png))
+                        .setSource(source)
+                        .build()
+                }
+            }
+        }
+        return WidgetPreview.newBuilder().setProvider(provider).build()
     }
 
     private fun add(requestId: Int, provider: String) {
@@ -775,7 +932,9 @@ class WidgetManager(
         }
         if (placed().size >= MAX_WIDGETS) return refuse("$MAX_WIDGETS widgets are placed already; remove one first")
         val offered = try {
-            platform.providers().firstOrNull { it.provider == provider }
+            // Without the previews: only the widget's sizes and setup are read here, and
+            // drawing every widget's preview to find one took seconds for an app with hundreds.
+            platform.galleryProviders().firstOrNull { it.provider == provider }
         } catch (e: Exception) {
             log.warn("reading the installed widgets failed", e)
             null
@@ -999,6 +1158,7 @@ class WidgetManager(
         const val MAX_FRAME_BYTES = 512 * 1024
         const val MAX_BATCH_BYTES = 256 * 1024
         const val MAX_PROVIDERS = 512
+        const val MAX_PREVIEWS_ASKED = 64
         const val MAX_WIDGETS = 64
         const val MAX_SIDE = 4096
 
